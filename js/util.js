@@ -1,5 +1,5 @@
 'use strict';
-/* 梦潮回声航线 — shared helpers, save data and local telemetry */
+/* 梦潮：回声航线 — shared helpers, save data (v2) and local telemetry */
 
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -46,55 +46,66 @@ const icon = (id, cls = 'ic') => `<svg class="${cls}" aria-hidden="true"><use hr
 
 /* ---------- persistent save (per viewer, browser storage) ---------- */
 const DEFAULT_SETTINGS = () => ({
-  difficulty: 'normal',
-  aimMode: 'auto',
-  autoFire: true,
-  bulletSlow: false,
-  shake: true,
-  particles: 'full',
-  colorblind: false,
-  bigButtons: false,
-  simpleWarn: false,
-  reduceFlash: false,
-  showHitbox: true,
-  music: 0.7,
-  sfx: 0.8,
-  muted: false,
-  binds: null,
+  shake: true, particles: 'full', colorblind: false, bigButtons: false, reduceFlash: false, showHitbox: true,
+  dragSens: 1, music: 0.7, sfx: 0.8, muted: false, binds: null,
 });
+
+/* 每架飞机解锁时随机生成自己的星盘：四条路线各 5 个节点 */
+function genStarMap(planeId, seed) {
+  const rnd = mulberry32(seed || Math.floor(Math.random() * 1e9));
+  const map = {};
+  for (const r of ROUTE_ORDER) {
+    const pool = ROUTES[r].pool.slice(0, 5);
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    map[r] = pool.map((type) => { const T = NODE_TYPES[type]; return { type, v: T.min + Math.round(rnd() * (T.max - T.min)) }; });
+  }
+  return map;
+}
+function addStarNode(rec) {
+  // 4★：随机一条路线多一个节点
+  const r = pick(ROUTE_ORDER), pool = ROUTES[r].pool, type = pool[5 % pool.length], T = NODE_TYPES[type];
+  rec.map[r].push({ type, v: T.min + Math.round(Math.random() * (T.max - T.min)) });
+  return r;
+}
+function newPlaneRecord(id) {
+  return { owned: true, stars: 1, frags: 0, map: genStarMap(id), lit: { blast: 0, fire: 0, collect: 0, burst: 0 } };
+}
 
 function freshMeta() {
   return {
-    v: 1,
-    dust: 0,
-    unlocked: { weapons: ['needle', 'blade'], perfs: ['echo', 'melody'], nightmare: false },
-    codex: { bullets: {}, enemies: {}, cards: {}, weapons: { needle: 1, blade: 1 } },
-    memories: [],
-    records: { runs: 0, clears: 0, deaths: 0, bestCombo: 0, bestBossTime: 0, challengeBest: 0, perfectParries: 0, assistedClear: false },
+    v: 2,
+    stardust: 0, tickets: 0, talent: 0, cosTickets: 0,
+    planes: { moon: newPlaneRecord('moon') },
+    frags: {},
+    current: 'moon',
+    gacha: { pulls: 0, sinceHigh: 0, newbieDone: false },
+    lockRoute: null,
+    cosmetics: { owned: ['exp:default', 'trail:default'], exp: 'default', trail: 'default' },
+    tasks: { active: ['kills', 'bursts', 'runs'], progress: {}, claimed: 0 },
+    stats: { kills: 0, bursts: 0, runs: 0, syns: 0, streak100: 0, crystals: 0, bossKills: 0, lv5: 0, chests: 0 },
+    codex: { planes: { moon: 1 }, skills: {}, syns: {}, enemies: {}, portals: {} },
+    records: { runs: 0, clears: 0, bestStreak: 0, bestTime: 0, bestCrystals: 0 },
+    bossFirstClear: false,
+    firstRunDone: false, seenTitle: false,
+    nextHint: null,
     settings: DEFAULT_SETTINGS(),
-    loadout: { weapon: 'needle', perf: 'echo' },
-    tutorialDone: false,
-    seenTitle: false,
-    telemetry: { counts: {}, firsts: {} },
-    run: null,
+    telemetry: { counts: {}, firsts: {}, runs: [] },
   };
 }
 
 const Store = {
-  key: 'dreamtide.echo-route.v1',
+  key: 'dreamtide.echo-route.v2',
   ok: true,
   load() {
     let data = null;
     try { data = JSON.parse(localStorage.getItem(this.key) || 'null'); } catch (e) { this.ok = false; }
     const base = freshMeta();
-    if (!data || data.v !== 1) return base;
-    // shallow-merge so new fields added later still exist
+    if (!data || data.v !== 2) return base;
     const m = Object.assign(base, data);
+    const f = freshMeta();
     m.settings = Object.assign(DEFAULT_SETTINGS(), data.settings || {});
-    m.unlocked = Object.assign(freshMeta().unlocked, data.unlocked || {});
-    m.codex = Object.assign(freshMeta().codex, data.codex || {});
-    m.records = Object.assign(freshMeta().records, data.records || {});
-    m.telemetry = Object.assign({ counts: {}, firsts: {} }, data.telemetry || {});
+    for (const k of ['gacha', 'cosmetics', 'tasks', 'stats', 'codex', 'records', 'telemetry']) m[k] = Object.assign(f[k], data[k] || {});
+    if (!m.planes || !m.planes[m.current]) { m.planes = Object.assign({ moon: newPlaneRecord('moon') }, m.planes || {}); m.current = 'moon'; }
     return m;
   },
   save(meta) {
@@ -107,6 +118,7 @@ const Store = {
 /* ---------- local telemetry: the doc's 埋点 list, counted per viewer ---------- */
 const Tele = {
   meta: null,
+  add(name, n) { if (!this.meta || !n) return; const c = this.meta.telemetry.counts; c[name] = (c[name] || 0) + n; },
   recent: [],
   bind(meta) { this.meta = meta; },
   log(name, data) {

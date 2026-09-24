@@ -1,6 +1,7 @@
 'use strict';
-/* 梦潮回声航线 — 区域 Boss「失控闹钟」: three movements, each teaching one idea and then layering a rule.
-   HP 1000, phases at 70% / 35%, weak point exposed at least twice per phase. */
+/* 梦潮：回声航线 — 区域 Boss「失控闹钟」：三个乐章，每段教一个攻击再叠一层规则；会回应玩家的 Build。
+   HP 1000，70% / 35% 切换阶段，每阶段至少两次弱点暴露。 */
+const BOSS_DMG_K = 0.085;
 
 const CLOCK_PHASES = {
   1: { name: '第一乐章 · 指针卡住', music: 'boss1' },
@@ -11,14 +12,15 @@ const CLOCK_PHASES = {
 class ClockBoss {
   constructor(w) {
     this.w = w; this.t = 0;
-    this.homeX = w.W * 0.75; this.homeY = (ARENA_TOP + ARENA_BOTTOM) / 2 - 4;
+    this.homeX = w.W * 0.76; this.homeY = (TOP + BOTTOM) / 2 - 4;
     this.x = w.W + 280; this.y = this.homeY;
     this.hp = 1000; this.maxHp = 1000; this.phase = 1; this.alive = true;
     this.minA = -Math.PI / 2; this.hourA = 0.6; this.weakT = 0; this.weakCd = 0; this.mouth = 0; this.ringT = 1.4; this.hitFlash = 0; this.lookA = Math.PI;
     this.shield = 0; this.shieldMax = 80; this.lean = 0; this.leanT = 0;
     this.gen = null; this.wait = 0; this.cycleIdx = 0; this.tempo = 1; this.phaseT = 0; this.transT = 0;
     this.bigT = 16; this.revT = 5; this.repeatT = 6.5; this.shieldT = 24;
-    this.sweep = null; this.dying = 0; this.stuck = false; this.fightT = 0;
+    this.sweep = null; this.dying = 0; this.stuck = false; this.fightT = 0; this.handsT = 0; this.openCd = 0; this.iceT = 10;
+    this.conductive = false; this.marked = false; this.iceHands = false;
     this.orbit = []; for (let i = 0; i < 10; i++) this.orbit.push({ a: rand(TAU), r: rand(150, 200), s: rand(0.3, 0.7), petal: i % 2 === 0 });
     Sound.sfx('alarm');
   }
@@ -48,9 +50,13 @@ class ClockBoss {
     for (const o of this.orbit) o.a += dt * o.s * (this.phase === 3 ? -1 : 1);
     // movement
     const targetX = this.homeX + (this.phase === 2 ? Math.sin(this.t * 0.5) * 30 : 0);
-    this.x = smooth(this.x, targetX, w.state === 'intro' ? 1.4 : 3, dt);
+    this.x = smooth(this.x, targetX, w.bossIntroT > 0 ? 1.4 : 3, dt);
     this.y = smooth(this.y, this.homeY + Math.sin(this.t * 0.8) * 18, 3, dt);
     if (this.dying > 0) return this.updateDeath(dt);
+    if (w.timeStop > 0) { this.handsT = Math.max(this.handsT, 0.1); return; }
+    this.openCd -= dt;
+    if (this.handsT > 0) { this.handsT -= dt; this.stuck = true; if (this.handsT <= 0) this.stuck = false; }
+    if (this.iceHands && this.phase >= 2) { this.iceT -= dt; if (this.iceT <= 0) { this.iceT = 10; this.freezeHands(2); w.emit('flag', { text: '指针冻住了 · 核心暴露', color: 'cyan', dur: 1.2 }); } }
     // hands
     if (!this.sweep) {
       if (this.stuck) this.minA = -0.9 + Math.sin(this.t * 40) * 0.05;
@@ -58,7 +64,7 @@ class ClockBoss {
     }
     this.hourA += dt * 0.08 * (this.phase === 3 ? -1 : 1);
     if (this.weakT > 0) this.weakT -= dt;
-    if (w.state !== 'play') return;
+    if (w.state !== 'play' || w.bossIntroT > 0) return;
     this.fightT += dt; this.phaseT += dt;
     if (this.transT > 0) { this.transT -= dt; if (this.transT <= 0) this.beginPhase(); return; }
     // tempo & phase rules
@@ -79,7 +85,7 @@ class ClockBoss {
       if (w.state === 'play' && p.alive) {
         const ex = this.x + Math.cos(s.a) * s.len, ey = this.y + Math.sin(s.a) * s.len;
         const hit = segDist2(p.x, p.y, this.x, this.y, ex, ey) < (s.w / 2 + p.r) * (s.w / 2 + p.r);
-        if (hit) { if (p.dashInv > 0) { if (p.dodgeReady) w.perfectDodge({ x: p.x, y: p.y }); } else if (p.hurtInv <= 0) w.hurtPlayer(18, p.x, p.y); }
+        if (hit && p.inv <= 0) w.hurtPlayer(1);
       }
       if (s.t >= s.dur) this.sweep = null;
     }
@@ -179,6 +185,8 @@ class ClockBoss {
     this.stuck = false; yield 0.6;
   }
   exposeWeak(s) { this.weakT = Math.max(this.weakT, s); Sound.sfx('weakOpen'); }
+  freezeHands(s) { this.handsT = Math.max(this.handsT, s); this.stuck = true; this.weakT = Math.max(this.weakT, s); Sound.sfx('weakOpen'); }
+  openFromExplosion() { if (this.openCd > 0) return; this.openCd = 5; this.weakT = Math.max(this.weakT, 1.4); Sound.sfx('weakOpen'); this.w.emit('flag', { text: '爆炸撬开了核心！', color: 'gold', dur: 1 }); }
 
   bigWarning() {
     const w = this.w, mid = (w.arena.top + w.arena.bottom) / 2, upper = Math.random() < 0.5;
@@ -199,26 +207,20 @@ class ClockBoss {
   /* ---------- damage & phases ---------- */
   hit(o) {
     const w = this.w;
-    if (!this.alive || this.dying || this.transT > 0 || w.state !== 'play') return;
-    const onCore = dist2(o.x, o.y, this.x, this.y) < 40 * 40 || o.kind === 'burst';
-    let k;
-    if (o.kind === 'burst') k = 1;
-    else if (o.kind === 'melee') k = this.weakT > 0 ? 0.8 : 0.35;
-    else if (this.weakT > 0 && onCore) k = Math.max(0.6, o.armor || 0.2);
-    else k = o.armor || 0.2;
-    let dmg = o.dmg * k * 0.36; // boss durability: ~45–75 s per movement
-    if (this.weakT > 0 && onCore && o.kind !== 'burst') {
-      if (this.weakCd <= 0) { this.weakCd = 0.5; w.addRes(12, this.x, this.y - 40); w.text('弱点!', this.x, this.y - 60, '#ffffff', 18, 2); Tele.log('boss_weak_hit'); }
-      Sound.sfx('weakHit', { gap: 60 });
-    } else Sound.sfx('armor', { gap: 70 });
-    this.hitFlash = Math.min(1, this.hitFlash + 0.4);
+    if (!this.alive || this.dying || this.transT > 0 || w.state !== 'play' || w.bossIntroT > 0) return;
+    const weak = this.weakT > 0, onCore = o.kind === 'zap' || dist2(o.x, o.y, this.x, this.y) < 46 * 46;
+    let k = weak ? (onCore ? 1 : 0.6) : 0.35;
+    if (o.kind === 'burst') k = weak ? 1 : 0.6;
+    const dmg = o.dmg * k * BOSS_DMG_K;
+    if (weak && onCore && this.weakCd <= 0) { this.weakCd = 0.25; w.addCharge(0.02); if (Math.random() < 0.3) w.text('弱点!', this.x, this.y - 60, '#ffffff', 18, 2); Sound.sfx('weakHit', { gap: 60 }); }
+    this.hitFlash = Math.min(1, this.hitFlash + 0.25);
     if (this.shield > 0) {
       this.shield -= dmg;
       if (this.shield <= 0) { this.shield = 0; Sound.sfx('shieldPop'); w.text('护盾破碎!', this.x, this.y - 150, '#fff3c8', 20, 3); w.shake(0.3); }
       return;
     }
     this.hp -= dmg;
-    // a phase is never skipped: HP floors at the next threshold until the transition plays
+    // 阶段不会被跳过：HP 停在阶段线，演出播完才进入下一乐章
     if (this.phase === 1 && this.hp <= 700) { this.hp = 700; this.startTransition(2); }
     else if (this.phase === 2 && this.hp <= 350) { this.hp = 350; this.startTransition(3); }
     else if (this.hp <= 0) { this.hp = 0; this.die(); }
@@ -232,13 +234,15 @@ class ClockBoss {
     Tele.log('boss_phase_change', { to: n });
     for (let i = 0; i < 26; i++) w.part(i % 2 ? 'petal' : 'shard', this.x, this.y, rand(-380, 380), rand(-380, 200), 1.2, rand(5, 9), pick(['#ffcf7a', '#c9a8ff', '#fff3c8']));
     w.emit('phase', { n, name: CLOCK_PHASES[n].name });
+    if (w.planeId === 'clock') w.onBossPhase(0);
   }
   beginPhase() {
     const w = this.w;
     this.phase = this.nextPhase; this.phaseT = 0; this.cycleIdx = 0; this.tempo = 1;
     Sound.setMode(CLOCK_PHASES[this.phase].music);
-    if (this.phase === 2) { w.arenaTarget = { top: ARENA_TOP + 58, bottom: ARENA_BOTTOM - 58 }; this.bigT = 8; }
-    if (this.phase === 3) { w.arenaTarget = { top: ARENA_TOP, bottom: ARENA_BOTTOM }; this.shield = 80; this.shieldMax = 80; this.revT = 3; this.repeatT = 6; Sound.setBpm(100); }
+    if (this.phase === 2) { w.arenaTarget = { top: TOP + 58, bottom: BOTTOM - 58 }; this.bigT = 8; }
+    if (this.phase === 3) { w.arenaTarget = { top: TOP, bottom: BOTTOM }; this.shield = 80; this.shieldMax = 80; this.revT = 3; this.repeatT = 6; Sound.setBpm(100); }
+    if (this.phase === 2) w.onBossPhase(2);
   }
   die() {
     const w = this.w;
@@ -254,8 +258,7 @@ class ClockBoss {
     if (this.dying <= 0) {
       this.alive = false; w.shake(0.6); Sound.sfx('win');
       for (let i = 0; i < 40; i++) w.part('note', this.x, this.y, rand(-300, 300), rand(-300, 100), 1.6, rand(10, 18), pick(['#ffe38a', '#c9a8ff', '#aeeaff']));
-      w.bossTime = this.fightT;
-      w.finishRoom();
+      w.onBossDead();
     }
   }
 

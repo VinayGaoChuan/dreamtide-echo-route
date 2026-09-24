@@ -1,22 +1,16 @@
 'use strict';
-/* 梦潮回声航线 — boot, responsive stage (16:10 … 19.5:9, letterboxed beyond), fixed-step loop, background scenes */
+/* 梦潮：回声航线 — 启动、自适应舞台（16:10 … 19.5:9，超出部分留黑边）、固定步长主循环、菜单背景 */
 
 (function boot() {
   const cv = $('#cv'), ctx = cv.getContext('2d'), stage = $('#stage'), app = $('#app');
-  G.meta = Store.load(); Tele.bind(G.meta); G.run = G.meta.run || null;
+  G.meta = Store.load(); Tele.bind(G.meta);
   if (!G.meta.seenTitle && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { G.meta.settings.shake = false; G.meta.settings.reduceFlash = true; }
   G.sea = new SeaScene(); G.hub = new HubScene(); G.map = new MapScene();
   try { document.documentElement.style.setProperty('--paper-tex', `url(${makePaper().toDataURL()})`); } catch (e) { /* canvas export blocked */ }
-  const hero = { x: 0, y: 0, face: 'idle', blink: 0, blinkT: 2, phase: 0.5, lamp: 1 };
 
-  Input.mapper = (cx, cy) => { const r = cv.getBoundingClientRect(); return { x: ((cx - r.left) / r.width) * G.W, y: ((cy - r.top) / r.height) * LH }; };
-  Input.bindCanvasMouse(cv);
-  Input.onDevice = (d) => {
-    if (G.hudRefs) G.hudLast.br = null;
-    $('#touch').hidden = !(d === 'touch' && G.world && !G.paused && Input.gameActive);
-    $('#hud').classList.toggle('touchmode', d === 'touch');
-    requestAnimationFrame(() => Input.resetJoy());
-  };
+  // 拖动：整块舞台（含黑边）都能拖，HUD 按钮自己拦截
+  Input.bindDrag(app);
+  Input.onDevice = (d) => { if (G.hudRefs) { G.hudLast.bk = null; if (G.world && G.world.hintShown) showHint(G.world.hintShown); } };
   const wake = () => { Sound.init(); window.removeEventListener('pointerdown', wake, true); window.removeEventListener('keydown', wake, true); };
   window.addEventListener('pointerdown', wake, true); window.addEventListener('keydown', wake, true);
 
@@ -35,25 +29,23 @@
     if (G.world) G.world.W = W;
     const coarse = window.matchMedia && matchMedia('(pointer:coarse)').matches;
     $('#rotate').hidden = !(coarse && h > w * 1.1 && !rotateDismissed);
-    Input.resetJoy();
   }
   resize();
   window.addEventListener('resize', resize);
   if (window.visualViewport) visualViewport.addEventListener('resize', resize);
-  document.addEventListener('visibilitychange', () => { if (document.hidden && G.world && Input.gameActive && !G.paused) pauseGame(); });
-  window.addEventListener('blur', () => { if (G.world && Input.gameActive && !G.paused && G.world.mode !== 'demo') pauseGame(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+  window.addEventListener('blur', () => pauseGame());
 
-  // optional runtime capabilities (absent outside the Claude viewer: the game works without them)
+  // 可选的运行时能力（Claude 查看器之外不存在；游戏不依赖它们）
   if (window.claude && typeof window.claude.use === 'function') {
     window.claude.use('sample').then((s) => { G.cap.sample = s; }).catch(() => {});
     window.claude.use('downloads').then((d) => { G.cap.downloads = d; }).catch(() => {});
   }
-  try { if (window.claude && window.claude.hot && window.claude.hot.snapshot) window.claude.hot.snapshot(() => ({ screen: G.screen })); } catch (e) { /* optional */ }
 
   applySettings();
-  if (G.meta.seenTitle) showHub(); else showTitle();
+  if (G.meta.seenTitle && G.meta.firstRunDone) showHub(); else showTitle();
 
-  /* ---------- background scenes for menus ---------- */
+  /* ---------- 菜单背景 ---------- */
   let grain = null, vig = null, vigW = 0;
   function overlay(W) {
     if (G.meta.settings.particles !== 'low') {
@@ -68,38 +60,40 @@
     }
     ctx.drawImage(vig, 0, 0);
   }
-  function drawHero(x, y, scale, t, face) {
+  const hero = { blink: 0, blinkT: 2 };
+  function drawHero(id, x, y, scale, t) {
     hero.blinkT -= 1 / 60; if (hero.blinkT <= 0) { hero.blink = 1; hero.blinkT = 2 + Math.random() * 3; } hero.blink = Math.max(0, hero.blink - 0.14);
-    drawPlayer(ctx, { x, y, scale, face: face || 'idle', blink: hero.blink, phase: hero.phase, lamp: 1, lean: Math.sin(t * 0.7) * 0.08, tail: Math.sin(t * 1.3) * 2 }, t);
+    drawGlow(ctx, x, y + 6, 130 * scale / 2.6, PLANES[id].colors.accent, 0.35);
+    drawPlane(ctx, id, x, y + Math.sin(t * 1.6) * 8, scale, t, { tilt: Math.sin(t * 0.9) * 0.08, blink: hero.blink, happy: true });
   }
-  function drawStaff(W, t) {
-    ctx.strokeStyle = 'rgba(255,227,138,0.12)'; ctx.lineWidth = 1.4;
-    for (let i = 0; i < 5; i++) { ctx.beginPath(); for (let x = 0; x <= W; x += 30) ctx.lineTo(x, LH * 0.58 + i * 14 + Math.sin(x * 0.006 + t * 0.8) * 26); ctx.stroke(); }
-    for (let i = 0; i < 7; i++) { const x = ((i * 190 + t * 40) % (W + 100)) - 50, y = LH * 0.58 + Math.sin(x * 0.006 + t * 0.8) * 26 + (i % 5) * 14 - 6; ctx.fillStyle = 'rgba(255,227,138,0.4)'; ctx.font = '22px serif'; ctx.fillText('♪', x, y); }
+  function drawTrail(x, y, t) {
+    const cols = (COSMETICS.trail.find((c) => c.id === G.meta.cosmetics.trail) || COSMETICS.trail[0]).colors;
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 22; i++) { const k = i / 22; ctx.globalAlpha = (1 - k) * 0.5; ctx.fillStyle = cols[i % cols.length]; ctx.beginPath(); ctx.arc(x - 60 - i * 16, y + Math.sin(t * 1.6 - i * 0.25) * 8 + Math.sin(i * 1.7) * 4, 9 * (1 - k) + 2, 0, TAU); ctx.fill(); }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   }
   function render(t) {
     const k = G.scale * G.dpr, W = G.W;
     ctx.setTransform(k, 0, 0, k, 0, 0);
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    const cur = G.meta.current;
     switch (G.bg) {
       case 'world':
         if (G.world) { G.world.render(ctx); return; }
         G.sea.draw(ctx, W, LH); break;
       case 'title':
-        G.sea.draw(ctx, W, LH); drawStaff(W, t); drawHero(W * 0.3, LH * 0.56, 3.4, t); break;
+        G.sea.draw(ctx, W, LH); drawTrail(W * 0.3, LH * 0.56, t); drawHero(cur, W * 0.3, LH * 0.56, 2.6, t); break;
       case 'hub':
-        G.hub.draw(ctx, W, LH); if (G.screen === 'hub') drawHero(W / 2, LH * 0.53, 2.5, t); break;
+        G.hub.draw(ctx, W, LH); if (G.screen === 'hub') { drawTrail(W / 2, LH * 0.4, t); drawHero(cur, W / 2, LH * 0.4, 2.2, t); } break;
       case 'map':
         G.map.draw(ctx, W, LH); break;
-      case 'rest':
-        G.sea.draw(ctx, W, LH); drawHero(W * 0.22, LH * 0.66, 2.2, t, 'sleep'); break;
       default:
         G.sea.draw(ctx, W, LH);
     }
     overlay(W);
   }
 
-  /* ---------- main loop: fixed 120 Hz simulation, render once per frame ---------- */
+  /* ---------- 主循环：固定 120 Hz 模拟，每帧渲染一次 ---------- */
   const STEP = 1 / 120;
   let last = performance.now(), acc = 0, errored = false;
   function frame(now) {
@@ -107,8 +101,9 @@
     let dt = (now - last) / 1000; last = now; if (dt > 0.1) dt = 0.1; if (dt < 0) dt = 0;
     try {
       Input.update(dt);
-      const w = G.world;
-      if (w && !G.paused && G.bg === 'world') {
+      const d = Input.consumeDrag(), w = G.world;
+      if (w && !G.paused && !w.done && G.bg === 'world') {
+        if (Input.gameActive) { const s = G.meta.settings.dragSens / G.scale; w.dragDX += d.dx * s; w.dragDY += d.dy * s; }
         acc += dt; let n = 0;
         while (acc >= STEP && n < 12) { w.step(STEP); acc -= STEP; n++; }
         if (n >= 12) acc = 0;
@@ -121,8 +116,7 @@
       if (!Input.gameActive) navUpdate();
       render(now / 1000);
       updateHud();
-      tickDemo(dt);
-      if (G.anims.length) tickAnims(now / 1000);
+      tickPreview(dt);
     } catch (e) {
       if (!errored) { errored = true; console.error('[梦潮] frame error', e); }
     }

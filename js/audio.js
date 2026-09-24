@@ -1,5 +1,5 @@
 'use strict';
-/* 梦潮回声航线 — WebAudio: four-layer procedural music (环境/节奏/紧张/演奏) and synthesized SFX */
+/* 梦潮：回声航线 — WebAudio: four-layer procedural music (环境/节奏/紧张/演奏) and synthesized SFX */
 
 const Sound = (() => {
   let ctx = null, master, comp, musicBus, sfxBus, musicFilter, lfo, lfoGain, delay, delayFb, delayWet, revIn, noiseBuf;
@@ -330,6 +330,37 @@ const Sound = (() => {
     waveClear: () => { const t = ctx.currentTime; bell(t, 81, 0.12, sfxBus); bell(t + 0.08, 86, 0.1, sfxBus); },
     weakOpen: () => { tone({ f: 2400, f2: 3200, dur: 0.12, vol: 0.09 }); tone({ f: 3200, dur: 0.12, vol: 0.06, delay: 0.12 }); },
     weakHit: (o) => tone({ f: 3000 + rand(300), dur: 0.05, vol: 0.05, pan: o.pan }),
+    crystal: () => { const t = ctx.currentTime; [79, 83, 86, 91].forEach((m, i) => bell(t + i * 0.045, m, 0.18, sfxBus)); noise({ f: 6000, f2: 9000, q: 0.6, dur: 0.3, vol: 0.06, ft: 'highpass' }); },
+    levelup: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90].forEach((m, i) => bell(t + i * 0.06, m, 0.2, sfxBus)); tone({ f: 400, f2: 1600, dur: 0.4, vol: 0.08, type: 'triangle' }); },
+    synergy: () => { const t = ctx.currentTime; [62, 66, 69, 74].forEach((m) => { tone({ f: mtof(m), dur: 1.2, vol: 0.09, type: 'sawtooth', lp: 2400, a: 0.02 }); }); [86, 90, 93, 98].forEach((m, i) => bell(t + 0.1 + i * 0.07, m, 0.22, sfxBus)); noise({ f: 300, f2: 5000, q: 0.5, dur: 0.6, vol: 0.14 }); },
+    stream: () => { const t = ctx.currentTime; [62, 69, 74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.08, m, 0.24, sfxBus)); tone({ f: 110, f2: 55, dur: 1, vol: 0.25, type: 'triangle' }); },
+    streak: (o) => { const t = ctx.currentTime, k = o.k || 0; [81, 86, 90].forEach((m, i) => bell(t + i * 0.05, m + k * 2, 0.16, sfxBus)); noise({ f: 1200, f2: 4000, q: 0.5, dur: 0.25, vol: 0.1 }); },
+    nova: () => { noise({ f: 200, f2: 3000, q: 0.5, dur: 0.4, vol: 0.2 }); tone({ f: 160, f2: 60, dur: 0.4, vol: 0.2, type: 'triangle' }); },
+    burstCut: () => { noise({ f: 400, f2: 6000, q: 0.4, dur: 0.45, vol: 0.2, a: 0.2 }); tone({ f: 220, f2: 880, dur: 0.45, vol: 0.1, type: 'sawtooth', lp: 2000, a: 0.2 }); },
+    b_moon: () => { const t = ctx.currentTime; tone({ f: 330, f2: 990, dur: 0.8, vol: 0.18, type: 'triangle' }); [74, 81, 86, 93].forEach((m, i) => bell(t + i * 0.1, m, 0.2, sfxBus)); },
+    b_cloud: () => { noise({ f: 200, f2: 1200, q: 0.4, dur: 1.4, vol: 0.3, a: 0.2 }); tone({ f: 90, f2: 60, dur: 1.2, vol: 0.2, type: 'sine' }); },
+    b_candy: () => { const t = ctx.currentTime; for (let i = 0; i < 10; i++) bell(t + i * 0.07, 84 + ((i * 5) % 12), 0.12, sfxBus); },
+    b_paper: () => { const t = ctx.currentTime; for (let i = 0; i < 5; i++) noise({ f: 1500, f2: 4000, q: 1, dur: 0.15, vol: 0.12, t: t + i * 0.08 }); bell(t + 0.4, 88, 0.2, sfxBus); },
+    b_whale: () => { tone({ f: 800, f2: 120, dur: 1, vol: 0.2, type: 'sine', slide: 0.9 }); tone({ f: 120, f2: 60, dur: 1.6, vol: 0.28, type: 'triangle', delay: 1 }); noise({ f: 200, f2: 2400, q: 0.4, dur: 1.2, vol: 0.25, delay: 1 }); },
+    b_clock: () => { const t = ctx.currentTime; for (let i = 0; i < 6; i++) tick(t + i * 0.12, i % 2 === 0); tone({ f: 1400, f2: 200, dur: 0.8, vol: 0.14, type: 'sine' }); },
+    timeResume: () => { tone({ f: 200, f2: 1400, dur: 0.5, vol: 0.14, type: 'sine' }); noise({ f: 300, f2: 3000, q: 0.5, dur: 0.6, vol: 0.2 }); },
+    portal: () => { tone({ f: 300, f2: 1200, dur: 0.6, vol: 0.12, type: 'sine' }); noise({ f: 500, f2: 3000, q: 0.6, dur: 0.6, vol: 0.14, a: 0.1 }); bell(ctx.currentTime + 0.2, 86, 0.18, sfxBus); },
+    explode: (o) => { noise({ f: 900, f2: 120, q: 0.5, dur: 0.3, vol: 0.14 * (o.v || 1), ft: 'lowpass', pan: o.pan }); tone({ f: 140, f2: 50, dur: 0.25, vol: 0.12 * (o.v || 1), type: 'sine', pan: o.pan }); },
+    zap: (o) => { noise({ f: 3000, f2: 1200, q: 3, dur: 0.12, vol: 0.08, pan: o.pan }); tone({ f: 1800 + rand(600), f2: 600, dur: 0.1, vol: 0.05, type: 'sawtooth', lp: 4000 }); },
+    freeze: (o) => { noise({ f: 7000, f2: 3000, q: 1, dur: 0.18, vol: 0.06, ft: 'highpass', pan: o.pan }); tone({ f: 2400, dur: 0.12, vol: 0.04 }); },
+    shatter: (o) => { noise({ f: 5000, f2: 1500, q: 0.8, dur: 0.25, vol: 0.1, pan: o.pan }); tone({ f: 3200, f2: 2000, dur: 0.15, vol: 0.05, type: 'triangle' }); },
+    beam: () => { tone({ f: 600, f2: 1200, dur: 0.8, vol: 0.07, type: 'sawtooth', lp: 3000 }); tone({ f: 900, f2: 1800, dur: 0.8, vol: 0.05, type: 'triangle' }); },
+    candy: () => { const t = ctx.currentTime; bell(t, 86, 0.14, sfxBus); bell(t + 0.05, 90, 0.12, sfxBus); },
+    gold: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90, 93, 98].forEach((m, i) => bell(t + i * 0.05, m, 0.2, sfxBus)); },
+    chest: () => { const t = ctx.currentTime; noise({ f: 800, f2: 300, q: 1, dur: 0.2, vol: 0.14 }); [81, 86, 90].forEach((m, i) => bell(t + 0.1 + i * 0.06, m, 0.2, sfxBus)); },
+    gachaRoll: () => { const t = ctx.currentTime; for (let i = 0; i < 12; i++) tone({ f: 500 + i * 80, dur: 0.06, vol: 0.05, type: 'triangle', t: t + i * 0.06 }); },
+    reveal: (o) => {
+      const t = ctx.currentTime, r = o.r || 'N';
+      const seq = { N: [74, 78, 81], R: [74, 78, 81, 86], SR: [74, 78, 81, 86, 90], SSR: [62, 69, 74, 78, 81, 86, 90, 93] }[r];
+      seq.forEach((m, i) => bell(t + i * 0.07, m, 0.22, sfxBus));
+      if (r === 'SSR' || r === 'SR') { noise({ f: 300, f2: 6000, q: 0.4, dur: 1, vol: 0.18 }); tone({ f: 110, f2: 55, dur: 1.2, vol: 0.25, type: 'triangle' }); }
+    },
+    starLight: () => { const t = ctx.currentTime; bell(t, 86, 0.2, sfxBus); bell(t + 0.08, 93, 0.18, sfxBus); tone({ f: 600, f2: 1800, dur: 0.3, vol: 0.06 }); },
   };
 
   function sfx(name, o = {}) {

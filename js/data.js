@@ -1,185 +1,193 @@
 'use strict';
-/* 梦潮回声航线 — design data taken from the gameplay & art documents (v0.2 / Q版 v0.1) */
+/* 梦潮：回声航线 v0.4 — 自动射击 + 轻度构筑 + 飞行分岔。设计数据来自《局内 Build 与局外成长策划文档 v0.4》，
+   美术沿用《Q版美术风格规范 v0.1》。 */
 
-const WEAPONS = {
-  needle: {
-    id: 'needle', name: '光针炮', icon: 'w-needle', tag: '稳定远程',
-    line: '高速直线光针，站远一点也能稳稳输出。',
-    range: '长', rangeN: 5, rateN: 5, cutN: 3, diffN: 1, cut: '中', diff: '低',
-    rate: 7, dmg: 8, rangeK: 1.0, pierce: 0, res: 1, speedK: 1.0,
-    cutR: 100, cutA: 1.3, meleeDmg: 18,
-    who: '第一次进入梦境、喜欢稳扎稳打的玩家',
-    problem: '保持距离边躲边射，把蓝色菱形弹留给「切」。',
-    unlock: null,
-  },
-  blade: {
-    id: 'blade', name: '梦刃', icon: 'w-blade', tag: '近战切弹',
-    line: '挥出月牙刃波，刃波本身也能切开蓝弹。',
-    range: '短', rangeN: 2, rateN: 2, cutN: 5, diffN: 3, cut: '强', diff: '中',
-    rate: 2, dmg: 28, rangeK: 0.55, pierce: 1, res: 3, speedK: 1.06,
-    cutR: 140, cutA: 1.75, meleeDmg: 40,
-    who: '喜欢贴脸、享受切开弹幕的玩家',
-    problem: '贴近敌人，切开最危险的弹幕。',
-    unlock: null,
-  },
-  kite: {
-    id: 'kite', name: '风筝弓', icon: 'w-kite', tag: '延迟输出',
-    line: '箭矢先绕场飞一圈，再自己找到目标。',
-    range: '中', rangeN: 4, rateN: 2, cutN: 1, diffN: 3, cut: '弱', diff: '中',
-    rate: 1.5, dmg: 24, rangeK: 0.85, pierce: 0, res: 2, speedK: 1.03,
-    cutR: 80, cutA: 1.05, meleeDmg: 14,
-    who: '喜欢走位、让箭矢替自己绕场的玩家',
-    problem: '箭会绕路追踪，你只管专心躲，别停下来。',
-    unlock: { cost: 120 },
-  },
-  bell: {
-    id: 'bell', name: '影子铃', icon: 'w-bell', tag: '陷阱输出',
-    line: '把音符放到敌人身边，延迟后炸成一圈音波。',
-    range: '中', rangeN: 3, rateN: 1, cutN: 3, diffN: 5, cut: '中', diff: '高',
-    rate: 1, dmg: 12, rangeK: 0.75, pierce: 2, res: 2, speedK: 1.0,
-    cutR: 100, cutA: 1.3, meleeDmg: 20,
-    who: '喜欢预判、布置陷阱的玩家',
-    problem: '把音符放在敌人要去的地方，而不是它现在的位置。',
-    unlock: { cost: 180 },
-  },
+const RARITY = {
+  N: { id: 'N', color: '#dfe6ff', glow: 'rgba(223,230,255,0.85)', dupFrags: 10, unlockFrags: 30, rate: 0.55 },
+  R: { id: 'R', color: '#7fd8ff', glow: 'rgba(127,216,255,0.9)', dupFrags: 15, unlockFrags: 50, rate: 0.33 },
+  SR: { id: 'SR', color: '#c9a0ff', glow: 'rgba(201,160,255,0.9)', dupFrags: 25, unlockFrags: 80, rate: 0.09 },
+  SSR: { id: 'SSR', color: '#ffd76a', glow: 'rgba(255,215,106,0.95)', dupFrags: 40, unlockFrags: 120, rate: 0.03 },
 };
 
-const PERFS = {
-  echo: { id: 'echo', name: '时间回声', icon: 'p-echo', dur: 5, main: '全屏敌弹速度降到 40%', side: '自身移动速度 +10%', who: '需要观察弹幕的玩家', color: '#9db4ff', unlock: null },
-  melody: { id: 'melody', name: '旋律反射', icon: 'p-melody', dur: 4, main: '30% 的敌弹转化为音符弹', side: '音符弹伤害 +35%', who: '喜欢弹反的玩家', color: '#ffe38a', unlock: null },
-  gravity: { id: 'gravity', name: '重力倒置', icon: 'p-gravity', dur: 4, main: '敌弹轨迹上下反转', side: '普通敌人被抛向上方', who: '喜欢改变规则的玩家', color: '#8ff0ff', unlock: { cost: 100 } },
-  still: { id: 'still', name: '梦境静止', icon: 'p-still', dur: 3, main: '普通敌人冻结', side: 'Boss 弱点暴露 1.5 秒', who: '喜欢稳定输出的玩家', color: '#d8c4ff', unlock: { cost: 150 } },
+/* 首批飞机：每架自带基础攻击形状、专属大招、基础被动、随机星盘、专属爆炸颜色 */
+const PLANES = {
+  moon: {
+    id: 'moon', name: '月兔号', rarity: 'N', look: '白色月灯兔', hearts: 5, speed: 1, rate: 8, dmg: 10, shot: '双月牙弹',
+    burst: { name: '月轮清屏', desc: '放出巨型月轮，穿过敌人后分裂成六枚小月轮四处弹射。' },
+    passive: { name: '月光回收', desc: '月轮命中敌人后回收星尘。' },
+    star3: '月轮分裂数量翻倍',
+    colors: { body: '#fff6ee', accent: '#ffd76a', exp: ['#fff3c8', '#c9a8ff', '#ffffff'] },
+  },
+  cloud: {
+    id: 'cloud', name: '云朵号', rarity: 'N', look: '白云和小翅膀', hearts: 6, speed: 0.95, rate: 6, dmg: 18, shot: '软绵云团（击退）',
+    burst: { name: '云海冲撞', desc: '裹进一整片云海横冲过屏幕，沿途敌人和子弹全部碾碎。' },
+    passive: { name: '缓冲云层', desc: '被攻击后生成一层缓冲云，挡下下一次伤害（12 秒冷却）。' },
+    star3: '冲撞结束后留下一面云墙挡子弹',
+    colors: { body: '#ffffff', accent: '#aee9ff', exp: ['#ffffff', '#aee9ff', '#dcd0ff'] },
+  },
+  candy: {
+    id: 'candy', name: '糖果号', rarity: 'R', look: '粉蓝糖果飞机', hearts: 5, speed: 1, rate: 6, dmg: 8, shot: '三向糖果弹',
+    burst: { name: '彩虹糖雨', desc: '彩虹糖雨落满屏幕，被砸中的小怪直接变成糖果。' },
+    passive: { name: '糖果掉落', desc: '击杀有概率掉落糖果强化：射速 +50%，持续 5 秒。' },
+    star3: '糖雨持续时间延长一半',
+    colors: { body: '#ff9fcf', accent: '#9fe3f0', exp: ['#ff9fcf', '#9fe3f0', '#fff3c8'] },
+  },
+  paper: {
+    id: 'paper', name: '纸飞机号', rarity: 'R', look: '奶油纸张质感', hearts: 4, speed: 1.1, rate: 9, dmg: 7, shot: '追踪纸镖',
+    burst: { name: '五重分身', desc: '生成五架纸飞机分身，自动锁敌齐射 6 秒。' },
+    passive: { name: '折纸编队', desc: '每拾取一次强化，多一架临时分身（最多 3 架，10 秒）。' },
+    star3: '分身增加到七架',
+    colors: { body: '#fff4dc', accent: '#ffcf8a', exp: ['#fff4dc', '#ffcf8a', '#c9a8ff'] },
+  },
+  whale: {
+    id: 'whale', name: '星鲸号', rarity: 'SR', look: '深蓝小鲸鱼', hearts: 6, speed: 0.95, rate: 10, dmg: 8, shot: '波浪泡泡流',
+    burst: { name: '星尘海啸', desc: '先把屏幕里的敌人和子弹吸进来，再吐出一道星尘海啸。' },
+    passive: { name: '越多越大', desc: '屏幕上敌人越多，海啸范围越大。' },
+    star3: '海啸之后再追加一道小浪',
+    colors: { body: '#4f63d6', accent: '#ffe38a', exp: ['#6ff0ff', '#ffe38a', '#8f9dff'] },
+  },
+  clock: {
+    id: 'clock', name: '闹钟号', rarity: 'SSR', look: '金色圆闹钟', hearts: 5, speed: 1, rate: 7, dmg: 13, shot: '旋转指针光束（穿透）',
+    burst: { name: '时间暂停', desc: '时间暂停 2 秒，所有敌人被标记，时间恢复时一起爆开。' },
+    passive: { name: '准点充能', desc: 'Boss 切换阶段时自动充能一半大招。' },
+    star3: '暂停时间延长到 3 秒',
+    special: '专属 Boss 互动：暂停期间失控闹钟的指针也会停下，核心完全暴露。',
+    colors: { body: '#ffd76a', accent: '#fff3c8', exp: ['#ffd76a', '#fff3c8', '#ff9a6b'] },
+  },
+};
+const PLANE_ORDER = ['moon', 'cloud', 'candy', 'paper', 'whale', 'clock'];
+
+/* 局内技能晶体：六个流派，每个 5 级。最多同时持有 3 种（3 个技能槽）。 */
+const SKILLS = {
+  thunder: { id: 'thunder', name: '雷球', stream: '雷暴流', icon: 's-thunder', color: '#8fd3ff', glow: 'rgba(143,211,255,0.9)',
+    lv: ['发射追踪雷球，命中后跳电 2 次', '一次发射 2 颗，跳电 3 次', '被电到的敌人麻痹 0.6 秒', '跳电 5 次，伤害提高', '雷暴核心：巨型雷球环绕你持续放电'],
+    burstMod: '大招后落下一轮连锁雷击' },
+  wing: { id: 'wing', name: '纸飞机分身', stream: '分身流', icon: 's-wing', color: '#fff3c8', glow: 'rgba(255,243,200,0.9)',
+    lv: ['1 架分身跟随射击', '2 架分身', '分身子弹追踪并穿透', '3 架分身，射速提高', '金色编队：分身变大并三连发'],
+    burstMod: '大招时所有分身齐射一轮' },
+  bomb: { id: 'bomb', name: '标记爆破', stream: '爆破流', icon: 's-bomb', color: '#ff9a6b', glow: 'rgba(255,154,107,0.9)',
+    lv: ['命中时标记敌人，被标记的敌人死亡时爆炸', '标记概率与爆炸范围提高', '爆炸会标记周围敌人，形成连环爆', '爆炸伤害大幅提高', '烟花爆破：爆炸变成巨型彩色烟花'],
+    burstMod: '大招时标记全屏敌人' },
+  magnet: { id: 'magnet', name: '磁吸星尘', stream: '吸星流', icon: 's-magnet', color: '#c9a8ff', glow: 'rgba(201,168,255,0.9)',
+    lv: ['吸附范围变大，每吸一颗星尘发射一枚星弹', '吸附范围继续变大', '每 6 秒一次磁暴，吸来全屏掉落物', '星弹伤害提高', '星尘海啸：定期掀起一道星尘浪'],
+    burstMod: '大招时吸来全屏掉落物' },
+  rainbow: { id: 'rainbow', name: '彩虹光束', stream: '彩虹流', icon: 's-rainbow', color: '#ff9fcf', glow: 'rgba(255,159,207,0.9)',
+    lv: ['定期扫出一道彩虹光束', '光束更宽、间隔更短', '被光束击败的敌人掉落糖果强化', '光束伤害提高', '双彩虹：两道光束交叉扫射'],
+    burstMod: '大招时放出一圈彩虹光环' },
+  ice: { id: 'ice', name: '冰晶', stream: '冰晶流', icon: 's-ice', color: '#bff4ff', glow: 'rgba(191,244,255,0.9)',
+    lv: ['扇形发射冰晶，命中可能冻结敌人', '冰晶数量增加', '必定冻结；冻住的敌人死亡时碎裂伤害周围', '碎裂伤害提高', '暴风雪：定期冻结身边所有敌人'],
+    burstMod: '大招时冻结全屏敌人' },
+};
+const SKILL_ORDER = ['thunder', 'wing', 'bomb', 'magnet', 'rainbow', 'ice'];
+const synKey = (a, b) => [a, b].sort((x, y) => SKILL_ORDER.indexOf(x) - SKILL_ORDER.indexOf(y)).join('+');
+
+/* 技能联动：两种技能合计达到 3 层自动触发；只增加收益，没有负面条件 */
+const SYNERGIES = {
+  'thunder+wing': { name: '雷暴分身', desc: '每架分身每 2 秒发射一枚雷球。' },
+  'thunder+bomb': { name: '雷爆连锁', desc: '雷击会标记目标，标记目标受到额外连锁雷击。' },
+  'thunder+magnet': { name: '电磁风暴', desc: '每吸一颗星尘，就向附近敌人放一次电。' },
+  'thunder+rainbow': { name: '彩虹电网', desc: '彩虹光束扫中的敌人会引发连锁雷击。' },
+  'thunder+ice': { name: '超导冰雷', desc: '冻结的敌人受雷击伤害翻倍，跳电 +2。' },
+  'wing+bomb': { name: '空投爆破', desc: '分身的子弹也会标记敌人。' },
+  'wing+magnet': { name: '吸星编队', desc: '分身也能吸附星尘，吸到就发星弹。' },
+  'wing+rainbow': { name: '彩虹编队', desc: '分身各自发射小型彩虹光束。' },
+  'wing+ice': { name: '冰翼', desc: '分身的子弹会冻结敌人。' },
+  'bomb+magnet': { name: '星尘地雷', desc: '吸来的星尘落地时爆炸。' },
+  'bomb+rainbow': { name: '彩虹烟火', desc: '标记爆炸变成彩色烟火，范围 +40%。' },
+  'bomb+ice': { name: '冰爆', desc: '冻结的敌人碎裂时引发爆炸。' },
+  'magnet+rainbow': { name: '七彩吸附', desc: '光束扫过时把掉落物全部吸向你。' },
+  'magnet+ice': { name: '冰晶星尘', desc: '冻结敌人碎裂时掉落双倍星尘。' },
+  'rainbow+ice': { name: '冰彩碎', desc: '冰冻敌人碎裂后掉落彩色强化。' },
 };
 
-const CARDS = {
-  echo: { id: 'echo', name: '回声', icon: 'c-echo', rarity: 'common', max: 2, tag: '重复',
-    trigger: '切断、弹反或擦过敌弹时', pos: '被你处理过的敌弹 2 秒后在原地响起回声，化作友方回声弹（伤害 50%）', neg: '弹幕密度 +15%',
-    combo: '和梦刃、星屑回响一起用：处理得越多，回声越密。' },
-  tide: { id: 'tide', name: '潮汐', icon: 'c-tide', rarity: 'common', max: 1, tag: '重力', excl: 'gravity',
-    trigger: '每 10 秒（提前 1 秒预告）', pos: '潮汐翻转：场上所有敌弹上下反转，瞄准你的弹会偏开', neg: '移动速度 -8%',
-    combo: '与「落星」同属重力规则，只能保留一张。' },
-  gentle: { id: 'gentle', name: '温柔', icon: 'c-gentle', rarity: 'common', max: 2, tag: '恢复',
-    trigger: '近战击杀（切弹、梦刃刃波）', pos: '有 20% 概率掉落梦心，恢复 8 点生命', neg: '每波敌人 +2',
-    combo: '梦刃玩家的续航核心。' },
-  unfocus: { id: 'unfocus', name: '失焦', icon: 'c-unfocus', rarity: 'rare', max: 1, tag: '视野',
-    trigger: '持续生效', pos: '敌人本体隐入梦雾，只显示预警与弱点；它们的瞄准弹随之失焦，偏移约 15°', neg: '敌人伤害 +10%',
-    combo: '盯住白色预警线和发光核心。' },
-  rewind: { id: 'rewind', name: '倒带', icon: 'c-rewind', rarity: 'rare', max: 1, tag: '时间',
-    trigger: '受到致命伤害时（每局一次）', pos: '回到 5 秒前的位置与生命值', neg: '最大生命值 -10',
-    combo: '与「过热」同时持有属于高风险组合。' },
-  mirror: { id: 'mirror', name: '镜中人', icon: 'c-mirror', rarity: 'rare', max: 1, tag: '分身',
-    trigger: '持续生效', pos: '生成一个影子，复制你的射击（50% 伤害）并吸引部分敌人瞄准', neg: '影子被击中时，你的共振 -5',
-    combo: '影子在画面另一侧，留意它挡在哪条弹道上。' },
-  overheat: { id: 'overheat', name: '过热', icon: 'c-overheat', rarity: 'rare', max: 1, tag: '演奏',
-    trigger: '释放梦境演奏时', pos: '梦境演奏伤害 +80%', neg: '演奏结束后损失 10% 最大生命',
-    combo: '与「倒带」同时持有属于高风险组合。' },
-  quiet: { id: 'quiet', name: '安静海', icon: 'c-quiet', rarity: 'common', max: 2, tag: '密度',
-    trigger: '持续生效', pos: '弹幕密度 -25%', neg: '梦尘收益 -20%',
-    combo: '想先活下来时的好选择。' },
-  stardust: { id: 'stardust', name: '星屑回响', icon: 'c-stardust', rarity: 'common', max: 2, tag: '弹反',
-    trigger: '精准或完美弹反时', pos: '反射出的音符分裂为 3 枚', neg: '金色星弹速度 +15%',
-    combo: '配合旋律反射，音符会铺满画面。' },
-  mint: { id: 'mint', name: '薄荷梦', icon: 'c-mint', rarity: 'common', max: 1, tag: '闪避',
-    trigger: '持续生效', pos: '闪避充能加快到 3.2 秒一次', neg: '闪避距离 -20%',
-    combo: '更适合贴身擦弹的打法。' },
-  nightlamp: { id: 'nightlamp', name: '夜航灯', icon: 'c-lamp', rarity: 'common', max: 2, tag: '输出',
-    trigger: '持续生效', pos: '射击伤害 +20%', neg: '受到伤害 +15%',
-    combo: '越早击倒，越少挨打。' },
-  paperboat: { id: 'paperboat', name: '纸船', icon: 'c-boat', rarity: 'rare', max: 1, tag: '护盾',
-    trigger: '每个房间开始时', pos: '获得一层纸船护盾，抵挡一次伤害', neg: '梦尘收益 -15%',
-    combo: '护盾在房间之间不叠加。' },
-  fallstar: { id: 'fallstar', name: '落星', icon: 'c-fallstar', rarity: 'common', max: 1, tag: '重力', excl: 'gravity',
-    trigger: '持续生效', pos: '敌弹受重力缓缓下坠，画面上方更安全', neg: '敌弹速度 +10%',
-    combo: '与「潮汐」同属重力规则，只能保留一张。' },
+/* 分岔洞口：图标 + 颜色 + 运动特效，不弹说明框 */
+const PORTALS = {
+  skill: { id: 'skill', name: '技能洞', icon: 'bolt', color: '#5fb8ff', effect: '保证出现当前流派的技能晶体' },
+  rare: { id: 'rare', name: '稀有洞', icon: 'star', color: '#ffd54a', effect: '出现稀有技能晶体（一次升 2 级）' },
+  wing: { id: 'wing', name: '分身洞', icon: 'wing', color: '#fff3c8', effect: '出现分身相关技能' },
+  bomb: { id: 'bomb', name: '爆破洞', icon: 'bomb', color: '#ff8a5c', effect: '出现爆炸相关技能，敌人死亡时会爆开' },
+  chest: { id: 'chest', name: '宝箱洞', icon: 'chest', color: '#ffb347', effect: '获得大量星尘和天赋点' },
+  heal: { id: 'heal', name: '回复洞', icon: 'heart', color: '#6fe39a', effect: '恢复生命，敌人更少' },
+  boss: { id: 'boss', name: 'Boss 洞', icon: 'crown', color: '#ff5a6e', effect: '直接进入 Boss，越早进入奖励越高' },
 };
 
-const RELICS = {
-  bellmint: { id: 'bellmint', name: '薄荷铃', icon: 'r-bell', price: 70, desc: '闪避充能上限 +1。' },
-  pillow: { id: 'pillow', name: '棉花云枕', icon: 'r-pillow', price: 65, desc: '最大生命 +20，并立刻恢复 20。' },
-  fork: { id: 'fork', name: '金色音叉', icon: 'r-fork', price: 60, desc: '弹反判定窗口 +0.04 秒。' },
-  crane: { id: 'crane', name: '纸鹤', icon: 'r-crane', price: 70, desc: '每个战斗房间结束后恢复 6 点生命。' },
-  sand: { id: 'sand', name: '星砂瓶', icon: 'r-sand', price: 55, desc: '擦弹获得的共振 +2。' },
-  glass: { id: 'glass', name: '蓝玻璃刃', icon: 'r-glass', price: 60, desc: '切弹范围 +20%。' },
+/* 随机天赋星盘：四条路线 × 5 节点，节点只提供正向收益 */
+const ROUTES = {
+  blast: { id: 'blast', name: '爆炸', icon: 'n-blast', color: '#ffb347', pool: ['blast', 'blast', 'repeat', 'wing', 'blast', 'blast'] },
+  fire: { id: 'fire', name: '火力', icon: 'n-fire', color: '#ff8a5c', pool: ['dmg', 'dmg', 'repeat', 'boss', 'dmg', 'dmg'] },
+  collect: { id: 'collect', name: '收集', icon: 's-magnet', color: '#9ff2c8', pool: ['magnet', 'magnet', 'heart', 'charge', 'magnet', 'heart'] },
+  burst: { id: 'burst', name: '大招', icon: 's-rainbow', color: '#ffd76a', pool: ['charge', 'charge', 'boss', 'blast', 'charge', 'charge'] },
 };
+const ROUTE_ORDER = ['blast', 'fire', 'collect', 'burst']; // 上 / 左 / 右 / 下
+const NODE_TYPES = {
+  dmg: { name: '火力', icon: 'n-fire', min: 8, max: 15, fmt: (v) => `普通攻击伤害 +${v}%` },
+  blast: { name: '爆炸', icon: 'n-blast', min: 12, max: 20, fmt: (v) => `爆炸范围 +${v}%` },
+  charge: { name: '大招充能', icon: 'n-charge', min: 10, max: 18, fmt: (v) => `大招充能速度 +${v}%` },
+  magnet: { name: '吸附', icon: 's-magnet', min: 25, max: 40, fmt: (v) => `强化吸附范围 +${v}%` },
+  repeat: { name: '重复', icon: 'n-repeat', min: 6, max: 10, fmt: (v) => `技能触发后 ${v}% 概率再触发一次` },
+  wing: { name: '分身', icon: 's-wing', min: 1, max: 1, fmt: () => '开局多一架自动分身' },
+  heart: { name: '生命', icon: 'i-heart', min: 1, max: 1, fmt: () => '最大生命 +1' },
+  boss: { name: 'Boss 伤害', icon: 'n-crown', min: 15, max: 25, fmt: (v) => `Boss 阶段伤害 +${v}%` },
+};
+const STAR_COST = [30, 60, 100, 150, 220, 300];
+const STAR_UP = { 2: { cost: 10, gain: '大招视觉升级：更大、更亮' }, 3: { cost: 20, gain: '解锁第二段大招联动' }, 4: { cost: 30, gain: '星盘多一个随机节点' }, 5: { cost: 50, gain: '解锁终极爆炸演出' } };
 
-const BULLETS = {
-  pink: { id: 'pink', name: '粉色圆弹', label: 'DODGE', shape: '圆形', danger: 1, cut: false, parry: false,
-    op: '躲避', move: '直线、弧线或缓慢旋转', reward: '贴身擦过：擦弹，共振 +4', tip: '别硬接，擦边而过就是收益。', color: '#ff7eb6' },
-  blue: { id: 'blue', name: '蓝色菱形弹', label: 'CUT', shape: '菱形', danger: 2, cut: true, parry: false,
-    op: '靠近后「切」', move: '成列推进，会轻微旋转', reward: '裂成友方碎片追击敌人，共振 +6', tip: '它是冲你来的礼物——迎上去切开。', color: '#5fd4ff' },
-  gold: { id: 'gold', name: '金色星弹', label: 'PARRY', shape: '星形', danger: 3, cut: false, parry: true,
-    op: '进入危险圈后「切」即弹反', move: '瞄准你飞来，靠近时出现危险圈', reward: '反射成金色音符，共振 +10（完美 +14）', tip: '等它进圈再按，越晚越完美。', color: '#ffd54a' },
-  white: { id: 'white', name: '白色细弹', label: 'WARN', shape: '细线', danger: 3, cut: false, parry: false,
-    op: '看预警线，提前「闪」', move: '预警 0.3 秒后变亮，约 1 秒后沿线射出', reward: '无额外收益', tip: '先出现透明细线，变亮之后才会发射。', color: '#ffffff' },
-  purple: { id: 'purple', name: '紫色泡泡', label: 'ABSORB', shape: '泡泡', danger: 0, cut: false, parry: false,
-    op: '接触吸收', move: '慢慢漂浮', reward: '获得梦尘，偶尔是梦心', tip: '它不会伤害你，放心去碰。', color: '#b58cff' },
+const GACHA = { pityStart: 10, pityStep: 0.02, newbiePulls: 10 };
+
+/* 活动任务：同时挂 3 个，领奖后从池里补新任务 */
+const TASK_POOL = [
+  { id: 'kills', name: '累计击败 400 只小怪', stat: 'kills', goal: 400, reward: 3 },
+  { id: 'bursts', name: '释放大招 8 次', stat: 'bursts', goal: 8, reward: 2 },
+  { id: 'runs', name: '完成 3 局航行', stat: 'runs', goal: 3, reward: 3 },
+  { id: 'syns', name: '触发 4 次技能联动', stat: 'syns', goal: 4, reward: 2 },
+  { id: 'streak', name: '单局达成 100 连杀', stat: 'streak100', goal: 1, reward: 2 },
+  { id: 'crystals', name: '拾取 20 个技能晶体', stat: 'crystals', goal: 20, reward: 2 },
+  { id: 'boss', name: '击败失控闹钟', stat: 'bossKills', goal: 1, reward: 3 },
+  { id: 'lv5', name: '把任意技能升到 5 级', stat: 'lv5', goal: 1, reward: 2 },
+  { id: 'chest', name: '打开 5 个宝箱', stat: 'chests', goal: 5, reward: 2 },
+];
+
+/* 外观：爆炸颜色与拖尾，用外观票解锁 */
+const COSMETICS = {
+  exp: [
+    { id: 'default', name: '飞机原色', colors: null, cost: 0 },
+    { id: 'candy', name: '糖果', colors: ['#ff9fcf', '#9fe3f0', '#fff3c8'], cost: 1 },
+    { id: 'aurora', name: '极光', colors: ['#6ff0ff', '#9dffb0', '#c9a8ff'], cost: 1 },
+    { id: 'gold', name: '熔金', colors: ['#ffd76a', '#ffb347', '#fff6c8'], cost: 1 },
+    { id: 'violet', name: '星紫', colors: ['#c9a8ff', '#8f7cf0', '#ffffff'], cost: 1 },
+  ],
+  trail: [
+    { id: 'default', name: '月光', colors: ['rgba(255,246,238,0.7)', 'rgba(201,168,255,0.4)'], cost: 0 },
+    { id: 'rainbow', name: '彩虹', colors: ['#ff9fcf', '#ffe38a', '#9fe3f0', '#c9a8ff'], cost: 1 },
+    { id: 'stardust', name: '星屑', colors: ['#ffe38a', '#fff6c8'], cost: 1 },
+    { id: 'frost', name: '霜蓝', colors: ['#bff4ff', '#6ff0ff'], cost: 1 },
+  ],
 };
 
 const ENEMY_INFO = {
-  jelly: { name: '泡泡水母', desc: '顺着梦潮上下漂浮，钟罩发亮后吐出一小扇粉色圆弹。', bullet: 'pink' },
-  boat: { name: '纸船灯', desc: '从右往左横渡梦海，沿途放下蓝色菱形弹。船头朝哪就往哪走。', bullet: 'blue' },
-  tick: { name: '小闹钟', desc: '一蹦一跳地找地方站定，摇铃后炸开一圈粉弹，圈上总会留一道缝。', bullet: 'pink' },
-  star: { name: '星星鱼', desc: '游到近处，鳍尖一闪，射出一枚金色星弹。', bullet: 'gold' },
-  moth: { name: '梦尘蛾', desc: '乱飞的小蛾子，被打散时会掉落紫色梦尘泡泡。', bullet: 'purple' },
-  beacon: { name: '灯塔眼', desc: '钉在画面边缘的独眼灯塔，先画出白色预警线，再沿线射出细弹。', bullet: 'white' },
-  jellyE: { name: '守望水母', desc: '精英。三颗护盾珠环绕着它，会吐出旋转的粉弹涡。', bullet: 'pink', elite: true },
-  tickE: { name: '裂纹闹钟', desc: '精英。表壳上的裂纹在发光，双层粉环夹着蓝色十字。', bullet: 'blue', elite: true },
-  starE: { name: '双瞳星鱼', desc: '精英。一双特殊的眼睛，会连续射出三枚金色星弹。', bullet: 'gold', elite: true },
-  clock: { name: '失控闹钟', desc: '区域 Boss。代表焦虑与停不下来的时间压力：三个乐章，节奏越来越快，最后让时间倒流。', bullet: 'gold', boss: true },
+  jelly: { name: '泡泡水母', desc: '成排漂过来的小怪，一发就散。偶尔吐一颗粉色圆弹。' },
+  moth: { name: '梦尘蛾', desc: '成群乱飞，会掉很多星尘，是连杀的好材料。' },
+  boat: { name: '纸船灯', desc: '横渡梦海，沿途往下投粉色圆弹。' },
+  tick: { name: '小闹钟', desc: '跳到位置后摇铃，炸开一圈子弹，圈上留着缝。' },
+  star: { name: '星星鱼', desc: '朝你所在的高度俯冲，射出一枚金色星弹。' },
+  beacon: { name: '灯塔眼', desc: '先画出白色预警线，再沿线射出细弹。' },
+  jellyE: { name: '守望水母', desc: '精英。吐出旋转的粉弹涡，击败后掉技能晶体和大量充能。' },
+  tickE: { name: '裂纹闹钟', desc: '精英。双层弹环加十字弹列。' },
+  starE: { name: '双瞳星鱼', desc: '精英。连续射出三枚金色星弹。' },
+  mirror: { name: '镜像闹钟', desc: '失控闹钟面对分身流时召唤的镜像，分身会自动锁定它们。' },
+  clock: { name: '失控闹钟', desc: '区域 Boss。会看见你的 Build：雷暴让它导电，爆破打开它的护甲，冰晶冻住它的指针。' },
 };
 
-const AFFIXES = {
-  fast: { id: 'fast', name: '加速', desc: '移动与弹幕速度提高' },
-  echo: { id: 'echo', name: '回声', desc: '受到伤害后重复一次攻击' },
-  drain: { id: 'drain', name: '吸梦', desc: '存活时你的共振获取减半' },
-  shatter: { id: 'shatter', name: '破碎', desc: '死亡时炸开一圈高密度弹幕' },
-};
-
-const ROOM_TYPES = {
-  normal: { id: 'normal', name: '普通战斗', icon: 'i-battle', rewards: '梦尘 · 三选一梦境卡', stars: 1 },
-  elite: { id: 'elite', name: '精英战斗', icon: 'i-elite', rewards: '更多梦尘 · 稀有卡概率提高 · 下个房间共振上限 130', stars: 3 },
-  rest: { id: 'rest', name: '恢复房间', icon: 'i-rest', rewards: '三选一：恢复生命 / 恢复共振 / 移除一张卡（不给梦境卡）', stars: 0 },
-  challenge: { id: 'challenge', name: '挑战房间', icon: 'i-challenge', rewards: '大量梦尘 · 额外一张梦境卡 · 记录成绩', stars: 3 },
-  shop: { id: 'shop', name: '梦尘商店', icon: 'i-shop', rewards: '遗物 · 梦心 · 临时强化', stars: 0 },
-  boss: { id: 'boss', name: '失控闹钟', icon: 'i-boss', rewards: '章节梦尘 · 新剧情 · 解锁新内容', stars: 3 },
-};
-
-const NORMAL_GOALS = {
-  kill: { id: 'kill', name: '击败所有敌人', short: '击败所有敌人' },
-  survive: { id: 'survive', name: '坚持 40 秒', short: '坚持到倒计时结束', time: 40 },
-  core: { id: 'core', name: '守护梦境核心 35 秒', short: '守护梦境核心', time: 35 },
-};
-
-const REGIONS = [
-  { id: 'sea', name: '失眠之海', open: true },
-  { id: 'forest', name: '反刍森林', open: false },
-  { id: 'glass', name: '玻璃海', open: false },
-  { id: 'paper', name: '纸月工厂', open: false },
-  { id: 'dawn', name: '黎明裂谷', open: false },
-];
-
-const DIFFICULTY = {
-  easy: { id: 'easy', name: '新手', bulletSpeed: 0.8, warnBonus: 0.3, invuln: 1.45, resGain: 1.15, extraEnemies: 0, desc: '弹速 80%，预警提前 0.3 秒，受伤后无敌更久，演奏充能 +15%' },
-  normal: { id: 'normal', name: '标准', bulletSpeed: 1.0, warnBonus: 0, invuln: 1.0, resGain: 1.0, extraEnemies: 0, desc: '基准数值，首发默认难度' },
-  nightmare: { id: 'nightmare', name: '梦魇', bulletSpeed: 1.15, warnBonus: 0, invuln: 0.9, resGain: 1.0, extraEnemies: 1, desc: '弹速 115%，敌人更多，负面更重；通关标准难度后解锁' },
-};
-
-const MEMORIES = {
-  first: { id: 'first', title: '第一盏梦灯', text: '很久以前，有人在睡不着的夜里点亮了第一盏梦灯。它说：只要还剩一点光，就能把噩梦折成纸船，放回海里。' },
-  sleep: { id: 'sleep', title: '熄灭也没关系', text: '灯熄了。你在黑暗里数到七，听见远处有人把你的名字轻轻哼成一段旋律，于是你又亮了一点。' },
-  clock: { id: 'clock', title: '失控闹钟的秘密', text: '闹钟其实只是怕迟到。它一遍又一遍拨快时间，想追上一个早就离开的人。现在它终于可以停下来，好好地响一次。' },
-  sea: { id: 'sea', title: '失眠之海', text: '海面像一整块玻璃，映着城堡里亮了又灭的窗。每一扇窗后面，都有一个还没睡着的人。' },
-  bell: { id: 'bell', title: '回声', text: '你第一次把星星弹回去的时候，它发出的声音像一句“谢谢”。后来你才知道，梦里的攻击，都是没说出口的话。' },
-};
-
-/* Route template: 8 columns + boss. Lane 0 = 浅梦航道（更安全）, lane 2 = 深梦航道（奖励更高）. */
-const ROUTE_TEMPLATE = [
-  [['normal', 0], ['normal', 2]],
-  [['normal', 0], ['normal', 1], ['normal', 2]],
-  [['normal', 0], ['shop', 1], ['elite', 2]],
-  [['normal', 0], ['normal', 1], ['normal', 2]],
-  [['rest', 0], ['normal', 1], ['challenge', 2]],
-  [['normal', 0], ['normal', 1], ['elite', 2]],
-  [['normal', 0], ['normal', 1], ['normal', 2]],
-  [['rest', 0], ['shop', 1], ['challenge', 2]],
+/* 数据验收标准（文档 §16） */
+const METRIC_TARGETS = [
+  { id: 'firstKill', name: '首次击杀时间', target: 5, cmp: 'le', unit: '秒' },
+  { id: 'firstSkill', name: '首次技能获取', target: 20, cmp: 'le', unit: '秒' },
+  { id: 'firstSyn', name: '首次联动', target: 60, cmp: 'le', unit: '秒' },
+  { id: 'firstBurst', name: '首次大招', target: 90, cmp: 'le', unit: '秒' },
+  { id: 'changes', name: '单局技能变化', target: 6, cmp: 'ge', unit: '次' },
+  { id: 'highlights', name: '单局明显爽点', target: 8, cmp: 'ge', unit: '次' },
+  { id: 'avgKill', name: '普通小怪平均击杀时间', target: 0.5, cmp: 'le', unit: '秒' },
+  { id: 'gap', name: '战斗段之间的空档', target: 1.2, cmp: 'le', unit: '秒' },
+  { id: 'restart', name: '失败后重开时间', target: 3, cmp: 'le', unit: '秒' },
+  { id: 'second', name: '第二局点击率', target: 55, cmp: 'ge', unit: '%' },
 ];
