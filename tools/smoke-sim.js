@@ -19,7 +19,7 @@ const ctx = {
   navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
 };
 ctx.globalThis = ctx; vm.createContext(ctx);
-for (const f of ['util', 'data', 'audio', 'input', 'art', 'world', 'boss']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
+for (const f of ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'mapfx', 'boss']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
 const R = (code) => vm.runInContext(code, ctx);
 R(`
 var settings = DEFAULT_SETTINGS();
@@ -28,6 +28,14 @@ function pilot(w) {
   const cr = w.pickups.find((k) => k.kind === 'crystal' || k.kind === 'gold' || k.kind === 'chest' || k.kind === 'heart');
   if (cr) { tx = Math.max(cr.x - 10, w.W * 0.15); ty = cr.y; }
   if (w.portals.length) { const q = w.portals[w.pilotPick % w.portals.length]; tx = Math.min(q.x, w.W * 0.6); ty = q.y; }
+  // v0.6：飞向地图互动点（停留 / 穿环 / 绕圈 / 看眼睛）
+  const mo = w.pilotMap !== false && w.mapObjs.find((o) => o.state === 'idle' && (o.kind === 'bridge' ? o.rings.some((q) => !q.lit && q.x < w.W) : o.x < w.W + 40));
+  if (mo) {
+    const c = w.mapCenter(mo);
+    if (mo.kind === 'bridge') { const q = mo.rings.find((r) => !r.lit); tx = q.x < p.x + 60 ? q.x : Math.min(q.x - 20, w.W * 0.7); ty = q.y; }
+    else if (mo.kind === 'npc') { const a = Math.atan2(p.y - c.y, p.x - c.x) + 0.7; tx = c.x + Math.cos(a) * 110; ty = c.y + Math.sin(a) * 110; }
+    else { tx = c.x - 50; ty = c.y; }
+  }
   let dodge = 0; w.bullets.each((b) => { const dx = b.x - p.x, dy = b.y - p.y; if (dx > -20 && dx < 160 && Math.abs(dy) < 60) dodge += dy > 0 ? -1 : 1; });
   const mx = Math.sign(tx - p.x) * Math.min(1, Math.abs(tx - p.x) / 60), my = dodge ? Math.sign(dodge) : Math.sign(ty - p.y) * Math.min(1, Math.abs(ty - p.y) / 60);
   Input.out.mx = mx; Input.out.my = my;
@@ -49,7 +57,7 @@ function run(plane, first, godmode) {
   const m = res ? res.stats : w.m;
   const f = (v) => (v === null || v === undefined ? '—' : typeof v === 'number' ? Math.round(v * 10) / 10 : v);
   return { plane, win: res && res.win, run: f(res ? res.runT : t), boss: f(res && res.bossTime), kill: f(m.firstKill), skill: f(m.firstSkill), syn: f(m.firstSyn), burst: f(m.firstBurst),
-    crystals: m.crystals, syns: m.syns, bursts: m.bursts, hl: m.highlights, avgKill: f(res && res.avgKill), gap: f(m.gapMax), streak: m.maxStreak, kills: m.kills, dust: Math.round(m.dust), stream: res && res.stream, hits: m.hitsTaken, maxE: maxEnemies, maxB: maxBullets, route: m.route.join('>') };
+    crystals: m.crystals, syns: m.syns, bursts: m.bursts, hl: m.highlights, avgKill: f(res && res.avgKill), gap: f(m.gapMax), streak: m.maxStreak, kills: m.kills, dust: Math.round(m.dust), stream: res && res.stream, hits: m.hitsTaken, inter: m.interacts, interMax: f(m.interactMax), fails: m.interactFails, npcs: (res ? res.companions : []).join('+'), journey: (res ? res.journey : []).map((j) => j.kind + (j.sub ? ':' + j.sub : '') + '=' + j.reward).join(' '), maxE: maxEnemies, maxB: maxBullets, route: m.route.join('>') };
 }
 `);
 const planes = ['moon', 'cloud', 'candy', 'paper', 'whale', 'clock'];

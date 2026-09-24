@@ -58,12 +58,13 @@ class World {
     this.m = { kills: 0, dust: 0, crystals: 0, syns: 0, bursts: 0, maxStreak: 0, elites: 0, highlights: 0, firstKill: null, firstSkill: null, firstSyn: null, firstBurst: null,
       killTimeSum: 0, killTimeN: 0, gapMax: 0, gapT: 0, talent: 0, chests: 0, frags: {}, candies: 0, lv5: 0, route: [], streak100: 0, hitsTaken: 0 };
     this.hintStep = this.first ? 0 : -1; this.hintShown = null;
+    this.initMap(o);
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
     if (this.mode === 'preview') this.setupPreview();
     else this.startSegment('normal');
     this.syncWingmen();
   }
-  emit(type, data) { this.events.push(Object.assign({ type }, data || {})); }
+  emit(type, data) { this.events.push(Object.assign({}, data || {}, { type })); } // 事件名永远不被数据里的同名字段覆盖
   later(t, fn) { this.timers.push({ t, fn }); }
   lvOf(id) { const s = this.skills.find((k) => k.id === id); return s ? s.lv : 0; }
   hasSyn(a, b) { return this.syn.has(synKey(a, b)); }
@@ -81,7 +82,7 @@ class World {
     this.flash = Math.max(0, this.flash - dt * 2.2); this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2);
     this.arena.top = approach(this.arena.top, this.arenaTarget.top, 60 * dt); this.arena.bottom = approach(this.arena.bottom, this.arenaTarget.bottom, 60 * dt);
     this.scene.dir = this.boss && this.boss.phase === 3 ? -1 : 1;
-    this.scene.speed = this.bursting ? 30 : this.phase === 'portal' ? 150 : 90;
+    this.scene.speed = this.bursting ? 30 : this.phase === 'portal' ? 150 : this.mapCalm ? 45 : 90;
     this.scene.update(this.timeStop > 0 ? 0 : sdt);
     for (const tm of this.timers) { tm.t -= sdt; if (tm.t <= 0 && !tm.done) { tm.done = true; tm.fn(); } }
     this.timers = this.timers.filter((tm) => !tm.done);
@@ -112,9 +113,12 @@ class World {
     this.updateFx(sdt);
     this.updateStreak(sdt);
     this.updateHints();
+    this.updateMap(sdt);
     if (this.mode === 'run' && (this.phase === 'fight' || this.phase === 'portal') && this.state === 'play') {
-      const onScreen = this.enemies.some((e) => e.alive && !e.isBoss && e.x - e.r < this.W);
-      if (!onScreen) this.m.gapT += sdt; else { this.m.gapMax = Math.max(this.m.gapMax, this.m.gapT); this.m.gapT = 0; }
+      // 屏幕上有敌人，或 0.4 秒内刚击破过（敌人一进屏幕边缘就被打爆也算在战斗）
+      const onScreen = this.enemies.some((e) => e.alive && !e.isBoss && e.x - e.r < this.W) || (this.recentKills.length > 0 && this.t - this.recentKills[this.recentKills.length - 1] < 0.4);
+      // 时间暂停 / 大招演出不算空档
+      if (!onScreen && this.timeStop <= 0 && !this.bursting) this.m.gapT += sdt; else { this.m.gapMax = Math.max(this.m.gapMax, this.m.gapT); this.m.gapT = 0; }
     }
   }
 
@@ -280,7 +284,7 @@ class World {
   spawnElite() {
     const type = pick(['jellyE', 'tickE', 'starE']);
     this.addEnemy(type, { x: this.W + 60, y: (this.arena.top + this.arena.bottom) / 2, path: 'elite', tx: this.W * 0.74, fireT: 1.6, life: 26 });
-    this.emit('elite', { type });
+    this.emit('elite', { elite: type });
     if (this.cb.onSeenEnemy) this.cb.onSeenEnemy(type);
   }
   updateEnemies(dt) {
@@ -407,6 +411,7 @@ class World {
       if (this.hasSyn('magnet', 'ice')) for (let i = 0; i < 2; i++) this.dropPickup('dust', e.x, e.y, { value: 1 });
     }
     if (e.clockMark && !o.clock) this.later(0.02, () => this.explode(e.x, e.y, 60 * this.stats.blastK, 40, { level: 2 }));
+    this.onCompanionKill(e);
     if (this.cb.onKill) this.cb.onKill(e.type);
   }
   freezeEnemy(e, s) { if (e.isBoss || !e.alive) return; if (e.frozen <= 0) Sound.sfx('freeze', { pan: this.pan(e.x), gap: 60 }); e.frozen = Math.max(e.frozen, s); }
@@ -481,6 +486,7 @@ class World {
     if (this.m.firstSkill === null) this.m.firstSkill = this.runT;
     const S = SKILLS[id];
     this.emit('skill', { id, lv: s.lv, isNew: before === 0, text: S.lv[s.lv - 1] });
+    this.onCompanionSkill();
     Sound.sfx(before === 0 ? 'crystal' : 'levelup');
     this.fx(this.player.x, this.player.y, 2, 70, [S.color, '#ffffff', '#ffe38a']);
     if (s.lv === 5 && before < 5) { this.m.lv5++; this.highlight(); this.emit('lv5', { id }); this.shake(0.3); }
@@ -842,9 +848,10 @@ class World {
     if (o.force && this.lvOf(o.force) >= 5) skill = this.pickCrystalSkill();
     if (skill === 'gold') { this.dropPickup('gold', x, y, { vx: -40, vy: 0 }); return; }
     const pairId = _eid++;
+    if (this.rareNext) { this.rareNext = false; o.rare = true; }
     this.dropPickup('crystal', x, y, { skill, rare: !!o.rare, vx: -50, vy: rand(-30, 30), pair: pairId });
-    // 用飞行做选择：一半情况下同时掉两颗，飞向想要的那颗
-    if (!first && !o.force && !o.single && this.skills.length < 3 && Math.random() < 0.5) {
+    // 用飞行做选择：一半情况下同时掉两颗，飞向想要的那颗；地图互动给的是必定二选一
+    if (o.choice || (!first && !o.force && !o.single && this.skills.length < 3 && Math.random() < 0.5)) {
       const alt = this.pickCrystalSkill(null, skill);
       if (alt && alt !== 'gold' && alt !== skill) this.dropPickup('crystal', x, clamp(y + (y > (TOP + BOTTOM) / 2 ? -110 : 110), TOP + 30, BOTTOM - 30), { skill: alt, rare: !!o.rare, vx: -50, vy: 0, pair: pairId });
     }
@@ -869,7 +876,7 @@ class World {
       k.t += dt;
       if (k.gather && k.gatherT > 0) { k.gatherT -= dt; k.x = smooth(k.x, k.gather.x, 6, dt); k.y = smooth(k.y, k.gather.y, 6, dt); if (k.gatherT <= 0) { k.gather = null; if (k.kind !== 'crystal') k.attract = true; } continue; }
       const d = Math.sqrt(dist2(k.x, k.y, p.x, p.y));
-      const pull = k.kind !== 'crystal' && (k.attract || (d < R && k.t > 0.25) || this.state === 'victory');
+      const pull = (k.kind !== 'crystal' || k.bunny) && (k.attract || (d < R && k.t > 0.25) || this.state === 'victory');
       if (pull && p.alive) { const a = angTo(k.x, k.y, p.x, p.y), sp = 560 + k.t * 120; k.vx = smooth(k.vx, Math.cos(a) * sp, 12, dt); k.vy = smooth(k.vy, Math.sin(a) * sp, 12, dt); }
       else if (k.kind === 'crystal' || k.kind === 'gold' || k.kind === 'chest') { k.vx = smooth(k.vx, -55, 2, dt); k.vy = smooth(k.vy, Math.sin(k.t * 2 + k.seed) * 20, 2, dt); }
       else if (!k.rain) { k.vx = smooth(k.vx, -70, 2.5, dt); k.vy = smooth(k.vy, 0, 2.5, dt); }
@@ -944,6 +951,7 @@ class World {
     const tier = this.segIdx - 1;
     const dur = type === 'chest' ? 18 : type === 'heal' ? 20 : this.segIdx === 1 ? 28 : 38;
     this.seg = { type, idx: this.segIdx, tier, t: 0, dur, spawnT: 0.3, eliteAt: tier >= 1 && type !== 'chest' && type !== 'heal' ? dur * 0.45 : -1, eliteDone: false, over: false, overT: 0, explosive: type === 'bomb', chests: type === 'chest' ? [3, 8, 13] : [] };
+    this.scheduleMap(this.seg);
     this.phase = 'fight';
     this.m.route.push(type);
     const cx = this.W * 0.62, cy = (TOP + BOTTOM) / 2;
@@ -953,7 +961,7 @@ class World {
     if (type === 'wing') this.spawnCrystalDrop(cx, cy, { force: 'wing' });
     if (type === 'bomb') this.spawnCrystalDrop(cx, cy, { force: 'bomb' });
     if (type === 'heal') { this.dropPickup('heart', cx, cy - 60, { vx: -40, vy: 0 }); this.dropPickup('heart', cx, cy + 60, { vx: -40, vy: 0 }); }
-    this.emit('segment', { idx: this.segIdx, type });
+    this.emit('segment', { idx: this.segIdx, segType: type });
     if (this.cb.onPortal && type !== 'normal') this.cb.onPortal(type);
   }
   formationPool(tier, calm) {
@@ -970,8 +978,8 @@ class World {
     if (this.phase === 'fight') {
       const S = this.seg; S.t += dt;
       if (!S.over) {
-        S.spawnT -= dt;
-        const calm = S.type === 'heal' || S.type === 'chest';
+        S.spawnT -= dt * (this.mapCalm ? 0.45 : 1); // 飞机在跟地图互动时，敌人变少
+        const calm = S.type === 'heal' || S.type === 'chest' || S.t < (S.calmT || 0) || this.mapCalm;
         const empty = !this.enemies.some((e) => e.alive && !e.isBoss && e.x < this.W + 60);
         if (empty && S.spawnT > 0.2) S.spawnT = 0.2; // 屏幕清空就立刻补下一波，保证空档不超过 1.2 秒
         if (S.spawnT <= 0) {
@@ -979,9 +987,10 @@ class World {
           else this.spawnFormation(pick(this.formationPool(S.tier, calm)));
           S.spawnT = calm ? 2.6 : Math.max(1.2, 2.2 - S.tier * 0.12);
         }
-        if (S.eliteAt > 0 && !S.eliteDone && S.t >= S.eliteAt) { S.eliteDone = true; this.spawnElite(); }
+        if (S.eliteAt > 0 && !S.eliteDone && S.t >= S.eliteAt && !this.mapCalm) { S.eliteDone = true; this.spawnElite(); }
         while (S.chests.length && S.t >= S.chests[0]) { S.chests.shift(); this.dropPickup('chest', this.W + 30, rand(TOP + 80, BOTTOM - 80), { vx: -90, vy: 0 }); }
-        if (S.t >= S.dur) S.over = true;
+        this.tickMapSchedule(S);
+        if (S.t >= S.dur && !this.mapObjs.some((o) => o.state === 'idle' && o.engaged)) S.over = true;
       } else {
         S.overT += dt;
         const fighters = this.enemies.filter((e) => e.alive && !e.leaving && !e.fodder && e.x < this.W + 40);
@@ -992,12 +1001,15 @@ class World {
   choosePortals() {
     const k = this.segIdx, p = this.player;
     if (this.first && k === 1) return ['skill', 'rare'];
-    if (k >= (this.first ? 5 : 7)) return ['boss'];
+    // 首局 = 第一章：五个互动点都出现过才开 Boss 门（最迟第 7 段）；之后的局第 7 段起只剩 Boss
+    if (this.first ? k >= 7 || (k >= 5 && this.mapIdx >= this.mapPlan.length && !this.mapObjs.some((o) => o.state === 'idle')) : k >= 7) return ['boss'];
     const pool = ['skill', 'rare', 'wing', 'bomb', 'chest', 'skill'];
     if (p.hp < p.maxHp) pool.push('heal', 'heal');
     const out = [], n = k >= 3 ? 3 : 2;
     while (out.length < n) { const t = pick(pool); if (!out.includes(t)) out.push(t); }
-    if (k >= 4) out[out.length - 1] = 'boss';
+    if (k >= 4 && !this.first) out[out.length - 1] = 'boss'; // 首局是第一章：走完五个互动点再进 Boss 门
+    if (this.nextRare && !out.includes('rare')) out[0] = 'rare'; // 星砂矿 / 月亮兔：下一次洞口必有稀有洞
+    this.nextRare = false;
     return out;
   }
   openPortals() {
@@ -1034,11 +1046,13 @@ class World {
     this.bossProxy = { id: 'boss', isBoss: true, type: 'boss', x: this.boss.x, y: this.boss.y, r: 118, alive: true };
     this.enemies.push(this.bossProxy);
     this.emit('boss');
+    this.onMapBoss();
     if (this.cb.onPortal) this.cb.onPortal('boss');
   }
   /* n = 0：阶段切换瞬间（闹钟号被动充能）；n = 2：第二乐章开始（Boss 回应 Build） */
   onBossPhase(n) {
     if (n === 0 && this.planeId === 'clock') { const p = this.player; const before = p.burst; p.burst = Math.min(1, p.burst + 0.5); this.text('准点充能', p.x, p.y - 44, '#ffd76a', 16, 4); if (before < 1 && p.burst >= 1) this.emit('burstReady'); }
+    if (n === 0) this.onCompanionBossPhase();
     if (n === 2) this.bossResponse();
   }
   /* Boss 看见你的 Build */
@@ -1074,6 +1088,7 @@ class World {
       win, plane: this.planeId, runT: this.runT, stats: m,
       skills: this.skills.map((s) => ({ id: s.id, lv: s.lv })), syns: [...this.syn], stream: this.stream ? this.stream.name : null, streamId: this.stream ? this.stream.id : null,
       avgKill: m.killTimeN ? m.killTimeSum / m.killTimeN : null, bossTime: this.bossTime || 0, bossEarly: this.bossEarly,
+      journey: (this.journey || []).slice(), companions: (this.companions || []).map((c) => c.id),
     };
   }
 
@@ -1166,7 +1181,7 @@ class World {
   hud() {
     const p = this.player;
     const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, ready: p.burst >= 1 && !this.bursting, skills: this.skills.map((s) => ({ id: s.id, lv: s.lv })), syns: [...this.syn], stream: this.stream ? this.stream.name : null,
-      streak: this.streak.n, dust: Math.floor(this.m.dust), seg: this.seg && this.seg.idx, segType: this.seg && this.seg.type, segU: this.seg && this.seg.dur ? clamp(this.seg.t / this.seg.dur, 0, 1) : 0, phase: this.phase, candy: p.candy };
+      streak: this.streak.n, dust: Math.floor(this.m.dust), companions: (this.companions || []).map((c) => c.id), seg: this.seg && this.seg.idx, segType: this.seg && this.seg.type, segU: this.seg && this.seg.dur ? clamp(this.seg.t / this.seg.dur, 0, 1) : 0, phase: this.phase, candy: p.candy };
     if (this.boss && this.phase === 'boss') h.boss = this.boss.hudInfo();
     return h;
   }
@@ -1176,6 +1191,7 @@ class World {
     const W = this.W, t = this.t, p = this.player, cb = this.settings.colorblind;
     g.save();
     if (this.trauma > 0) { const s = this.trauma * this.trauma * 16; g.translate(rand(-s, s), rand(-s, s)); }
+    if (this.mapObjs) this.applyCam(g);
     if (o.simpleBg) { const gr = g.createLinearGradient(0, 0, 0, LH); gr.addColorStop(0, '#1b1548'); gr.addColorStop(1, '#2e2670'); g.fillStyle = gr; g.fillRect(-20, -20, W + 40, LH + 40); }
     else this.scene.draw(g, W, LH);
     if (this.carnival) { g.globalCompositeOperation = 'soft-light'; const gr = g.createLinearGradient(0, 0, W, LH); gr.addColorStop(0, 'rgba(255,159,207,0.5)'); gr.addColorStop(0.5, 'rgba(255,227,138,0.5)'); gr.addColorStop(1, 'rgba(159,227,240,0.5)'); g.fillStyle = gr; g.fillRect(0, 0, W, LH); g.globalCompositeOperation = 'source-over'; }
@@ -1185,6 +1201,7 @@ class World {
       g.beginPath(); g.moveTo(0, this.arena.top); g.lineTo(W, this.arena.top); g.moveTo(0, this.arena.bottom); g.lineTo(W, this.arena.bottom); g.stroke(); g.setLineDash([]);
     }
     this.drawWarns(g);
+    if (this.mapObjs) this.drawMap(g);
     for (const q of this.portals) drawPortal(g, q.type, q.x, q.y, q.r, t + q.y * 0.01, clamp((this.W + 80 - q.x) / 120, 0, 1));
     for (const w of this.walls) { g.globalCompositeOperation = 'lighter'; const gr = g.createLinearGradient(w.x - 40, 0, w.x + 10, 0); gr.addColorStop(0, 'rgba(201,168,255,0)'); gr.addColorStop(1, 'rgba(255,243,200,0.7)'); g.fillStyle = gr; g.fillRect(w.x - 40, this.arena.top, 50, this.arena.bottom - this.arena.top); g.globalCompositeOperation = 'source-over'; }
     for (const k of this.pickups) if (k.kind !== 'crystal') drawPickup(g, k, t);
@@ -1195,6 +1212,7 @@ class World {
     this.drawArcs(g);
     for (const k of this.pickups) if (k.kind === 'crystal') drawPickup(g, k, t);
     this.drawPlayer(g);
+    if (this.mapObjs) this.drawMapFront(g);
     const stop = this.timeStop > 0;
     this.bullets.each((b) => {
       if (b.ghost > 0) { g.globalAlpha = 0.25 + 0.25 * Math.sin(t * 20); BulletArt.draw(g, b.type, b.x, b.y, b.type === 'blue' || b.type === 'white' ? b.rot : 0, 1, cb); g.globalAlpha = 1; return; }

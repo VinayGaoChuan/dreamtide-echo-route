@@ -10,7 +10,7 @@
 
   // 拖动：整块舞台（含黑边）都能拖，HUD 按钮自己拦截
   Input.bindDrag(app);
-  Input.onDevice = (d) => { if (G.hudRefs) { G.hudLast.bk = null; if (G.world && G.world.hintShown) showHint(G.world.hintShown); } };
+  Input.onDevice = (d) => { if (G.hudRefs) { G.hudLast.bk = null; if (G.world) showHint(); } };
   const wake = () => { Sound.init(); window.removeEventListener('pointerdown', wake, true); window.removeEventListener('keydown', wake, true); };
   window.addEventListener('pointerdown', wake, true); window.addEventListener('keydown', wake, true);
 

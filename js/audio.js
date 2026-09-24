@@ -361,6 +361,15 @@ const Sound = (() => {
       if (r === 'SSR' || r === 'SR') { noise({ f: 300, f2: 6000, q: 0.4, dur: 1, vol: 0.18 }); tone({ f: 110, f2: 55, dur: 1.2, vol: 0.25, type: 'triangle' }); }
     },
     starLight: () => { const t = ctx.currentTime; bell(t, 86, 0.2, sfxBus); bell(t + 0.08, 93, 0.18, sfxBus); tone({ f: 600, f2: 1800, dur: 0.3, vol: 0.06 }); },
+    /* v0.6 地图互动 */
+    mapNear: (o) => { const t = ctx.currentTime; bell(t, 81, 0.1, sfxBus); bell(t + 0.09, 88, 0.08, sfxBus); tone({ f: 900, f2: 1300, dur: 0.25, vol: 0.03, pan: o.pan }); },
+    mapCharge: (o) => tone({ f: 500 + (o.k || 0) * 900, f2: 560 + (o.k || 0) * 900, dur: 0.07, vol: 0.035, type: 'triangle', pan: o.pan }),
+    ringPass: (o) => { const t = ctx.currentTime, k = o.k || 0; bell(t, 79 + k * 4, 0.2, sfxBus); tone({ f: 700 + k * 200, f2: 1500 + k * 300, dur: 0.18, vol: 0.05 }); },
+    spin: () => { const t = ctx.currentTime; for (let i = 0; i < 9; i++) tone({ f: 1400 - i * 60, dur: 0.03, vol: 0.05, type: 'square', lp: 2600, delay: i * (0.05 + i * 0.012) }); },
+    mapDone: () => { const t = ctx.currentTime; [69, 74, 78, 81, 86, 90].forEach((m, i) => bell(t + i * 0.055, m, 0.2, sfxBus)); noise({ f: 400, f2: 4000, q: 0.5, dur: 0.5, vol: 0.12, a: 0.1 }); },
+    bridge: () => { const t = ctx.currentTime; [62, 66, 69, 74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.07, m, 0.2, sfxBus)); tone({ f: 220, f2: 440, dur: 0.9, vol: 0.12, type: 'triangle' }); },
+    rescue: () => { const t = ctx.currentTime; noise({ f: 2600, f2: 900, q: 1, dur: 0.2, vol: 0.12 }); [78, 83, 86, 90].forEach((m, i) => bell(t + 0.1 + i * 0.08, m, 0.2, sfxBus)); },
+    giantWake: () => { tone({ f: 70, f2: 110, dur: 1.6, vol: 0.3, type: 'sine', a: 0.4 }); tone({ f: 140, f2: 220, dur: 1.4, vol: 0.12, type: 'triangle', a: 0.5 }); const t = ctx.currentTime; [57, 64, 69].forEach((m, i) => bell(t + 0.5 + i * 0.18, m, 0.2, sfxBus)); },
   };
 
   function sfx(name, o = {}) {

@@ -145,6 +145,9 @@ const TASK_POOL = [
   { id: 'boss', name: '击败失控闹钟', stat: 'bossKills', goal: 1, reward: 3 },
   { id: 'lv5', name: '把任意技能升到 5 级', stat: 'lv5', goal: 1, reward: 2 },
   { id: 'chest', name: '打开 5 个宝箱', stat: 'chests', goal: 5, reward: 2 },
+  { id: 'interact', name: '完成 10 次地图互动', stat: 'interacts', goal: 10, reward: 3 },
+  { id: 'rescue', name: '救出 3 位伙伴', stat: 'rescues', goal: 3, reward: 2 },
+  { id: 'giant', name: '唤醒 2 只巨型梦境生物', stat: 'giants', goal: 2, reward: 2 },
 ];
 
 /* 外观：爆炸颜色与拖尾，用外观票解锁 */
@@ -190,4 +193,57 @@ const METRIC_TARGETS = [
   { id: 'gap', name: '战斗段之间的空档', target: 1.2, cmp: 'le', unit: '秒' },
   { id: 'restart', name: '失败后重开时间', target: 3, cmp: 'le', unit: '秒' },
   { id: 'second', name: '第二局点击率', target: 55, cmp: 'ge', unit: '%' },
+  { id: 'interacts', name: '单局主动触发互动', target: 3, cmp: 'ge', unit: '次' },
+  { id: 'interactTime', name: '单次互动最长用时', target: 5, cmp: 'le', unit: '秒' },
 ];
+
+/* ================================================== v0.6 飞机—地图交互 ================================================== */
+/* 地图物件：飞近会回应；停留 / 穿环 / 绕行 / 看眼睛，全部只靠移动完成 */
+const MAP_OBJECTS = {
+  house: { id: 'house', name: '梦灯屋', verb: '点亮', how: 'dwell', tag: '转盘', color: '#ffd76a', icon: 'star',
+    hint: ['飞到梦灯屋前停一会儿', '飞机的灯会把房子点亮，转盘里的奖励会飞回来。'], desc: '停在屋前充能，房子亮灯、开门，转盘转出一份奖励。' },
+  bridge: { id: 'bridge', name: '断桥', verb: '修复', how: 'path', tag: '捷径', color: '#9fe3f0', icon: 'wing',
+    hint: ['穿过三个灯环，把断桥接起来', '尾流会把灯环连成桥。错过也没关系，继续飞。'], desc: '穿过三段灯环，尾流连成完整的桥：跳过一波小怪，送出技能二选一。' },
+  mine: { id: 'mine', name: '星砂矿', verb: '挖开', how: 'dwell', tag: '大招', color: '#c9a8ff', icon: 'charge',
+    hint: ['停在星砂矿旁边，等它爆开', '裂缝会顺着你的灯光变大。'], desc: '停在矿旁充能，矿石爆开清场，星砂瀑布吸进飞机：大招 +1、天赋点 +1。' },
+  npc: { id: 'npc', name: '被困的伙伴', verb: '救出', how: 'orbit', tag: '伙伴', color: '#ff9fcf', icon: 'heart',
+    hint: ['绕着被困的伙伴飞一圈，救出它', '泡泡、藤蔓、齿轮都会松开。救出来的伙伴会跟着你一起飞。'], desc: '绕着困住它的泡泡、藤蔓或齿轮飞一圈，它就加入本局，一直跟着你。' },
+  giant: { id: 'giant', name: '巨型梦境生物', verb: '唤醒', how: 'eye', tag: '清场', color: '#6ff0ff', icon: 'crown',
+    hint: ['飞到它的眼睛旁边', '它不会攻击你。叫醒它，它会帮你清掉一波敌人。'], desc: '不是 Boss，是会动的地图。飞到眼睛旁叫醒它，它会帮你一把。' },
+};
+const MAP_ORDER = ['house', 'bridge', 'mine', 'npc', 'giant'];
+/* 梦灯屋转盘：五种奖励，按当前 Build 挑 */
+const HOUSE_REWARDS = {
+  burst: { id: 'burst', label: '大招', icon: 'charge', color: '#ffd76a', desc: '大招充能 +1' },
+  choice: { id: 'choice', label: '技能', icon: 'star', color: '#6ff0ff', desc: '立即出现技能二选一' },
+  power: { id: 'power', label: '强化', icon: 'blast', color: '#ff9a6b', desc: '当前技能释放一次强化版' },
+  shield: { id: 'shield', label: '护盾', icon: 'heart', color: '#9ff2c8', desc: '生成一次自动护盾' },
+  magnet: { id: 'magnet', label: '吸附', icon: 'magnet', color: '#c9a8ff', desc: '本局吸附范围提升' },
+};
+const HOUSE_WHEEL = ['burst', 'choice', 'power', 'shield', 'magnet'];
+/* 伙伴：救出后跟着飞机，自动射击，并各有一个效果；Boss 出现前各帮一次忙 */
+const NPCS = {
+  bunny: { id: 'bunny', name: '小梦兔', trap: 'bubble', color: '#e7d8ff', effect: '自动把附近的奖励叼回来（二选一的技能晶体除外）' },
+  grandpa: { id: 'grandpa', name: '云朵爷爷', trap: 'vine', color: '#dff2ff', effect: '每 15 秒给飞机铺一层缓冲云，挡下一次伤害' },
+  miner: { id: 'miner', name: '星星矿工', trap: 'vine', color: '#ffe38a', effect: '每击败一行敌人（8 只）挖出一把星砂，顺便充一点大招' },
+  merchant: { id: 'merchant', name: '糖果商人', trap: 'bubble', color: '#ff9fcf', effect: '技能每次升级，额外放一次糖果爆炸' },
+  clockling: { id: 'clockling', name: '小闹钟', trap: 'gear', color: '#ffd76a', effect: 'Boss 每个阶段开始时，补满一次大招' },
+};
+const NPC_ORDER = ['bunny', 'grandpa', 'miner', 'merchant', 'clockling'];
+/* 巨型梦境生物：可以互动的活景观 */
+const GIANTS = {
+  whale: { id: 'whale', name: '睡鲸', effect: '张嘴吸走前方的敌人和弹幕' },
+  turtle: { id: 'turtle', name: '云龟', effect: '展开背甲，7 秒安全航道：靠近飞机的敌弹全部化成星尘' },
+  deer: { id: 'deer', name: '花海鹿', effect: '撒下彩色强化花瓣：最低级技能 +1 级，射速提高 8 秒' },
+  moonbunny: { id: 'moonbunny', name: '月亮兔', effect: '让下一颗技能晶体变成稀有，下一次洞口必有稀有洞' },
+};
+const GIANT_ORDER = ['whale', 'turtle', 'deer', 'moonbunny'];
+/* P2：每架飞机对地图的专属反应（云朵号文档没写，按它的缓冲云被动补了一条） */
+const PLANE_MAP_REACT = {
+  moon: '月光物件提前亮起：感应范围更大，停留充能快 30%',
+  cloud: '停留或绕行时铺开云垫，靠近的敌弹直接散掉',
+  candy: '互动完成时，奖励变成一场糖果爆炸',
+  paper: '尾流留下充能点：离开物件时充能不会消退，穿环判定更宽',
+  whale: '靠近星砂矿就能把周围的星砂吸过来，挖开后星砂翻倍',
+  clock: '互动完成后，时间短暂停止 1.2 秒',
+};

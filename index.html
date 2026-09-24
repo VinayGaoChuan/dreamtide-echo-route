@@ -73,6 +73,7 @@ svg.ic{width:1.1em;height:1.1em;fill:currentColor;flex:none;vertical-align:-.16e
 .chip.coral{background:rgba(255,122,107,.14);border-color:rgba(255,122,107,.45);color:#ffb2a8}
 .chip.cyan{background:rgba(95,212,255,.13);border-color:rgba(95,212,255,.45);color:#aeeaff}
 .chip.dust{background:rgba(181,140,255,.15);border-color:rgba(181,140,255,.45);color:#dcc8ff}
+.chip.pink{background:rgba(255,159,207,.14);border-color:rgba(255,159,207,.5);color:#ffc4e2}
 .chip.mint{background:rgba(111,227,154,.14);border-color:rgba(111,227,154,.45);color:#b8f5cf}
 .chip.r-N{color:#dfe6ff;border-color:rgba(223,230,255,.5)}.chip.r-R{color:#9fe3ff;border-color:rgba(127,216,255,.6)}.chip.r-SR{color:#dcc2ff;border-color:rgba(201,160,255,.7)}.chip.r-SSR{color:#ffe38a;border-color:rgba(255,215,106,.8);background:rgba(255,215,106,.16)}
 .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:1.7em;height:1.6em;padding:0 .35em;border-radius:.4em;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.3);border-bottom-width:3px;font-family:var(--f-num);font-weight:800;font-size:.85em;color:var(--text)}
@@ -259,6 +260,15 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .slot.pop{animation:slotPop .5s cubic-bezier(.2,.9,.3,1.5)}
 @keyframes slotPop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
 .syns{display:flex;gap:4px;flex-wrap:wrap;max-width:calc(260px*var(--u));margin-top:4px}
+.comps{display:flex;gap:4px;flex-wrap:wrap}
+.comps canvas{width:calc(40px*var(--tb));height:calc(40px*var(--tb));border-radius:50%;background:rgba(24,19,64,.72);border:2px solid rgba(255,159,207,.65)}
+.jrow{display:flex;flex-wrap:wrap;gap:6px}
+.jchip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 2px;border-radius:999px;background:rgba(15,12,42,.6);border:1.5px solid var(--jc,#ffd76a);font-size:var(--fs-xs);white-space:nowrap}
+.jchip canvas{width:max(26px,calc(34px*var(--u)));height:max(26px,calc(34px*var(--u)));border-radius:50%;background:rgba(40,30,100,.6)}
+.jchip b{font-family:var(--f-display);font-weight:400;color:var(--jc)}
+.jchip em{font-style:normal;color:var(--lamp2)}
+.lure-npc{display:inline-flex;align-items:center;gap:6px}
+.lure-npc canvas{width:max(28px,calc(36px*var(--u)));height:max(28px,calc(36px*var(--u)))}
 .stream-badge{font-family:var(--f-display);font-size:var(--fs-m);color:var(--lamp2);text-shadow:0 0 10px rgba(255,201,74,.8)}
 .hud-tc{position:absolute;top:calc(10px*var(--u));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;min-width:calc(220px*var(--u))}
 .seg-label{font-family:var(--f-display);font-size:var(--fs-m);color:var(--paper);background:rgba(20,16,54,.62);border:1px solid var(--edge);border-radius:999px;padding:.15em 1em;display:flex;align-items:center;gap:.4em}
@@ -292,7 +302,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 @keyframes glowPulse{0%,100%{box-shadow:0 0 14px rgba(255,201,74,.7),0 0 0 0 rgba(111,240,255,.5)}50%{box-shadow:0 0 38px rgba(255,201,74,1),0 0 0 10px rgba(111,240,255,0)}}
 .hint-box{position:absolute;left:50%;bottom:calc(30px*var(--u));transform:translateX(-50%);max-width:min(56%,calc(560px*var(--u)));padding:.6em 1.2em;text-align:center;font-size:var(--fs-m);line-height:1.5;border-radius:18px;background:rgba(24,19,64,.86);border:2px solid rgba(255,201,74,.55);box-shadow:0 0 24px rgba(255,201,74,.25);animation:scrIn .3s both}
 .hint-box small{display:block;color:var(--dim);font-size:var(--fs-xs)}
-#banner{position:absolute;left:0;right:0;top:24%;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;text-align:center;z-index:4}
+#banner{position:absolute;left:0;right:0;top:30%;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;text-align:center;z-index:4}
 #banner .bt{font-family:var(--f-display);font-size:max(26px,calc(54px*var(--u)));color:var(--paper);text-shadow:0 0 24px var(--bgc,rgba(255,201,74,.6)),0 4px 0 #2d2358;animation:bannerIn .5s cubic-bezier(.2,.9,.3,1.3) both}
 #banner .bs{font-size:var(--fs-m);color:var(--dim);background:rgba(15,12,42,.66);padding:.3em 1em;border-radius:999px;animation:bannerIn .5s .08s both}
 #banner.out > *{animation:bannerOut .35s ease-in both}
@@ -304,7 +314,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 #rotate{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;background:radial-gradient(circle at 50% 40%,#2a2170,#100c2c);font-size:16px;line-height:1.6}
 #rotate .phone{width:56px;height:92px;border:4px solid var(--lamp2);border-radius:12px;animation:rot 2s ease-in-out infinite}
 @keyframes rot{0%,20%{transform:rotate(0)}50%,80%{transform:rotate(90deg)}100%{transform:rotate(0)}}
-@media (max-height:600px){.stat-pill{padding:.25em .6em;min-width:0}.center-col{gap:8px}}
+@media (max-height:600px){.stat-pill{padding:.25em .6em;min-width:0}.center-col{gap:8px}.build-list .row .dim-text{display:none}.build-list .row{display:inline-flex;margin-right:4px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s!important;animation-iteration-count:1!important;transition-duration:.001s!important}}
 </style>
 
@@ -371,7 +381,9 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 <script src="js/audio.js" charset="utf-8"></script>
 <script src="js/input.js" charset="utf-8"></script>
 <script src="js/art.js" charset="utf-8"></script>
+<script src="js/mapart.js" charset="utf-8"></script>
 <script src="js/world.js" charset="utf-8"></script>
+<script src="js/mapfx.js" charset="utf-8"></script>
 <script src="js/boss.js" charset="utf-8"></script>
 <script src="js/ui.js" charset="utf-8"></script>
 <script src="js/main.js" charset="utf-8"></script>
