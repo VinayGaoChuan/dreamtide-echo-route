@@ -14,8 +14,6 @@
   const wake = () => { Sound.init(); window.removeEventListener('pointerdown', wake, true); window.removeEventListener('keydown', wake, true); };
   window.addEventListener('pointerdown', wake, true); window.addEventListener('keydown', wake, true);
 
-  let rotateDismissed = false;
-  $('#rotate-go').onclick = () => { rotateDismissed = true; $('#rotate').hidden = true; };
   function resize() {
     const r = app.getBoundingClientRect(), w = Math.max(1, r.width), h = Math.max(1, r.height);
     const W = clamp(Math.round((w / h) * LH), 1152, 1560);
@@ -27,8 +25,6 @@
     document.documentElement.style.setProperty('--u', scale.toFixed(4));
     applySettings();
     if (G.world) G.world.W = W;
-    const coarse = window.matchMedia && matchMedia('(pointer:coarse)').matches;
-    $('#rotate').hidden = !(coarse && h > w * 1.1 && !rotateDismissed);
   }
   resize();
   window.addEventListener('resize', resize);

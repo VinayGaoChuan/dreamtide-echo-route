@@ -149,7 +149,7 @@ const SHARED = { max: 10, cost: [0, 0, 100, 160, 220, 280, 340, 400, 460, 520, 5
 const sharedAtk = (lv) => Math.pow(SHARED.atk, lv - 1);
 const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 
-/* 章节 / 关卡：一关 = 一次完整出击（约 6~8 分钟），只在出击结束时结算。难度固定，不跟随玩家成长或付费抬高。 */
+/* 章节 / 关卡：一关 = 一次完整出击（约 6~8 分钟），只在出击结束时结算。难度固定，不跟随玩家成长抬高。 */
 const STAGES = {
   '1-1': { id: '1-1', ch: 1, name: '梦灯海湾', segs: 6, segDur: 54, hpK: 1, avg: 5, peak: 9, elites: ['jellyE'], boss: 'captain', bossName: '泡泡小队长', bossHp: 8000, rec: 1, reward: 120, fail: [30, 90], ult: 1,
     map: ['house', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '第一次出击：开局只会直射，拿到穿透或追踪后清怪方式会变。' },
@@ -159,12 +159,6 @@ const STAGES = {
     map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'], intro: '护卫编队之后是第一章 Boss：失控闹钟。' },
 };
 const STAGE_ORDER = ['1-1', '1-2', '1-3'];
-/* 第 2 章：完整版内容（原型只展示解锁流程，不能游玩） */
-const CHAPTER2 = [
-  { id: '2-1', name: '星砂荒原', rec: 4, hp: 11, peak: 15 },
-  { id: '2-2', name: '回声峡谷', rec: 5, hp: 12, peak: 17 },
-  { id: '2-3', name: '无梦之渊', rec: 6, hp: 13, peak: 19 },
-];
 const STAR_COST = [30, 60, 100, 150, 220, 300];
 const STAR_UP = { 2: { cost: 10, gain: '大招视觉升级：更大、更亮' }, 3: { cost: 20, gain: '解锁第二段大招联动' }, 4: { cost: 30, gain: '星盘多一个随机节点' }, 5: { cost: 50, gain: '解锁终极爆炸演出' } };
 
@@ -204,11 +198,6 @@ const COSMETICS = {
   ],
 };
 
-/* 外观包（商业原型）：只换颜色和演出，不改变数值；机库里可以预览 */
-const COS_PACKS = [
-  { id: 'stardust', name: '星砂尾焰包', colors: ['#ffe38a', '#fff6c8', '#ffd76a'], cos: { exp: 'gold', trail: 'stardust' }, desc: '金色尾焰点亮梦灯屋屋顶，爆炸变成熔金色。' },
-  { id: 'candy', name: '糖果涂装包', colors: ['#ff9fcf', '#9fe3f0', '#fff3c8'], cos: { exp: 'candy', trail: 'rainbow' }, desc: '彩虹拖尾，爆炸撒出糖果色碎屑。' },
-];
 
 const ENEMY_INFO = {
   jelly: { name: '泡泡水母', desc: '成排漂过来的小怪，一发就散。偶尔吐一颗粉色圆弹。' },

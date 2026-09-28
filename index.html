@@ -311,9 +311,6 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 #toast{position:absolute;left:50%;top:calc(96px*var(--u));transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;z-index:5}
 #toast div{display:flex;align-items:center;gap:.5em;padding:.4em 1.1em;border-radius:999px;background:rgba(24,19,64,.92);border:1.5px solid var(--tc,var(--edge));font-size:var(--fs-s);animation:scrIn .25s both;box-shadow:0 0 16px var(--tc,transparent)}
 #toast svg{width:1.3em;height:1.3em;fill:var(--tc,#fff)}
-#rotate{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;background:radial-gradient(circle at 50% 40%,#2a2170,#100c2c);font-size:16px;line-height:1.6}
-#rotate .phone{width:56px;height:92px;border:4px solid var(--lamp2);border-radius:12px;animation:rot 2s ease-in-out infinite}
-@keyframes rot{0%,20%{transform:rotate(0)}50%,80%{transform:rotate(90deg)}100%{transform:rotate(0)}}
 .lvbox{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:6px;border-top:1px dashed rgba(255,255,255,.15)}
 .lvnum{font-family:var(--f-display);font-size:var(--fs-l);color:var(--lamp2);text-shadow:0 0 12px rgba(255,201,74,.6)}
 .stage-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
@@ -324,9 +321,6 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .stage-chip.locked{opacity:.5}
 .stage-chip.ch2{border-style:dashed;opacity:.8}
 .stage-chip svg.ic{width:1em;height:1em;fill:currentColor}
-.unlock-wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:calc(12px*var(--u))}
-.unlock-card{padding:calc(16px*var(--u));display:flex;flex-direction:column;gap:8px;font-size:var(--fs-s);line-height:1.6}
-.unlock-card p{margin:0}
 .lure-path{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
 .lure-path .arrow{color:var(--dim)}
 .lure-mini{font-size:var(--fs-xs);margin-top:2px}
@@ -353,7 +347,6 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .wave-label{margin-top:4px;font-size:var(--fs-xs);color:var(--lamp2);text-align:center;text-shadow:0 1px 3px rgba(0,0,0,.6)}
 #banner,#toast{transition:opacity .25s}
 #stage.offering #banner,#stage.offering #toast{opacity:.1}
-.cos.pack{border:1.5px dashed rgba(255,215,106,.5)}
 @media (max-width:760px){.end-grid3{grid-template-columns:1fr 1fr}}
 @media (max-height:600px){.stat-pill{padding:.25em .6em;min-width:0}.center-col{gap:8px}.build-list .row .dim-text{display:none}.build-list .row{display:inline-flex;margin-right:4px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s!important;animation-iteration-count:1!important;transition-duration:.001s!important}}
@@ -412,11 +405,6 @@ table.metrics td.num{text-align:right;white-space:nowrap}
     <div id="screens"></div>
     <div id="banner" aria-live="polite"></div>
     <div id="toast" role="status" aria-live="polite"></div>
-  </div>
-  <div id="rotate" hidden>
-    <div class="phone" aria-hidden="true"></div>
-    <div>横过手机，梦会更宽一些。</div>
-    <button class="btn" id="rotate-go" type="button">就这样继续</button>
   </div>
 </div>
 

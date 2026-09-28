@@ -126,7 +126,7 @@ function showTitle() {
       <p class="title-tag">${first ? '移动飞机对准敌人，飞进奖励门挑升级，按下爆发键清屏。' : '梦灯还亮着。欢迎回来。'}</p>
       <p class="title-start">点击任意处开始</p>
     </div>
-    <p class="title-foot">触屏 · 键鼠 · 手柄 &nbsp;|&nbsp; 进度保存在这台设备的浏览器里</p>`, { bg: 'title', label: '标题' });
+    <p class="title-foot">键鼠 · 手柄 &nbsp;|&nbsp; 进度自动保存在本机</p>`, { bg: 'title', label: '标题' });
   el.addEventListener('click', (e) => { if (e.target.closest('#t-sound')) return; startFromTitle(); });
   $('#t-sound', el).addEventListener('click', () => {
     Sound.init(); G.meta.settings.muted = !G.meta.settings.muted; applySettings(); persist();
@@ -160,7 +160,7 @@ function stageChips(sel) {
   return `<div class="stage-row" role="group" aria-label="第 1 章关卡">${STAGE_ORDER.map((id) => {
     const S = STAGES[id], ok = stageUnlocked(id), done = P.cleared[id];
     return `<button class="stage-chip ${id === sel ? 'sel' : ''} ${ok ? '' : 'locked'} ${done ? 'cleared' : ''}" data-stage="${id}" type="button" ${ok ? '' : 'aria-disabled="true"'}><b>${id}</b><span>${S.name}</span>${done ? '<i>✓</i>' : ok ? '' : icon('i-lock')}</button>`;
-  }).join('')}<button class="stage-chip ch2" id="stage-ch2" type="button"><b>第 2 章</b><span>完整版</span>${icon('i-lock')}</button></div>`;
+  }).join('')}<button class="stage-chip ch2" id="stage-ch2" type="button" aria-disabled="true"><b>第 2 章</b><span>制作中</span>${icon('i-lock')}</button></div>`;
 }
 
 /* ================================================== HUB（机库大厅）================================================== */
@@ -199,7 +199,7 @@ function showHub() {
     </div>`, { bg: 'hub', label: '机库大厅' });
   $('#hub-go', el).onclick = () => { Sound.sfx('select'); startRun(sel); };
   $$('[data-stage]', el).forEach((b) => b.onclick = () => { if (!stageUnlocked(b.dataset.stage)) { Sound.sfx('denied'); toast('先通关上一关', '#ffb2a8'); return; } Sound.sfx('ui'); m.progress.selected = b.dataset.stage; persist(); showHub(); });
-  $('#stage-ch2', el).onclick = () => { Sound.sfx('ui'); showUnlock(showHub); };
+  $('#stage-ch2', el).onclick = () => { Sound.sfx('denied'); toast('第 2 章还在制作中', '#ffe38a'); };
   const lvb = $('#hub-lv', el); if (lvb) lvb.onclick = () => { if (levelUp()) showStarMap(m.current, showHub, true); };
   $('#hub-preview', el).onclick = () => openPreview(m.current, showHub);
   $('#hub-gacha', el).onclick = () => { Sound.sfx('ui'); showGacha(showHub); };
@@ -210,26 +210,6 @@ function showHub() {
   $('#hub-codex', el).onclick = () => { Sound.sfx('ui'); showCodex('planes', showHub); };
   $('#hub-records', el).onclick = () => { Sound.sfx('ui'); showRecords(showHub); };
   $('#hub-settings', el).onclick = () => { Sound.sfx('ui'); showSettings(showHub); };
-}
-/* 完整版解锁流程原型：只展示内容边界，不接支付 */
-function showUnlock(back) {
-  const el = showScreen('unlock', `${backBtn()}
-    <div class="screen-title"><h2>第 2 章 · 完整版</h2><p>商业流程原型：不会扣款，也没有接入任何支付</p></div>
-    <div class="unlock-wrap">
-      <div class="panel unlock-card">
-        <div class="label">第 2 章 · 三关</div>
-        ${CHAPTER2.map((c) => `<div class="row"><span class="chip">${c.id}</span><b>${c.name}</b><span class="dim-text">建议 Lv${c.rec} · 杂兵生命 ${c.hp} · 峰值 ${c.peak} 只/秒</span></div>`).join('')}
-        <p class="dim-text">新 Boss 与新的地图设施（风力塔、古钟台）。第 1 章全部内容免费可玩，已购买的内容一直可玩。</p>
-      </div>
-      <div class="panel unlock-card">
-        <div class="label">发行方式（建议，未定价）</div>
-        <p><b>Steam</b>：买断基础游戏，后续可选外观与内容扩展。</p>
-        <p><b>手机</b>：免费体验第 1 章，一次性解锁完整内容。开始前就说明，不会在失败时弹付款。</p>
-        <p class="dim-text">穿透、追踪、大招第 2 / 3 次容量都通过正常游玩获得；不卖本次必出技能，不靠广告重抽，战斗中不弹购买页。</p>
-        <button class="btn" type="button" disabled>价格待定 · 原型不接支付</button>
-      </div>
-    </div>`, { bg: 'hub', back, label: '完整版解锁' });
-  return el;
 }
 function lureRows(L) {
   const path = (L.path || []).map((id, i) => `${i ? '<span class="arrow">›</span>' : ''}<span class="chip" style="color:${(SKILLS[id] || { color: '#ffd76a' }).color}">${SKILLS[id] ? SKILLS[id].name : SYNERGIES[id] ? SYNERGIES[id].name : id}</span>`).join('');
@@ -436,7 +416,7 @@ function showGacha(back) {
           </div>
           <div class="dim-text" style="font-size:var(--fs-xs);line-height:1.6">十连必出 R 或以上 · 连续 ${GACHA.pityStart} 次没出 SR 以上后概率逐次提高（当前 +${Math.round(pity * 100)}%）${g.newbieDone ? '' : ` · 新手前 ${GACHA.newbiePulls} 次内必得一架完整 R 飞机`}</div>
           <div class="rates">${['N', 'R', 'SR', 'SSR'].map((r) => `<div><span class="chip r-${r}">${r}</span><div class="num" style="margin-top:4px">${Math.round((RARITY[r].rate + (r === 'SSR' ? pity * 0.3 : r === 'SR' ? pity * 0.7 : 0)) * 1000) / 10}%</div></div>`).join('')}</div>
-          <div class="dim-text" style="font-size:var(--fs-xs)">招募券来自：关卡首通、救出伙伴、任务目标。首版不售卖随机抽取。</div>
+          <div class="dim-text" style="font-size:var(--fs-xs)">招募券来自：关卡首通、救出伙伴、任务目标。</div>
         </div>
         <div class="panel" style="padding:calc(12px*var(--u))"><div class="label">飞机池</div><div class="row wrap" style="margin-top:6px">${PLANE_ORDER.map((p) => `<span class="chip r-${PLANES[p].rarity}">${PLANES[p].name}${m.planes[p] ? ' ✓' : ''}</span>`).join('')}</div></div>
       </div>
@@ -608,7 +588,7 @@ function showTasks(back) {
   ensureTasks();
   const T = G.meta.tasks;
   const el = showScreen('tasks', `${backBtn()}
-    <div class="screen-title"><h2>活动任务</h2><p>完成后领取招募券；领完会补上新任务（没有每日强制签到）</p></div>
+    <div class="screen-title"><h2>活动任务</h2><p>完成后领取招募券；领完会补上新任务</p></div>
     <div class="grid-cards">${T.active.map((id) => { const d = taskDef(id), p = taskProgress(id), done = p >= d.goal; return `<div class="panel task"><h3>${d.name}</h3><div class="bar-mini"><i style="width:${(p / d.goal) * 100}%"></i></div><div class="row"><span class="num">${p}/${d.goal}</span><span class="spacer"></span><span class="chip gold">${icon('i-ticket')} ×${d.reward}</span></div><button class="btn ${done ? 'primary' : ''} small" data-claim="${id}" type="button" ${done ? '' : 'disabled'}>${done ? '领取' : '进行中'}</button></div>`; }).join('')}</div>
     <p class="dim-text" style="font-size:var(--fs-xs);margin-top:12px">已领取 ${T.claimed} 次。${curRow()}</p>`, { bg: 'hub', back, label: '任务' });
   $$('[data-claim]', el).forEach((b) => b.onclick = () => { claimTask(b.dataset.claim); showTasks(back); });
@@ -626,11 +606,7 @@ function showCosmetics(back) {
     ${curRow()}
     <div class="label" style="margin:12px 0 6px">爆炸颜色</div><div class="grid-cards">${COSMETICS.exp.map((c) => item('exp', c)).join('')}</div>
     <div class="label" style="margin:12px 0 6px">飞行拖尾（梦灯屋的屋顶灯会跟着换色）</div><div class="grid-cards">${COSMETICS.trail.map((c) => item('trail', c)).join('')}</div>
-    <div class="label" style="margin:16px 0 6px">外观包 · 商业原型（明码标价方向，未定价，不接支付）</div>
-    <div class="grid-cards">${COS_PACKS.map((k) => `<div class="panel cos pack"><b style="font-family:var(--f-display);font-weight:400;font-size:var(--fs-m)">${k.name}</b><span class="swatch">${k.colors.map((x) => `<i style="background:${x}"></i>`).join('')}</span><span class="dim-text" style="font-size:var(--fs-xs)">${k.desc}</span>
-      <div class="row wrap"><button class="btn small cyan" data-pv="${k.id}" type="button">${icon('i-play')} 机库预览</button><button class="btn small" type="button" disabled>价格待定</button></div></div>`).join('')}</div>
-    <p class="dim-text" style="font-size:var(--fs-xs)">外观只换颜色和演出主题，不改变伤害、奖励概率、转盘奖池或关卡难度。购买预览只在机库，战斗、选择升级和地图互动中都不会出现。</p>`, { bg: 'hub', back, label: '外观' });
-  $$('[data-pv]', el).forEach((b) => b.onclick = () => { const k = COS_PACKS.find((x) => x.id === b.dataset.pv); openPreview(m.current, () => showCosmetics(back), k.cos); });
+`, { bg: 'hub', back, label: '外观' });
   $$('[data-eq]', el).forEach((b) => b.onclick = () => { const [k, id] = b.dataset.eq.split(':'); C[k] = id; persist(); Sound.sfx('select'); showCosmetics(back); });
   $$('[data-buy]', el).forEach((b) => b.onclick = () => { const [k, id] = b.dataset.buy.split(':'), c = COSMETICS[k].find((x) => x.id === id); if (m.cosTickets < c.cost) return; m.cosTickets -= c.cost; C.owned.push(b.dataset.buy); C[k] = id; persist(); Sound.sfx('levelup'); showCosmetics(back); });
 }
@@ -703,10 +679,10 @@ function showSettings(back) {
     <div class="screen-title"><h2>设置</h2><p>操作只有两个：拖动飞机、按爆发键</p></div>
     <div class="set-wrap">
       <div class="panel set-sec"><h3>操作</h3>
-        <div class="opt"><span>拖动灵敏度<small>手指 / 鼠标拖动的距离 × 这个倍率</small></span><input type="range" id="set-drag" min="0.6" max="1.8" step="0.1" value="${s.dragSens}" aria-label="拖动灵敏度"></div>
+        <div class="opt"><span>拖动灵敏度<small>鼠标拖动的距离 × 这个倍率</small></span><input type="range" id="set-drag" min="0.6" max="1.8" step="0.1" value="${s.dragSens}" aria-label="拖动灵敏度"></div>
         ${tog('bigButtons', '放大爆发按钮')}
         ${tog('showHitbox', '显示碰撞核心', '飞机中间的小白点才是受击范围')}
-        <p class="dim-text" style="font-size:var(--fs-xs);margin:0">手机：按住屏幕任意处拖动；点右下角头像或双击屏幕释放大招。手柄：左摇杆 + 任意主按钮。</p>
+        <p class="dim-text" style="font-size:var(--fs-xs);margin:0">键鼠：WASD / 方向键移动，也可以按住鼠标拖动；空格释放大招。手柄（含 Steam Deck）：左摇杆移动，任意主按钮释放大招。</p>
       </div>
       <div class="panel set-sec"><h3>画面</h3>
         ${tog('shake', '屏幕震动')}${tog('reduceFlash', '减少闪烁')}${tog('colorblind', '色弱模式', '敌方子弹多一个内部符号')}
@@ -719,7 +695,7 @@ function showSettings(back) {
       </div>
       <div class="panel set-sec"><h3>按键（点一下再按新键，Esc 取消）</h3>${binds}<button class="btn small" id="set-resetkeys" type="button">恢复默认按键</button></div>
       <div class="panel set-sec"><h3>存档</h3>
-        <p class="dim-text" style="font-size:var(--fs-xs);margin:0">进度只存在这台设备的浏览器里${Store.ok ? '' : '（当前浏览器拒绝了本地存储，关掉页面后进度不会保留）'}。</p>
+        <p class="dim-text" style="font-size:var(--fs-xs);margin:0">进度自动保存在本机${Store.ok ? '' : '（当前环境拒绝了本地存储，关掉游戏后进度不会保留）'}。</p>
         <button class="btn coral" id="set-wipe" type="button">清除全部存档</button>
       </div>
     </div>`, { bg: G.world ? 'world' : 'hub', cls: G.world ? 'dim' : '', back: () => { persist(); back(); }, label: '设置' });
