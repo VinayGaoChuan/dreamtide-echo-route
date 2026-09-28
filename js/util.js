@@ -46,7 +46,7 @@ const icon = (id, cls = 'ic') => `<svg class="${cls}" aria-hidden="true"><use hr
 
 /* ---------- persistent save (per viewer, browser storage) ---------- */
 const DEFAULT_SETTINGS = () => ({
-  shake: true, particles: 'full', colorblind: false, bigButtons: false, reduceFlash: false, showHitbox: true,
+  shake: true, particles: 'full', colorblind: false, bigButtons: false, reduceFlash: false, showHitbox: true, flash: 1, rumble: 1,
   dragSens: 1, music: 0.7, sfx: 0.8, muted: false, binds: null,
 });
 

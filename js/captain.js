@@ -1,7 +1,8 @@
 'use strict';
 /* 梦潮：回声航线 v0.7 — 关卡队长（1-1 泡泡小队长 / 1-2 裂纹闹钟队长）。
    接口与失控闹钟一致：update / draw / hit / hudInfo / freezeHands / openFromExplosion，打倒后 w.onBossDead()。
-   50% 血量进入第二阶段：攻击更密，并带散兵出场。 */
+   50% 血量进入第二阶段：攻击更密，并带散兵出场。
+   v0.8 Boss 小目标：先打碎正面三块护甲（护甲在时核心只吃 30%）→ 核心暴露 → 召唤散兵时撑起护盾，清掉散兵护盾才消失。 */
 
 const CAPTAINS = {
   captain: { base: 'jelly', name: '泡泡小队长', scale: 2.4, color: '#ff9fcf', cycle: ['spiral', 'fan', 'ring', 'fan'], cycle2: ['spiral', 'summon', 'fan', 'ring', 'fan'] },
@@ -18,12 +19,17 @@ class CaptainBoss {
     this.fightT = 0; this.hitFlash = 0; this.weakT = 0; this.shield = 0; this.shieldMax = 1; this.stunT = 0;
     this.conductive = false; this.marked = false; this.iceHands = false;
     this.atkT = 1.6; this.idx = 0; this.gen = null; this.radius = 26 * C.scale + 20;
+    this.plates = [-62, 0, 62].map((dy) => ({ dy, hp: hp * 0.06, max: hp * 0.06, alive: true, flash: 0 }));
+    this.guard = false;
     Sound.sfx('alarm');
   }
   targetable() { return this.alive && !this.dying && this.x < this.w.W - 20; }
   update(dt) {
     const w = this.w, p = w.player;
     this.t += dt; this.hitFlash = Math.max(0, this.hitFlash - dt * 5); this.weakT = Math.max(0, this.weakT - dt);
+    for (const pl of this.plates) pl.flash = Math.max(0, pl.flash - dt * 6);
+    const adds = w.enemies.filter((e) => e.alive && e.bossAdd).length;
+    if (this.guard && adds === 0) { this.guard = false; Sound.sfx('weakOpen'); w.text('散兵清光了 · 护盾消失', this.x, this.y - 130, '#fff3c8', 20, 5); }
     this.x = smooth(this.x, this.homeX + Math.sin(this.t * 0.6) * 40, w.bossIntroT > 0 ? 1.4 : 2.5, dt);
     this.y = smooth(this.y, this.homeY + Math.sin(this.t * 0.9) * 120, 2.2, dt);
     if (this.dying > 0) return this.updateDeath(dt);
@@ -51,9 +57,10 @@ class CaptainBoss {
       case 'summon': {
         // 散兵：从右边补一队小怪，不计入“必须清零”的目标
         const top = w.arena.top + 60, bot = w.arena.bottom - 60, y0 = rand(top, bot);
-        if (this.kind === 'captain') for (let i = 0; i < 6; i++) w.addEnemy('jelly', { x: w.W + 10 + i * 50, y: y0, path: 'sine', vx: -170, amp: 30, freq: 2, phase: i * 0.5, escort: true });
-        else { for (let i = 0; i < 8; i++) w.addEnemy('moth', { x: w.W + 10 + rand(0, 160), y: rand(top, bot), path: 'line', vx: -rand(180, 240), escort: true }); w.addEnemy('star', { x: w.W + 40, y: rand(top, bot), path: 'dive', vx: -230, fire: 'aim', escort: true }); }
-        w.text('散兵来了', this.x, this.y - 110, this.C.color, 18, 3);
+        if (this.kind === 'captain') for (let i = 0; i < 6; i++) w.addEnemy('jelly', { x: w.W + 10 + i * 50, y: y0, path: 'sine', vx: -120, amp: 30, freq: 2, phase: i * 0.5, escort: true, bossAdd: true });
+        else { for (let i = 0; i < 7; i++) w.addEnemy('moth', { x: w.W + 10 + rand(0, 160), y: rand(top, bot), path: 'line', vx: -rand(130, 170), escort: true, bossAdd: true }); w.addEnemy('star', { x: w.W + 40, y: rand(top, bot), path: 'dive', vx: -200, fire: 'aim', escort: true, bossAdd: true }); }
+        this.guard = true;
+        w.text('散兵来了 · 护盾撑起来了', this.x, this.y - 110, this.C.color, 18, 3);
         yield* wait(0.4); break;
       }
     }
@@ -63,19 +70,36 @@ class CaptainBoss {
   hit(o) {
     const w = this.w;
     if (!this.alive || this.dying || w.state !== 'play' || w.bossIntroT > 0) return;
-    const dmg = o.dmg * (this.weakT > 0 ? 1.25 : 1) * (this.transT > 0 ? 0.3 : 1);
+    // 小目标 1：正面三块护甲，打在哪块就敲哪块
+    const dy = (o.y !== undefined ? o.y : this.y) - this.y, pl = this.plates.find((q) => q.alive && Math.abs(dy - q.dy) < 34);
+    if (pl && o.kind !== 'burst') {
+      pl.hp -= o.dmg; pl.flash = 1; Sound.sfx('clink', { pan: w.pan(this.x), gap: 60, k: 1 });
+      if (Math.random() < 0.5) w.part('shard', this.x - 70, this.y + pl.dy, rand(-200, -40), rand(-160, 80), 0.45, rand(3, 5), '#c7d0f0');
+      if (pl.hp <= 0) {
+        pl.alive = false; w.hitStop(0.05); w.shake(0.3); w.rumble(0.7, 0.5, 120); Sound.sfx('armorBreak', { prio: true });
+        w.part('plate', this.x - 70, this.y + pl.dy, rand(-240, -120), rand(-280, -120), 1.2, 30, '#9aa6d6');
+        const left = this.plates.filter((q) => q.alive).length;
+        w.text(left ? `护甲碎了 ${3 - left}/3` : '护甲全碎 · 核心露出来了！', this.x - 60, this.y + pl.dy - 40, '#e6ecff', 20, 5);
+        if (!left) { this.weakT = Math.max(this.weakT, 2.5); Sound.sfx('weakOpen'); }
+      }
+      return;
+    }
+    const armorUp = this.plates.some((q) => q.alive);
+    const dmg = o.dmg * (this.weakT > 0 ? 1.25 : 1) * (this.transT > 0 ? 0.3 : 1) * (armorUp ? 0.3 : 1) * (this.guard ? 0.15 : 1);
+    if (this.guard && Math.random() < 0.3) Sound.sfx('clink', { gap: 90 });
     this.hitFlash = Math.min(1, this.hitFlash + 0.2);
     this.hp -= dmg;
     if (this.phase === 1 && this.hp <= this.maxHp * 0.5 && this.transT <= 0) {
       this.hp = this.maxHp * 0.5; this.transT = 1.4; this.nextPhase = 2; this.gen = null;
-      w.clearEnemyBullets(true); w.shake(0.6); Sound.sfx('phase');
+      w.clearEnemyBullets(true); w.shake(0.6); w.hitStop(0.05); Sound.sfx('phase', { prio: true });
       w.emit('phase', { n: 2, name: `${this.C.name} · 怒气`, captain: true });
       w.onBossPhase(0);
     } else if (this.hp <= 0) { this.hp = 0; this.die(); }
   }
   die() {
     const w = this.w;
-    this.dying = 1.6; this.gen = null; w.clearEnemyBullets(true); w.warns = []; w.slowT = 1.2; w.shake(0.9); w.flash = 0.5;
+    this.dying = 1.6; this.gen = null; w.clearEnemyBullets(true); w.warns = []; w.slowT = 1.2; w.shake(0.9); w.flash = 0.5 * w.flashK(); w.hitStop(0.06);
+    for (const e of w.enemies) if (e.alive && e.bossAdd) { e.disband = true; e.path = 'scatter'; e.vx = -200; }
     Sound.sfx('boom'); Tele.log('boss_defeated', { time: Math.round(this.fightT), kind: this.kind });
   }
   updateDeath(dt) {
@@ -85,7 +109,9 @@ class CaptainBoss {
     if (this.dying <= 0) { this.alive = false; Sound.sfx('win'); w.onBossDead(); }
   }
   hudInfo() {
-    return { name: this.C.name, phase: this.phase, phaseName: this.phase === 1 ? '关卡队长' : '怒气 · 带散兵', hp: this.hp, maxHp: this.maxHp, shield: 0, shieldMax: 1, weak: this.weakT > 0, ticks: [50] };
+    const left = this.plates.filter((q) => q.alive).length, adds = this.w.enemies.filter((e) => e.alive && e.bossAdd).length;
+    const sub = left ? `打碎正面护甲 ${3 - left}/3（护甲在时核心只吃三成伤害）` : this.guard ? `清掉散兵 · 还剩 ${adds} · 清完护盾消失` : this.phase === 1 ? '核心露出来了 · 集中火力' : '怒气 · 会带散兵出场';
+    return { name: this.C.name, phase: this.phase, phaseName: sub, hp: this.hp, maxHp: this.maxHp, shield: this.guard ? 1 : 0, shieldMax: 1, weak: this.weakT > 0 || (!left && !this.guard), ticks: [50] };
   }
   draw(g) {
     if (!this.alive) return;
@@ -98,6 +124,17 @@ class CaptainBoss {
     g.restore();
     if (this.hitFlash > 0) glowAt(g, 0, 0, 70 * C.scale / 2, GLOW.white, this.hitFlash * 0.5);
     g.save(); g.translate(0, -34 * C.scale); g.rotate(Math.sin(t * 2) * 0.08); drawIcon(g, 'crown', 0, 0, 30 + C.scale * 4, '#ffd76a'); g.restore();
+    // 正面护甲 / 散兵护盾
+    for (const pl of this.plates) if (pl.alive) {
+      const u = 1 - pl.hp / pl.max;
+      g.save(); g.translate(-26 * C.scale - 14, pl.dy); g.rotate(pl.dy * 0.004);
+      g.fillStyle = pl.flash > 0 ? '#ffffff' : '#c7d0f0'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
+      g.beginPath(); g.roundRect ? g.roundRect(-14, -24, 28, 48, 8) : g.rect(-14, -24, 28, 48); g.fill(); g.stroke();
+      g.fillStyle = '#5b6798'; g.beginPath(); g.arc(-5, -12, 2.4, 0, TAU); g.arc(5, 12, 2.4, 0, TAU); g.fill();
+      if (u > 0.3) { g.strokeStyle = '#3c4470'; g.lineWidth = 1.8; g.beginPath(); g.moveTo(-10, -16); g.lineTo(0, -2); g.lineTo(-6, 10); if (u > 0.66) { g.moveTo(0, -2); g.lineTo(10, 6); } g.stroke(); }
+      g.restore();
+    }
+    if (this.guard) { g.strokeStyle = `rgba(200,230,255,${0.6 + Math.sin(t * 8) * 0.2})`; g.lineWidth = 5; g.beginPath(); g.arc(0, 0, 40 * C.scale, 0, TAU); g.stroke(); }
     if (this.transT > 0) { const u = 1 - this.transT / 1.4; g.strokeStyle = `rgba(255,243,200,${1 - u})`; g.lineWidth = 5; g.beginPath(); g.arc(0, 0, 90 + u * 200, 0, TAU); g.stroke(); }
     g.restore();
   }

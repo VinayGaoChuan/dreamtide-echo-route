@@ -4,12 +4,13 @@
 (function boot() {
   const cv = $('#cv'), ctx = cv.getContext('2d'), stage = $('#stage'), app = $('#app');
   G.meta = Store.load(); Tele.bind(G.meta);
-  if (!G.meta.seenTitle && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { G.meta.settings.shake = false; G.meta.settings.reduceFlash = true; }
+  if (!G.meta.seenTitle && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { G.meta.settings.shake = false; G.meta.settings.reduceFlash = true; G.meta.settings.flash = 0.3; }
   G.sea = new SeaScene(); G.hub = new HubScene(); G.map = new MapScene();
   try { document.documentElement.style.setProperty('--paper-tex', `url(${makePaper().toDataURL()})`); } catch (e) { /* canvas export blocked */ }
 
   // 拖动：整块舞台（含黑边）都能拖，HUD 按钮自己拦截
   Input.bindDrag(app);
+  Input.onPadLost = () => pauseGame(); // 手柄断开：暂停（仪式也一起冻结，恢复后接着走，不跳过、不重抽）
   Input.onDevice = (d) => { if (G.hudRefs) { G.hudLast.bk = null; if (G.world) showHint(); } };
   const wake = () => { Sound.init(); window.removeEventListener('pointerdown', wake, true); window.removeEventListener('keydown', wake, true); };
   window.addEventListener('pointerdown', wake, true); window.addEventListener('keydown', wake, true);
@@ -107,6 +108,7 @@
         while (acc >= STEP && n < 12) { w.step(STEP); acc -= STEP; n++; }
         if (n >= 12) acc = 0;
         drainWorldEvents();
+        Input.flushRumble(G.meta.settings.rumble === undefined ? 1 : G.meta.settings.rumble);
         if (Input.gameActive && Input.consume('pause')) pauseGame();
       } else {
         acc = 0;

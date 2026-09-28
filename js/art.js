@@ -551,12 +551,25 @@ class SeaScene {
     }
     g.globalAlpha = 1;
     // moon + halo (kept soft so it never outshines bullets)
-    const mx = W * 0.4, my = H * 0.2;
-    g.globalCompositeOperation = 'lighter'; drawGlow(g, mx, my, 150, 'rgba(190,175,255,0.5)', 0.55); g.globalCompositeOperation = 'source-over';
-    const mg = g.createRadialGradient(mx - 14, my - 14, 8, mx, my, 62); mg.addColorStop(0, '#f6f0ff'); mg.addColorStop(1, '#cfc2ff');
-    g.fillStyle = mg; g.globalAlpha = 0.72; g.beginPath(); g.arc(mx, my, 60, 0, TAU); g.fill();
-    g.fillStyle = 'rgba(170,150,235,0.45)'; for (const [cx, cy, cr] of [[-18, 8, 12], [16, -14, 8], [20, 18, 6], [-6, -24, 5]]) { g.beginPath(); g.arc(mx + cx, my + cy, cr, 0, TAU); g.fill(); }
-    g.globalAlpha = 1;
+    const mx = W * 0.4, my = H * 0.2, F = this.moonFx;
+    if (!(F && F.gone)) {
+      g.globalCompositeOperation = 'lighter'; drawGlow(g, mx, my, 150, 'rgba(190,175,255,0.5)', 0.55); g.globalCompositeOperation = 'source-over';
+      const mg = g.createRadialGradient(mx - 14, my - 14, 8, mx, my, 62); mg.addColorStop(0, '#f6f0ff'); mg.addColorStop(1, '#cfc2ff');
+      g.fillStyle = mg; g.globalAlpha = 0.72; g.beginPath(); g.arc(mx, my, 60, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(170,150,235,0.45)'; for (const [cx, cy, cr] of [[-18, 8, 12], [16, -14, 8], [20, 18, 6], [-6, -24, 5]]) { g.beginPath(); g.arc(mx + cx, my + cy, cr, 0, TAU); g.fill(); }
+      g.globalAlpha = 1;
+      if (F) { // 月亮怪的线索：影子慢慢爬过来、缺口在转、偶尔眨眼
+        g.save(); g.beginPath(); g.arc(mx, my, 60, 0, TAU); g.clip();
+        g.fillStyle = `rgba(40,30,90,${0.45 * F.shade})`; g.beginPath(); g.arc(mx + 70 - F.shade * 50, my, 60, 0, TAU); g.fill();
+        g.fillStyle = '#271f63'; g.beginPath(); g.arc(mx + Math.cos(F.notch) * 58, my + Math.sin(F.notch) * 58, 14, 0, TAU); g.fill();
+        if (F.blink) { g.fillStyle = '#8f82d6'; g.fillRect(mx - 60, my - 60, 120, 60 + 6); g.strokeStyle = '#2d2358'; g.lineWidth = 3; g.beginPath(); g.moveTo(mx - 40, my + 4); g.quadraticCurveTo(mx, my + 18, mx + 40, my + 4); g.stroke(); }
+        g.restore();
+      }
+    }
+    if (F && F.rift) { // 月亮碎后留在天上的裂缝（这一局一直都在）
+      g.save(); g.translate(mx, my); g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 110, 'rgba(255,215,106,0.6)', 0.5 + Math.sin(t * 2) * 0.1); g.globalCompositeOperation = 'source-over';
+      g.fillStyle = '#0a0620'; g.strokeStyle = '#ffd76a'; g.lineWidth = 3; g.beginPath(); g.moveTo(-10, -70); g.lineTo(12, -30); g.lineTo(-6, 0); g.lineTo(16, 34); g.lineTo(0, 72); g.lineTo(-18, 30); g.lineTo(2, 0); g.lineTo(-20, -34); g.closePath(); g.fill(); g.stroke(); g.restore();
+    }
     // far layer (25%)
     const fx = this.layerX(0.25, W);
     g.drawImage(this.far, fx, 0); g.drawImage(this.far, fx + this.TW, 0);
@@ -768,7 +781,10 @@ function paintEnemyIcon(cv, type, t = 0) {
   g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, s, s);
   g.translate(s / 2, s / 2);
   if (type === 'clock') { g.scale(s / 360, s / 360); drawClockBoss(g, { x: 0, y: 10, phase: 1, minA: -0.9, hourA: 2.2, weakT: 0, mouth: 0, lookA: Math.PI, shield: 0 }, t); }
-  else { const sc = s / (type.endsWith('E') ? 90 : 64); g.scale(sc, sc); (EnemyArt[type] || EnemyArt.jelly)(g, { seed: 1, charge: 0, aim: Math.PI }, t); }
+  else if (type === 'mcore' || type === 'moon') { g.scale(s / 290, s / 290); drawMoonMonster(g, 10, 0, 100, 1, t, 0.3, true); }
+  else if (type === 'hmimic') { g.scale(s / 330, s / 330); drawMimicHouse(g, 0, 30, t, 1, 1, true); }
+  else if (type === 'mimic') { g.scale(s / 120, s / 120); drawSticker(g, 0, 0, 46, 0, 1, 1, t, true); }
+  else { const base = { cmdr: 130, wreck: 140, armor: 78 }[type] || (type.endsWith('E') ? 90 : 64), sc = s / base; g.scale(sc, sc); if (type === 'cmdr') g.translate(-4, 12); (EnemyArt[type] || EnemyArt.jelly)(g, { seed: 1, charge: 0, aim: Math.PI, r: 30, crack: 1, armorHp: 30, armorMax: 45 }, t); }
   g.setTransform(1, 0, 0, 1, 0, 0);
 }
 

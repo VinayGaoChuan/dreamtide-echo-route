@@ -467,8 +467,10 @@ function paintMapIcon(cv, kind, sub) {
       drawLampRing(g, 110, 140, 26, 1, true, 0); drawLampRing(g, 210, 170, 26, 1, true, 0);
       break;
     }
-    case 'mine': g.translate(W / 2, H / 2); g.scale(W / 200, W / 200); drawMine(g, 0, 0, { r: 56, charge: 0.7, crackA: -2.6, seed: 3 }, 1); break;
-    case 'npc': drawTrap(g, NPCS[sub || 'bunny'].trap, W / 2, H / 2, W * 0.36, 1, 0); drawNPC(g, sub || 'bunny', W / 2, H / 2, W / 70, 1, 'sleep'); break;
+    case 'mine': g.translate(W / 2, H / 2); g.scale(W / 200, W / 200); drawMine(g, 0, 0, { r: 56, charge: 0.7, crackA: -2.6, seed: 3 }, 1); drawMineCore(g, -30, -10, 1, false); break;
+    case 'wind': g.translate(W / 2 + W * 0.12, H * 0.62); g.scale(W / 300, W / 300); drawWindTower(g, 0, 0, 0.4, 1, 0, 0, 0); break;
+    case 'core': g.translate(W / 2, H / 2); g.scale(W / 90, W / 90); glowAt(g, 0, 0, 30, GLOW.gold, 0.7); g.fillStyle = '#fff3c8'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4; g.beginPath(); g.moveTo(0, -22); g.lineTo(16, 0); g.lineTo(0, 22); g.lineTo(-16, 0); g.closePath(); g.fill(); g.stroke(); break;
+    case 'npc': g.translate(W / 2, H * 0.58); g.scale(W / 110, W / 110); drawPod(g, 0, 10, sub || 'bunny', 3, 0, 1, false); break;
     case 'giant': { const k = sub || 'whale', sc = { whale: 0.24, turtle: 0.25, deer: 0.26, moonbunny: 0.3 }[k] * (W / 120); g.translate(W / 2 + (k === 'deer' ? 14 : 0), H / 2 + (k === 'deer' ? 22 : k === 'moonbunny' ? 14 : 0)); drawGiant(g, 0, 0, sc, { kind: k, eye: 1 }, 1); break; }
   }
   g.restore();

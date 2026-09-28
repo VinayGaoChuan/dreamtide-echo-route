@@ -1,0 +1,452 @@
+'use strict';
+/* 梦潮：回声航线 v0.8 — 目标调度。
+   关卡 = 一串主目标（STAGE_PLANS）：看见障碍 → 成长机会（地图装置 / 精英核心）→ 用同样的敌人验证变强 → 5~8 秒优势窗口 → 预告下一个威胁 → 再上压力。
+   一次只有一个主目标 + 最多一个可选地图目标；目标完成才推进，慢的玩家不会被新压力叠上来；普通杂兵一直都有；不偷偷加血。
+   事件调度：同一时间只有一个大焦点（升级仪式 / 惊喜变身 / 目标入场），其余排队。 */
+
+const ADV_T = 7;       // 升级后的优势窗口（5~8 秒）
+const PREVIEW_T = 2.4; // 下一个威胁先预告，真正的压力等它结束
+const PORTRAIT_OF = { crowd: 'jelly', armor1: 'armor', pack: 'armor', cmdr: 'cmdr', chase: 'moth', spawner: 'wreck', boss: 'boss' };
+const REWARD_GOAL = { wind: '穿过风车前的风环', mine: '碰一下矿核，拖到岩壁上', house: '碰一下梦灯屋的铃铛', npc: '碰一下吊舱，护送到修理点', core: '碰一下精英掉下的核心' };
+
+Object.assign(World.prototype, {
+  initDirector() {
+    this.plan = (STAGE_PLANS[this.stageId] || STAGE_PLANS['1-1']).map((b) => Object.assign({}, b));
+    this.beatIdx = -1; this.goal = null; this.props = []; this.traces = {}; this.memories = [];
+    this.D = { st: 'goal', t: 0, budget: 3, next: null, advT: 0, noGoalT: 0, backlogT: 0, delay: 0, mapAt: -1, reward: null, dropSide: 1 };
+    this.seg = { tier: 0 };
+    Object.assign(this.m, { noGoalMax: 0, goalTimes: [], breaks: 0, backlogs: 0 });
+    for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: this.W - 80 + i * 56, y: this.player.y, path: 'sine', vx: -150, amp: 14, freq: 2.2, phase: i * 0.5 }); // 开局第一排：第一秒就有东西打
+    this.beginBeat(0);
+  },
+  /* 结算记忆点：惊喜 > 救出伙伴 > 联动 > 关键目标 > 其余；最多挑 3 个，按发生顺序显示 */
+  remember(txt, prio = 2) { if (!this.memories.some((m) => m.txt === txt)) this.memories.push({ txt, prio, i: this.memories.length }); },
+  pickMemories() { return this.memories.slice().sort((a, b) => b.prio - a.prio || a.i - b.i).slice(0, 3).sort((a, b) => a.i - b.i).map((m) => m.txt); },
+
+  /* ---------- 目标 ---------- */
+  beginBeat(i) {
+    const B = this.plan[i]; this.beatIdx = i;
+    this.seg = { tier: i + STAGE_ORDER.indexOf(this.stageId), explosive: false };
+    this.goal = { B, id: B.id, kind: B.kind, title: B.goal, t: 0, n: 0, total: B.n || 0, targets: [], wave: 0, waves: 0, state: 'active', portrait: B.kind === 'surprise' ? B.surprise : PORTRAIT_OF[B.kind] || 'jelly', sub: null };
+    this.D.st = 'goal'; this.D.t = 0; this.D.mapAt = B.map ? B.mapAt || 6 : -1;
+    this.m.segsDone = i;
+    const G = this.goal;
+    switch (B.kind) {
+      case 'armor1': this.entrance(B.from, 'armor', { goal: true }, 1); G.total = 1; break;
+      case 'pack': G.waves = 3; G.total = 7; this.packWave(G, 0); break;
+      case 'cmdr': this.entrance(B.from, 'cmdr', {}, 1); G.total = 1; break;
+      case 'chase': G.waves = B.waves || 3; this.chaseWave(G); break;
+      case 'spawner': this.spawnWreck(G); G.total = 1; break;
+      case 'surprise': this.startSurprise(B.surprise); break;
+      case 'boss': this.startBoss(); break;
+    }
+    this.emit('goal', { idx: i, n: this.plan.length, title: B.goal, kind: B.kind, portrait: G.portrait });
+  },
+  addTarget(e) { e.goal = true; this.goal.targets.push(e.id); },
+  targetsAlive() { const G = this.goal; if (!G) return 0; let n = 0; for (const e of this.enemies) if (e.alive && G.targets.includes(e.id)) n++; for (const q of this.incoming) if (G.targets.includes(q.e.id)) n++; return n + (G.pendingT || 0); },
+  packWave(G, w) {
+    G.wave = w;
+    const mid = (this.arena.top + this.arena.bottom) / 2, from = G.B.from;
+    if (w === 0) { // 先两只并排
+      for (const k of [-1, 1]) this.entrance(from, 'armor', { goal: true, ty: mid + k * 120 }, 1);
+    } else if (w === 2) { // 最后一波：一只从另一个方向来 + 一只正面 + 纸船掩护
+      this.entrance(from === 'drop' ? 'front' : 'drop', 'armor', { goal: true, ty: mid - 110 }, 1);
+      this.entrance('front', 'armor', { goal: true, ty: mid + 110, tx: this.W * 0.68 }, 1, 0.8);
+      this.spawnFormation('boats');
+    } else { // 再一整队：同一高度排成纵队 + 前面两只护卫 —— 穿透在这里最值
+      const ty = clamp(this.player.y, this.arena.top + 90, this.arena.bottom - 90);
+      for (let i = 0; i < 3; i++) this.entrance(from === 'drop' ? 'front' : from, 'armor', { goal: true, ty, tx: this.W * (0.66 + i * 0.07), bob: 26, phase: 0 }, 1, i * 0.25);
+      for (let i = 0; i < 2; i++) this.addEnemy('jelly', { x: this.W + 20 + i * 40, y: ty, path: 'line', vx: -150 });
+      this.text('厚甲编队：排成一列', this.W * 0.7, ty - 80, '#e6ecff', 18, 4);
+    }
+  },
+  chaseWave(G) {
+    G.wave++;
+    const ev = G.B.event, n = 7;
+    if (ev === 'rear') this.rearChase(n, G);
+    else this.riftWave(n, G);
+  },
+  onGoalEvent(type, e) {
+    const G = this.goal; if (!G || G.state !== 'active') return;
+    if (type !== 'kill') return;
+    if (G.kind === 'crowd' && !e.escort && !e.fodder && !e.elite && e.type !== 'armor') G.n++;
+    if (G.kind === 'chase' && e.chaser) G.n++;
+    if (G.targets.includes(e.id)) {
+      G.n = Math.min(G.total, G.n + 1);
+      if (e.type === 'cmdr') this.cmdrDown(e);
+      if (G.kind === 'armor1' || (G.kind === 'pack' && G.n === G.total)) this.hitStop(0.05);
+    }
+  },
+  goalTick(dt) {
+    const G = this.goal; if (!G || G.state !== 'active') return;
+    G.t += dt;
+    if (this.D.mapAt >= 0 && G.t >= this.D.mapAt && !this.focusBusy()) { this.D.mapAt = -1; this.spawnMapObject(G.B.map, { optional: true }); }
+    let done = false;
+    switch (G.kind) {
+      case 'crowd': done = G.n >= G.total && this.m.firstSkill !== null && !this.ritual && !this.ritualQueue.length; break;
+      case 'armor1': case 'cmdr': case 'spawner': done = G.t > 1 && this.targetsAlive() === 0; break;
+      case 'pack': if (G.t > 1 && this.targetsAlive() === 0) { if (G.wave + 1 < G.waves) this.packWave(G, G.wave + 1); else done = true; } break;
+      case 'chase': {
+        const alive = this.enemies.some((e) => e.alive && e.chaser) || this.incoming.some((q) => q.e.chaser) || this.props.some((p) => p.chase);
+        if (!alive && G.wave < G.waves) this.chaseWave(G);
+        else if (!alive && G.wave >= G.waves) done = true;
+        G.total = G.waves * 7; break;
+      }
+      case 'surprise': done = !!(this.surprise && this.surprise.done); break;
+    }
+    if (G.kind === 'spawner') this.wreckTick(G, dt);
+    if (done) this.goalComplete();
+  },
+  goalComplete() {
+    const G = this.goal, B = G.B; G.state = 'done';
+    this.m.goalTimes.push(Math.round(G.t));
+    const mem = { armor1: '敲碎了第一身厚甲', pack: '拆散了厚甲编队', cmdr: '打倒了带队精英', spawner: '摧毁了残骸刷怪核心', chase: B.event === 'rear' ? '挡住了后方追兵' : '清空了空间裂缝' }[B.kind];
+    if (mem) this.remember(mem);
+    Sound.sfx('goalDone'); this.highlight();
+    this.emit('goalDone', { title: B.goal, idx: this.beatIdx });
+    if (B.reward) {
+      this.D.st = 'reward'; this.D.reward = B.reward; this.D.t = 0;
+      if (B.reward !== 'core') this.later(0.6, () => this.spawnMapObject(B.reward, { reward: true }));
+    } else { this.D.st = 'adv'; this.D.advT = 3; }
+  },
+  /* 升级仪式结束：验证编队 + 优势窗口 */
+  onRitualDone(src, opt) {
+    this.verifyFormation(opt, src);
+    if (this.D.st === 'reward') { this.D.st = 'adv'; this.D.advT = ADV_T; this.D.reward = null; }
+  },
+  updateDirector(dt) {
+    if (this.phase !== 'fight') return;
+    const D = this.D; D.t += dt;
+    this.updateProps(dt);
+    if (D.st === 'goal') this.goalTick(dt);
+    else if (D.st === 'adv') { if (!this.ritual) D.advT -= dt; if (D.advT <= 0) this.previewNext(); }
+    else if (D.st === 'preview') {
+      const busy = this.enemies.filter((e) => e.alive && !e.fodder && e.x < this.W + 40).length;
+      if (D.t >= PREVIEW_T && (busy < 10 || D.t > 5) && !this.focusBusy()) this.beginBeat(this.beatIdx + 1);
+    } else if (D.st === 'reward' && D.reward === 'core' && D.t > 30 && !this.props.some((p) => p.kind === 'core') && !this.ritual && !this.ritualQueue.length) { D.st = 'adv'; D.advT = 3; }
+    // 验收记录：没有主目标、屏幕上也没有可打的东西的时长（优势窗口里验证编队还在就不算）
+    const idle = D.st === 'preview' || (D.st === 'adv' && !this.enemies.some((e) => e.alive && !e.isBoss && e.x < this.W));
+    if (idle && !this.ritual) { D.noGoalT += dt; this.m.noGoalMax = Math.max(this.m.noGoalMax, D.noGoalT); } else D.noGoalT = 0;
+    this.fill(dt);
+    // 首局 45 秒给一次完整大招，教一次
+    if ((this.first || this.tutorial) && !this.tutorCharge && this.runT >= 45 && this.m.bursts === 0 && this.player.stock === 0 && !this.ritual) { this.tutorCharge = true; this.addStock(1); this.emit('flag', { text: '大招充满了 · 按爆发键试试', dur: 1.6 }); }
+  },
+  previewNext() {
+    const nb = this.plan[this.beatIdx + 1]; if (!nb) return;
+    this.D.st = 'preview'; this.D.t = 0;
+    this.emit('goalNext', { title: nb.goal, kind: nb.kind, portrait: nb.kind === 'surprise' ? nb.surprise : PORTRAIT_OF[nb.kind] || 'jelly', boss: nb.kind === 'boss' });
+  },
+  focusBusy() { return !!(this.ritual || (this.surprise && this.surprise.busy) || this.bursting); },
+
+  /* ---------- 背景杂兵：一直都有，主目标在场 / 预告 / 仪式时减少 ---------- */
+  fill(dt) {
+    const D = this.D, st = this.stage;
+    if (this.ritual || (this.surprise && this.surprise.busy)) return;
+    let rate = st.fill || 2.3;
+    if (this.runT < 6) rate *= 0.5;
+    if (D.st === 'preview') rate *= 0.35;
+    else if (D.st === 'goal' && this.goal && this.goal.kind !== 'crowd') rate *= this.goal.kind === 'surprise' ? 0.3 : 0.5;
+    else if (D.st === 'reward') rate *= 0.6;
+    let alive = 0, active = 0, onScreen = false;
+    for (const e of this.enemies) { if (!e.alive || e.isBoss) continue; alive++; if (e.x < this.W + 60) active++; if (e.x - e.r < this.W) onScreen = true; }
+    if (alive > 24) D.backlogT += dt; else D.backlogT = 0;
+    if (D.backlogT >= 3) { D.backlogT = 0; D.delay = 3; this.m.backlogs++; this.emit('backlog'); }
+    if (D.delay > 0) { D.delay -= dt; return; }
+    D.budget = Math.min(D.budget + rate * dt, 14);
+    if (active >= 36) return;
+    const kind = D.next || (D.next = pick(this.formationPool(this.seg.tier)));
+    const size = FORMATION_SIZE[kind] || 5;
+    if (D.budget >= size || (!onScreen && D.budget >= size * 0.3)) {
+      // 装置留下的入口（岩壁裂口 / 风吹开的门）也会放杂兵出来
+      const tr = this.traces.crack || this.traces.door, r = Math.random();
+      if (tr && r < 0.3 && kind !== 'beacon' && kind !== 'ticks') this.spawnFromTrace(tr, kind === 'vee' || kind === 'swarm' ? 'moth' : 'jelly', 5);
+      else if (this.seg.tier >= 2 && r > 0.8 && (kind === 'boats' || kind === 'line' || kind === 'vee')) this.spawnPushed(kind === 'boats' ? 'boat' : kind === 'vee' ? 'moth' : 'jelly', kind === 'boats' ? 3 : 5);
+      else this.spawnFormation(kind);
+      D.budget = Math.max(0, D.budget - size); D.next = null;
+    }
+  },
+  formationPool(tier) {
+    const L = ['line', 'vee', 'snake', 'wall'];
+    if (tier >= 2) L.push('boats', 'stars');
+    if (tier >= 3) L.push('ticks', 'swarm');
+    if (tier >= 5) L.push('beacon', 'stars');
+    return L;
+  },
+
+  /* ---------- 验证编队：拿到什么就给什么样的敌人 ---------- */
+  verifyFormation(opt, src) {
+    if (!opt || this.phase !== 'fight') return;
+    const W = this.W, p = this.player, top = this.arena.top + 60, bot = this.arena.bottom - 60, y = clamp(p.y, top + 20, bot - 20);
+    const id = opt.kind === 'link' ? SYNERGIES[opt.id].need[0] : opt.id;
+    let label = '';
+    if (id === 'pierce') { for (let i = 0; i < 7; i++) this.addEnemy('jelly', { x: W + 20 + i * 44, y, path: 'line', vx: -140 }); label = '一整列：一发穿过去'; }
+    else if (id === 'homing') { for (let i = 0; i < 8; i++) this.addEnemy('moth', { x: W + 20 + rand(0, 200), y: rand(top, bot), path: 'sine', vx: -120, amp: 30, freq: 1.5, phase: i }); label = '四散的敌人：子弹会拐弯'; }
+    else if (id === 'multi') { for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: W + 20 + (i % 2) * 30, y: clamp(y + (i - 2.5) * 30, top, bot), path: 'line', vx: -130 }); label = '一面墙：几路子弹一起扫'; }
+    else if (id === 'bomb') { for (let i = 0; i < 10; i++) this.addEnemy('moth', { x: W + 30 + rand(-30, 30), y: clamp(y + rand(-50, 50), top, bot), path: 'line', vx: -120 }); label = '挤成一团：一炸一片'; }
+    else { this.spawnFormation('swarm'); label = '一群蛾子：试试新支援'; }
+    // 刚拿到打厚甲的能力：再来一只单独的厚甲怪，看看现在几秒能敲碎
+    if ((src === 'wind' || src === 'armor') && this.goal && this.goal.kind === 'armor1') { this.later(1.2, () => { if (this.phase === 'fight') { this.addArmor({ x: W + 60, ty: clamp(p.y + 90, top, bot) }); this.text('再来一只：看看现在几秒敲碎', W * 0.72, clamp(p.y + 30, top, bot), '#e6ecff', 17, 4); } }); }
+    if (label) this.text(`试试看 · ${label}`, W * 0.68, clamp(y - 70, top, bot), '#fff3c8', 17, 4);
+  },
+
+  /* ---------- 入场方式 ---------- */
+  entrance(from, type, o = {}, n = 1, delay = 0) {
+    if (delay > 0) { const G = this.goal; if (G && o.goal) G.pendingT = (G.pendingT || 0) + 1; this.later(delay, () => { if (G && o.goal) G.pendingT--; this.entrance(from, type, o, n, 0); }); return; }
+    const W = this.W, mid = (this.arena.top + this.arena.bottom) / 2, ty = o.ty !== undefined ? o.ty : mid, tx = o.tx || W * 0.74;
+    const make = (mode, P, base) => {
+      const e = type === 'cmdr' ? null : this.addIncoming(type, Object.assign({ path: 'hold', tx, ty, bob: 36, fire: 'slow', fireT: rand(1.6, 2.4) }, base || {}), mode, P);
+      if (e && o.goal) this.addTarget(e);
+      return e;
+    };
+    if (type === 'cmdr') { // 带队精英：从岩壁裂口 / 前方带着两队护卫出场
+      const tr = from === 'crack' && this.traces.crack;
+      const c = this.spawnCommander(tr ? { x: tr.x, y: tr.y } : {});
+      this.addTarget(c);
+      if (tr) { c.x = tr.x; c.y = tr.y; this.text('裂口里钻出了带队精英', tr.x, tr.y + (tr.side < 0 ? 70 : -60), '#ffb2a8', 18, 4); }
+      return;
+    }
+    switch (from) {
+      case 'shell': this.props.push({ kind: 'shell', x: W + 120, y: ty, tx, t: 0, st: 'in', goal: o.goal }); this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
+      case 'rift': this.openRift(Math.max(W * 0.6, this.player.x + 340), ty, type === 'armor' && this.goal && this.goal.kind === 'armor1' ? ['moth', 'moth', 'moth', 'moth', 'moth', 'armor'] : [type], { goal: o.goal, tx, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
+      case 'rear': this.rearChase(1, null, { type, goal: o.goal, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
+      case 'drop': {
+        const side = (this.D.dropSide = -this.D.dropSide), x = rand(W * 0.62, W * 0.8); // 上下交替，一次只从一边进，不会同时封死
+        this.props.push({ kind: 'drop', side, x, t: 0, warn: 1.0, spawn: () => make('drop', { x0: x + 60, y0: side < 0 ? TOP - 50 : BOTTOM + 50, x1: tx, y1: ty, dur: 0.9 }) });
+        if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1;
+        break;
+      }
+      case 'crack': {
+        const tr = this.traces.crack;
+        if (tr) make('emerge', { x0: tr.x, y0: tr.y, x1: tx, y1: ty, dur: 1.1 });
+        else make('push', { x0: tx + 40, y0: ty - 20, x1: tx, y1: ty, dur: 1.4 });
+        break;
+      }
+      case 'push': make('push', { x0: tx + 40, y0: ty - 20, x1: tx, y1: ty, dur: 1.5 }); break;
+      default: { const e = this.addArmor({ x: W + 60, tx, ty }); if (o.goal) this.addTarget(e); }
+    }
+  },
+  /* 背景推近：剪影从远处慢慢变大，越过景深线之前不会碰撞 */
+  spawnPushed(type, n) {
+    const x = rand(this.W * 0.6, this.W * 0.8), top = this.arena.top + 60, bot = this.arena.bottom - 60, y0 = rand(top + 60, bot - 60);
+    for (let i = 0; i < n; i++) {
+      const y = clamp(y0 + (i - (n - 1) / 2) * 48, top, bot);
+      this.addIncoming(type, type === 'boat' ? { path: 'line', vx: -80, fire: 'drop', fireT: rand(1, 2) } : { path: 'line', vx: -120 }, 'push', { x0: x + 20 + i * 8, y0: y - 30, x1: x + i * 30, y1: y, dur: 1.6 + i * 0.1 });
+    }
+  },
+  spawnFromTrace(tr, type, n) {
+    for (let i = 0; i < n; i++) this.addIncoming(type, { path: 'line', vx: -150 }, 'emerge', { x0: tr.x, y0: tr.y, x1: tr.x - 90 - i * 30, y1: clamp(tr.y + tr.side * -1 * (60 + i * 26), this.arena.top + 30, this.arena.bottom - 30), dur: 0.7 + i * 0.08 });
+  },
+  /* 后方追兵：左边缘先有引擎声和影子，沿看得见的弧线从飞机上方或下方绕到右前方；不要求向后射击 */
+  rearChase(n, G, one) {
+    const p = this.player, mid = (this.arena.top + this.arena.bottom) / 2, below = p.y < mid;
+    const cy = below ? this.arena.bottom - 30 : this.arena.top + 30, y0 = below ? this.arena.bottom - 90 : this.arena.top + 90;
+    const prop = { kind: 'rear', t: 0, warn: 1.3, below, y0, cy, chase: !one, spawn: null };
+    prop.spawn = () => {
+      if (one) {
+        for (let i = 0; i < 4; i++) this.later(i * 0.15, () => this.addIncoming('moth', { path: 'line', vx: -110 }, 'arc', { x0: -50, y0: y0 + i * 10, cx: p.x + 40, cy, x1: this.W * (0.62 + i * 0.04), y1: clamp(one.ty + (i - 1.5) * 50, this.arena.top + 40, this.arena.bottom - 40), dur: 1.8 }));
+        this.later(0.8, () => { const e = this.addIncoming(one.type, { path: 'hold', tx: this.W * 0.74, ty: one.ty, bob: 36, fire: 'slow', fireT: 2.5 }, 'arc', { x0: -60, y0, cx: p.x, cy, x1: this.W * 0.74, y1: one.ty, dur: 2.2 }); if (one.goal) { this.addTarget(e); if (this.goal) this.goal.pendingT--; } });
+        return;
+      }
+      for (let i = 0; i < n; i++) {
+        const ty = clamp(mid + (i - (n - 1) / 2) * 44, this.arena.top + 40, this.arena.bottom - 40);
+        this.later(i * 0.14, () => this.addIncoming('moth', { path: 'line', vx: -110, chaser: true }, 'arc', { x0: -50, y0: y0 + (i - n / 2) * 8, cx: p.x + 40, cy, x1: this.W * (0.68 + (i % 3) * 0.05), y1: ty, dur: 1.9 }));
+      }
+    };
+    this.props.push(prop);
+    Sound.sfx('engine');
+  },
+  /* 空间裂缝：远离飞机、至少 0.8 秒预警（先扭曲 → 再出轮廓）→ 吐出敌人 → 合上 */
+  openRift(x, y, types, o = {}) {
+    const p = this.player; x = Math.max(x, p.x + 320); y = clamp(y, this.arena.top + 80, this.arena.bottom - 80);
+    if (Math.abs(y - p.y) < 90 && x - p.x < 380) y = clamp(y + (y > p.y ? 120 : -120), this.arena.top + 80, this.arena.bottom - 80);
+    this.props.push({ kind: 'rift', x, y, t: 0, warn: 0.95, types: types.slice(), spitT: 0, o, chase: !!o.chase, open: 0 });
+    Sound.sfx('riftOpen', { pan: this.pan(x) });
+  },
+  riftWave(n, G) {
+    const p = this.player, top = this.arena.top + 90, bot = this.arena.bottom - 90;
+    const y = p.y < (top + bot) / 2 ? rand((top + bot) / 2 + 40, bot) : rand(top, (top + bot) / 2 - 40);
+    this.openRift(rand(this.W * 0.62, this.W * 0.8), y, Array(n).fill('moth'), { chase: true });
+  },
+  /* 地形刷怪点：沉船核心没被打碎前会一直放出蛾子 */
+  spawnWreck(G) {
+    const y = rand(this.arena.top + 120, this.arena.bottom - 120);
+    const e = this.addEnemy('wreck', { x: this.W + 120, y, path: 'wreck', tx: this.W * 0.8, ty: y, elite: false, portrait: 'wreck' });
+    this.addTarget(e); G.spawnT = 2.5;
+    this.text('沉船里有东西在发光', this.W * 0.78, y - 80, '#ff9fcf', 18, 4);
+  },
+  wreckTick(G, dt) {
+    const e = this.enemies.find((q) => q.alive && q.type === 'wreck'); if (!e || e.x > this.W - 40) return;
+    G.spawnT -= dt;
+    if (G.spawnT <= 0) { G.spawnT = 2.6; for (let i = 0; i < 2; i++) this.addIncoming('moth', { path: 'line', vx: -170 }, 'emerge', { x0: e.x - 10, y0: e.y, x1: e.x - 90, y1: clamp(e.y + (i ? 60 : -60), this.arena.top + 30, this.arena.bottom - 30), dur: 0.6 }); }
+  },
+  /* 带队精英倒下：护卫散开 + 掉出核心（完整升级仪式） */
+  cmdrDown(e) {
+    for (const q of this.enemies) if (q.alive && q.leader === e.id) { q.disband = true; q.fleeAt = q.t + 7; q.stun = 0.8; }
+    this.text('护卫散了！', e.x, e.y - 90, '#ffe38a', 22, 5);
+    this.hitStop(0.06); this.shake(0.45); this.rumble(0.8, 0.5, 140);
+    const p = this.player;
+    if (p.hp < p.maxHp) this.dropPickup('heart', e.x, e.y + 30);
+    this.dropPickup('chest', e.x, e.y - 30, { vx: -60, vy: 0 });
+    this.props.push({ kind: 'core', x: e.x, y: e.y, t: 0, v: 0 });
+  },
+
+  /* ---------- 场景道具（入场预警 / 贝壳 / 裂缝 / 核心） ---------- */
+  updateProps(dt) {
+    const p = this.player;
+    for (const P of this.props) {
+      P.t += dt;
+      switch (P.kind) {
+        case 'shell': // 破碎的场景外壳漂进来 → 裂开 → 第一只厚甲怪钻出来（前面有护卫要先清）
+          if (P.st === 'in') { P.x = smooth(P.x, P.tx + 30, 1.3, dt); if (P.t > 2.2) { P.st = 'crack'; P.t = 0; Sound.sfx('crack', { pan: this.pan(P.x) }); this.shake(0.15); } }
+          else if (P.st === 'crack' && P.t > 0.9) { // 外壳裂开：护卫先冲出来，厚甲怪躲在壳里看着
+            P.st = 'guard'; P.t = 0; Sound.sfx('crack', { pan: this.pan(P.x) });
+            P.escorts = [];
+            for (let r = 0; r < 2; r++) for (let i = 0; i < 4; i++) P.escorts.push(this.addEnemy('jelly', { x: P.x - 50 - i * 42, y: P.y + (r ? 46 : -46), path: 'line', vx: -95, escort: true }).id);
+            this.text('先清掉冲出来的护卫', P.x - 100, P.y - 100, '#ffe38a', 18, 4);
+          } else if (P.st === 'guard' && (P.t > 12 || !this.enemies.some((e) => e.alive && P.escorts.includes(e.id) && e.x > 0))) {
+            P.st = 'open'; P.t = 0; Sound.sfx('armorBreak', { pan: this.pan(P.x) }); this.shake(0.2);
+            for (let i = 0; i < 10; i++) this.part('shard', P.x, P.y, rand(-260, 120), rand(-260, 200), 0.8, rand(6, 11), pick(['#6d5fb8', '#8f82d6', '#c7d0f0']));
+            const e = this.addIncoming('armor', { path: 'hold', tx: P.tx, ty: P.y, bob: 34, fire: 'slow', fireT: 2.4 }, 'emerge', { x0: P.x, y0: P.y, x1: P.tx, y1: P.y, dur: 0.8 });
+            if (P.goal) { this.addTarget(e); this.goal.pendingT--; }
+            this.text('厚甲怪钻出来了！', P.x - 60, P.y - 100, '#e6ecff', 20, 5);
+          } else if (P.st === 'open' && P.t > 3) P.done = true;
+          if (P.st === 'open') P.x -= 40 * dt;
+          break;
+        case 'drop': if (!P.fired && P.t >= P.warn) { P.fired = true; P.spawn(); if (this.goal) this.goal.pendingT = Math.max(0, (this.goal.pendingT || 0) - 1); } if (P.t > P.warn + 1) P.done = true; break;
+        case 'rear': if (!P.fired && P.t >= P.warn) { P.fired = true; P.spawn(); } if (P.t > P.warn + 2.4) P.done = true; break;
+        case 'rift':
+          P.open = P.t < P.warn ? 0 : Math.min(1, (P.t - P.warn) / 0.3);
+          if (P.t >= P.warn && P.types.length) {
+            P.spitT -= dt;
+            if (P.spitT <= 0) {
+              P.spitT = 0.22; const type = P.types.shift(), o = P.o;
+              const base = type === 'armor' ? { path: 'hold', tx: o.tx || P.x - 60, ty: o.ty || P.y, bob: 36, fire: 'slow', fireT: 2.2 } : { path: 'line', vx: -140, chaser: !!P.chase };
+              const e = this.addIncoming(type, base, 'emerge', { x0: P.x, y0: P.y, x1: P.x - 70 - rand(0, 60), y1: clamp(P.y + rand(-80, 80), this.arena.top + 30, this.arena.bottom - 30), dur: 0.55 });
+              if (o.goal && type === 'armor') { this.addTarget(e); this.goal.pendingT--; }
+              Sound.sfx('riftSpit', { pan: this.pan(P.x), gap: 90 });
+              if (type === 'armor' && P.types.length === 0 && o.goal) P.spitT = 0; else if (P.types[0] === 'armor') P.spitT = 1.4; // 厚甲怪最后才挤出来
+            }
+          }
+          if (P.t >= P.warn && !P.types.length) { P.closeT = (P.closeT || 0) + dt; if (P.closeT > 0.8) P.done = true; }
+          break;
+        case 'core': { // 精英核心：飘到飞机前方，碰到（或 3 秒后）变成水晶转盘
+          const tx = clamp(p.x + 220, this.W * 0.35, this.W * 0.7), ty = clamp(p.y, this.arena.top + 90, this.arena.bottom - 90);
+          P.x = smooth(P.x, tx, 1.5, dt); P.y = smooth(P.y, ty, 1.5, dt);
+          if ((dist2(P.x, P.y, p.x, p.y) < 70 * 70 || P.t > 3.2) && !P.done && !this.ritual) {
+            P.done = true;
+            this.queueRitual('core', { full: true, q: 1, x: P.x, y: P.y, device: 'crystal', promise: '强化 Build' });
+            this.m.interacts++;
+          }
+          break;
+        }
+      }
+    }
+    this.props = this.props.filter((P) => !P.done);
+  },
+  drawProps(g) {
+    const t = this.t, W = this.W;
+    // 持续的场景痕迹：岩壁裂口 / 风吹开的门
+    const tr = this.traces;
+    if (tr.crack) drawCrackTrace(g, tr.crack, t);
+    if (tr.door) drawDoorTrace(g, tr.door, t);
+    for (const P of this.props) {
+      switch (P.kind) {
+        case 'shell': drawShell(g, P.x, P.y, P.st === 'crack' ? P.t / 0.9 : P.st === 'open' ? 1 : P.st === 'guard' ? 0.95 : 0, P.st === 'open' ? clamp(1 - P.t / 3, 0, 1) : 1, t, P.st === 'guard'); break;
+        case 'drop': { // 上方：云影；下方：海面鼓起
+          const u = clamp(P.t / P.warn, 0, 1), a = P.fired ? clamp(1 - (P.t - P.warn), 0, 1) : 0.4 + 0.5 * u;
+          g.save(); g.globalAlpha = a;
+          if (P.side < 0) { const gr = g.createRadialGradient(P.x, TOP, 10, P.x, TOP, 150); gr.addColorStop(0, 'rgba(10,6,30,0.75)'); gr.addColorStop(1, 'rgba(10,6,30,0)'); g.fillStyle = gr; g.fillRect(P.x - 170, TOP - 20, 340, 170); drawStepPill(g, P.x, TOP + 60, '上方来敌', '#ffb2a8', 1); }
+          else { g.fillStyle = 'rgba(160,140,255,0.35)'; g.beginPath(); g.ellipse(P.x, BOTTOM - 4, 120, 22 + u * 18, 0, Math.PI, TAU); g.fill(); g.strokeStyle = 'rgba(220,210,255,0.8)'; g.lineWidth = 2; g.stroke(); drawStepPill(g, P.x, BOTTOM - 60, '下方来敌', '#ffb2a8', 1); }
+          g.restore(); break;
+        }
+        case 'rear': { // 左边缘影子 + 看得见的绕行弧线
+          const u = clamp(P.t / P.warn, 0, 1), a = P.fired ? clamp(1 - (P.t - P.warn) / 1.5, 0, 1) : u;
+          const gr = g.createLinearGradient(0, 0, 130, 0); gr.addColorStop(0, `rgba(255,110,90,${(0.55 + Math.sin(t * 14) * 0.15) * a})`); gr.addColorStop(1, 'rgba(255,110,90,0)');
+          g.fillStyle = gr; g.fillRect(0, this.arena.top, 130, this.arena.bottom - this.arena.top);
+          if (!P.fired) for (let i = 0; i < 3; i++) { const yy = P.y0 + (i - 1) * 26; g.fillStyle = `rgba(20,10,40,${0.5 * a})`; g.beginPath(); g.ellipse(18 + Math.sin(t * 10 + i) * 4, yy, 16, 9, 0, 0, TAU); g.fill(); } // 引擎影子
+          g.save(); g.globalAlpha = a * 0.8; g.strokeStyle = '#ffb2a8'; g.lineWidth = 3; g.setLineDash([10, 10]); g.lineDashOffset = -t * 90;
+          const p = this.player; g.beginPath(); g.moveTo(0, P.y0); g.quadraticCurveTo(p.x + 40, P.cy, W * 0.72, (this.arena.top + this.arena.bottom) / 2); g.stroke(); g.setLineDash([]); g.restore();
+          if (!P.fired) drawStepPill(g, 120, P.below ? this.arena.bottom - 40 : this.arena.top + 40, '后方追兵 · 会从' + (P.below ? '下方' : '上方') + '绕到前面', '#ffb2a8', a);
+          break;
+        }
+        case 'rift': drawRift(g, P.x, P.y, P.t, P.warn, P.open, P.closeT || 0, t); break;
+        case 'core': drawCoreProp(g, P.x, P.y, t); break;
+      }
+    }
+  },
+  /* ---------- HUD 用的目标信息 ---------- */
+  goalHud() {
+    const D = this.D, G = this.goal; if (!G) return null;
+    const out = { step: this.beatIdx + 1, steps: this.plan.length, title: G.title, portrait: G.portrait, prog: null, opt: null, state: D.st };
+    if (D.st === 'reward') { const k = D.reward; out.title = REWARD_GOAL[k] || '拿奖励'; out.portrait = k; out.prog = null; out.reward = true; }
+    else if (D.st === 'adv') { out.title = '优势时间 · 用新能力扫一扫'; out.portrait = G.portrait; out.adv = true; }
+    else if (D.st === 'preview') { const nb = this.plan[this.beatIdx + 1]; out.title = nb ? `下一个：${nb.goal}` : ''; out.portrait = nb ? (nb.kind === 'surprise' ? nb.surprise : PORTRAIT_OF[nb.kind]) : G.portrait; out.next = true; out.step = this.beatIdx + 2; }
+    else {
+      const houseWait = this.mapObjs.some((o) => o.kind === 'house' && o.state === 'idle' && o.x < this.W);
+      if (G.kind === 'crowd') out.prog = { type: 'count', n: Math.min(G.n, G.total), total: G.total, need: this.m.firstSkill === null && houseWait ? (G.n >= G.total ? '还差一步：碰一下梦灯屋的铃铛' : '梦灯屋来了 · 碰一下铃铛') : null };
+      else if (G.kind === 'armor1' || G.kind === 'pack') {
+        const e = this.enemies.find((q) => q.alive && q.goal && q.type === 'armor');
+        out.prog = { type: 'count', n: G.n, total: G.total, crack: e ? (e.broken ? ARMOR.stages : e.crack || 0) : null, broken: e ? !!e.broken : false };
+        if (e && !e.broken) out.sub = ['对准它连续敲甲片', '裂开一段了 · 继续', '最后一段甲'][e.crack || 0]; else if (e) out.sub = '甲碎了 · 打核心';
+      } else if (G.kind === 'cmdr') { const e = this.enemies.find((q) => q.alive && q.type === 'cmdr'); out.prog = { type: 'hp', u: e ? e.hp / e.maxHp : 0 }; out.sub = e && e.rally > 0 ? '举旗了 · 打旗头水晶！' : '等它举旗再集中火力'; }
+      else if (G.kind === 'chase') out.prog = { type: 'count', n: Math.min(G.n, G.total), total: G.total };
+      else if (G.kind === 'spawner') { const e = this.enemies.find((q) => q.alive && q.type === 'wreck'); out.prog = { type: 'hp', u: e ? e.hp / e.maxHp : 0 }; }
+      else if (G.kind === 'surprise' && this.surprise) { out.title = this.surprise.title || G.title; out.prog = this.surprise.prog || null; out.sub = this.surprise.sub || null; }
+      const opt = this.mapObjs.find((o) => o.optional && o.state === 'idle' && !(G.kind === 'crowd' && o.kind === 'house' && this.m.firstSkill === null));
+      if (opt) out.opt = `可选 · ${REWARD_GOAL[opt.kind] || MAP_OBJECTS[opt.kind].name}`;
+    }
+    return out;
+  },
+});
+
+/* ---------- 道具的画法 ---------- */
+function drawShell(g, x, y, crack, alpha, t, peek) {
+  g.save(); g.globalAlpha = alpha; g.translate(x, y);
+  g.fillStyle = '#4a3f8f'; g.strokeStyle = PAL.ink; g.lineWidth = 3;
+  const open = crack >= 1 ? 1 : 0;
+  for (const s of [-1, 1]) { g.save(); g.rotate(s * open * 0.5); g.beginPath(); g.ellipse(0, s * 18, 70, 42, 0, s < 0 ? Math.PI : 0, s < 0 ? TAU : Math.PI); g.closePath(); g.fill(); g.stroke();
+    g.strokeStyle = '#6d5fb8'; g.lineWidth = 2; for (let i = -2; i <= 2; i++) { g.beginPath(); g.moveTo(i * 22, s * 18); g.lineTo(i * 14, s * 52); g.stroke(); } g.strokeStyle = PAL.ink; g.lineWidth = 3; g.restore(); }
+  if (peek) { g.save(); g.scale(0.8, 0.8); g.translate(0, Math.sin(t * 3) * 3); EnemyArt.armor(g, { crack: 0, armorHp: 1, armorMax: 1, seed: 1 }, t); g.restore(); }
+  if (crack > 0 && crack < 1) { g.strokeStyle = `rgba(255,243,200,${0.5 + crack * 0.5})`; g.lineWidth = 2 + crack * 2; g.beginPath(); g.moveTo(-60, 0); for (let i = 0; i < 6; i++) g.lineTo(-60 + i * 24, (i % 2 ? -8 : 8) * crack); g.stroke(); glowAt(g, 0, 0, 90, GLOW.gold, crack * 0.6); }
+  g.restore();
+}
+function drawRift(g, x, y, tt, warn, open, closeT, t) {
+  const pre = clamp(tt / (warn * 0.55), 0, 1), line = clamp((tt - warn * 0.55) / (warn * 0.45), 0, 1), close = clamp(1 - closeT / 0.8, 0, 1);
+  g.save(); g.translate(x, y);
+  // 先是背景扭曲（一圈圈的波纹），再出现裂缝轮廓
+  g.strokeStyle = `rgba(200,180,255,${0.35 * pre * close})`; g.lineWidth = 2;
+  for (let i = 0; i < 3; i++) { const r = 30 + ((t * 40 + i * 20) % 60); g.beginPath(); g.ellipse(0, 0, r * 0.6, r * 1.3, 0, 0, TAU); g.stroke(); }
+  if (line > 0) {
+    const h = 90 * line * close, w = 10 + 26 * open * close;
+    g.fillStyle = `rgba(20,8,50,${0.9 * close})`; g.beginPath(); g.moveTo(0, -h); g.quadraticCurveTo(w, 0, 0, h); g.quadraticCurveTo(-w, 0, 0, -h); g.fill();
+    g.strokeStyle = `rgba(255,159,207,${0.9 * close})`; g.lineWidth = 3; g.stroke();
+    glowAt(g, 0, 0, 80, GLOW.pink, 0.5 * close);
+  }
+  if (tt < warn) drawStepPill(g, 0, -120, '裂缝要开了', '#ff9fcf', 1);
+  g.restore();
+}
+function drawCoreProp(g, x, y, t) {
+  glowAt(g, x, y, 70, GLOW.gold, 0.7 + Math.sin(t * 8) * 0.2);
+  g.save(); g.translate(x, y); g.rotate(t * 1.5);
+  g.fillStyle = '#fff3c8'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
+  g.beginPath(); g.moveTo(0, -22); g.lineTo(16, 0); g.lineTo(0, 22); g.lineTo(-16, 0); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = '#ffd76a'; g.beginPath(); g.moveTo(0, -11); g.lineTo(8, 0); g.lineTo(0, 11); g.lineTo(-8, 0); g.closePath(); g.fill();
+  g.restore();
+  drawStepPill(g, x, y - 48, '精英核心 · 碰一下', '#ffd76a', 1);
+}
+function drawCrackTrace(g, c, t) {
+  g.save(); g.translate(c.x, c.y);
+  const s = c.side; // -1 顶部岩壁 / 1 底部岩壁
+  g.fillStyle = '#231a4f'; g.beginPath(); g.moveTo(-90, 0); g.lineTo(-60, -s * 30); g.lineTo(-20, -s * 12); g.lineTo(10, -s * 44); g.lineTo(50, -s * 16); g.lineTo(90, 0); g.lineTo(90, s * 80); g.lineTo(-90, s * 80); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(10,4,30,0.95)'; g.beginPath(); g.ellipse(0, -s * 4, 36, 18, 0, 0, TAU); g.fill();
+  glowAt(g, 0, -s * 4, 50, GLOW.purple, 0.45 + Math.sin(t * 3) * 0.1);
+  g.strokeStyle = 'rgba(201,168,255,0.8)'; g.lineWidth = 2; g.beginPath(); g.ellipse(0, -s * 4, 36, 18, 0, 0, TAU); g.stroke();
+  g.restore();
+}
+function drawDoorTrace(g, d, t) {
+  g.save(); g.translate(d.x, d.y); g.globalAlpha = 0.9;
+  glowAt(g, 0, 0, 70, GLOW.cyan, 0.4 + Math.sin(t * 2) * 0.1);
+  g.fillStyle = 'rgba(30,24,80,0.9)'; g.strokeStyle = '#9fe3f0'; g.lineWidth = 2.5;
+  g.beginPath(); g.moveTo(-26, 34); g.lineTo(-26, -10); g.quadraticCurveTo(0, -44, 26, -10); g.lineTo(26, 34); g.closePath(); g.fill(); g.stroke();
+  g.restore();
+}

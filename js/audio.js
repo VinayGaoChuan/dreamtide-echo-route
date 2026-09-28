@@ -2,12 +2,14 @@
 /* 梦潮：回声航线 — WebAudio: four-layer procedural music (环境/节奏/紧张/演奏) and synthesized SFX */
 
 const Sound = (() => {
-  let ctx = null, master, comp, musicBus, sfxBus, musicFilter, lfo, lfoGain, delay, delayFb, delayWet, revIn, noiseBuf;
+  let ctx = null, master, comp, musicBus, sfxBus, duckBus, bus, musicFilter, lfo, lfoGain, delay, delayFb, delayWet, revIn, noiseBuf;
   const layer = {}, level = { ambient: 0, rhythm: 0, tension: 0, perf: 0 };
   const cfg = { music: 0.7, sfx: 0.8, muted: false };
   let mode = 'silent', bpm = 92, step = 0, bar = 0, nextTime = 0, timer = null;
   let prog = 'dream', boost = { tension: 0, perf: 0 }, mods = {}, reverse = false;
   const throttle = {};
+  let focusOn = false, duckUntil = 0; const recent = [];
+  const LOW = new Set(['kill', 'shoot', 'dust', 'hit', 'clink', 'explode', 'spawnPink', 'spawnBlue', 'spawnGold', 'zap', 'freeze', 'shatter']); // 可以被压掉的碎声
   const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
   const PROGS = {
@@ -57,6 +59,7 @@ const Sound = (() => {
     musicBus = ctx.createGain(); sfxBus = ctx.createGain();
     musicFilter = ctx.createBiquadFilter(); musicFilter.type = 'lowpass'; musicFilter.frequency.value = 12000; musicFilter.Q.value = 0.5;
     musicFilter.connect(musicBus); musicBus.connect(master); sfxBus.connect(master);
+    duckBus = ctx.createGain(); duckBus.connect(sfxBus); bus = sfxBus; // 奖励焦点时战场音效走 duckBus 被压低
     // slow LFO on the music filter (the 潮汐 card deepens it)
     lfo = ctx.createOscillator(); lfo.frequency.value = 0.18; lfoGain = ctx.createGain(); lfoGain.gain.value = 0;
     lfo.connect(lfoGain); lfoGain.connect(musicFilter.frequency); lfo.start();
@@ -93,7 +96,8 @@ const Sound = (() => {
     if (!ctx) return;
     const t = ctx.currentTime;
     master.gain.setTargetAtTime(cfg.muted ? 0 : 0.9, t, 0.05);
-    musicBus.gain.setTargetAtTime(cfg.music * 0.8, t, 0.1);
+    musicBus.gain.setTargetAtTime(cfg.music * 0.8 * (focusOn ? 0.4 : 1), t, 0.1);
+    if (duckBus) duckBus.gain.setTargetAtTime(focusOn ? 0.22 : 1, t, 0.08);
     sfxBus.gain.setTargetAtTime(cfg.sfx, t, 0.05);
   }
   function configure(s) { cfg.music = s.music; cfg.sfx = s.sfx; cfg.muted = s.muted; applyVolumes(); }
@@ -253,7 +257,7 @@ const Sound = (() => {
     let node = g;
     if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; g.connect(f); node = f; }
     if (o.pan && ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = clamp(o.pan, -1, 1); node.connect(p); node = p; }
-    osc.connect(g); node.connect(o.dest || sfxBus); osc.start(t); osc.stop(t + o.dur + 0.05);
+    osc.connect(g); node.connect(o.dest || bus || sfxBus); osc.start(t); osc.stop(t + o.dur + 0.05);
   }
   function noise(o) {
     const t = (o.t || ctx.currentTime) + (o.delay || 0);
@@ -264,18 +268,47 @@ const Sound = (() => {
     g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(o.vol || 0.2, t + a); g.gain.exponentialRampToValueAtTime(0.0005, t + o.dur);
     let node = g;
     if (o.pan && ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = clamp(o.pan, -1, 1); g.connect(p); node = p; }
-    s.connect(f); f.connect(g); node.connect(o.dest || sfxBus); s.start(t, Math.random() * 0.4, o.dur + 0.05);
+    s.connect(f); f.connect(g); node.connect(o.dest || bus || sfxBus); s.start(t, Math.random() * 0.4, o.dur + 0.05);
   }
 
   const SFX = {
     shoot: (o) => tone({ f: 1500 + rand(200), f2: 900, dur: 0.05, vol: 0.035, type: 'triangle', pan: o.pan }),
     shootHeavy: (o) => { noise({ f: 900, f2: 3200, q: 0.8, dur: 0.16, vol: 0.13, pan: o.pan }); tone({ f: 420, f2: 700, dur: 0.12, vol: 0.05, type: 'triangle' }); },
     arrow: (o) => { noise({ f: 2400, f2: 900, q: 2, dur: 0.18, vol: 0.08, pan: o.pan }); tone({ f: 880, f2: 1320, dur: 0.1, vol: 0.04 }); },
-    bellnote: (o) => bell(ctx.currentTime, 84 + randi(0, 2) * 3, 0.1, sfxBus),
-    boomNote: () => { bell(ctx.currentTime, 79, 0.14, sfxBus); noise({ f: 500, f2: 120, q: 0.7, dur: 0.25, vol: 0.12 }); },
+    bellnote: (o) => bell(ctx.currentTime, 84 + randi(0, 2) * 3, 0.1, bus),
+    boomNote: () => { bell(ctx.currentTime, 79, 0.14, bus); noise({ f: 500, f2: 120, q: 0.7, dur: 0.25, vol: 0.12 }); },
     hit: (o) => tone({ f: 660 + rand(120), f2: 400, dur: 0.05, vol: 0.05, type: 'square', lp: 2400, pan: o.pan }),
     armor: (o) => tone({ f: 1800, f2: 1400, dur: 0.04, vol: 0.035, type: 'triangle', pan: o.pan }),
-    kill: (o) => { tone({ f: 520, f2: 180, dur: 0.12, vol: 0.12, type: 'triangle', pan: o.pan }); bell(ctx.currentTime + 0.02, 88 + randi(0, 3) * 2, 0.08, sfxBus); },
+    kill: (o) => { const k = o.k || 0; tone({ f: 620 * Math.pow(2, k / 12), f2: 220, dur: 0.07, vol: 0.1, type: 'triangle', pan: o.pan }); noise({ f: 2600 + k * 200, f2: 1200, q: 1.2, dur: 0.05, vol: 0.05, pan: o.pan }); }, // 短促的碎裂声，连杀音高上升（最多 +6 半音）
+    clink: (o) => { const k = o.k || 0; tone({ f: 2400 + k * 300 + rand(200), f2: 1800, dur: 0.05, vol: 0.06, type: 'triangle', pan: o.pan }); tone({ f: 5200 + rand(400), dur: 0.03, vol: 0.025, pan: o.pan }); },
+    crack: (o) => { noise({ f: 3000, f2: 1200, q: 2, dur: 0.1, vol: 0.12, pan: o.pan }); tone({ f: 900, f2: 500, dur: 0.08, vol: 0.06, type: 'square', lp: 2600, pan: o.pan }); },
+    armorBreak: (o) => { tone({ f: 110, f2: 45, dur: 0.35, vol: 0.32, type: 'sine', pan: o.pan }); noise({ f: 1400, f2: 300, q: 0.7, dur: 0.3, vol: 0.2, pan: o.pan }); tone({ f: 1600, f2: 900, dur: 0.12, vol: 0.07, type: 'triangle', delay: 0.02 }); },
+    armorKill: (o) => { const k = o.k || 0; tone({ f: 700 + k * 60, f2: 200, dur: 0.14, vol: 0.14, type: 'triangle', pan: o.pan }); bell(ctx.currentTime + 0.02, 83 + k, 0.12, bus); },
+    eliteKill: (o) => { tone({ f: 90, f2: 40, dur: 0.5, vol: 0.34, type: 'sine' }); noise({ f: 800, f2: 120, q: 0.5, dur: 0.45, vol: 0.22, ft: 'lowpass', pan: o.pan }); const t = ctx.currentTime; [81, 86, 90].forEach((m, i) => bell(t + 0.05 + i * 0.05, m, 0.16, bus)); },
+    goalDone: () => { const t = ctx.currentTime; [74, 81, 86, 93].forEach((m, i) => bell(t + i * 0.06, m, 0.22, bus)); tone({ f: 220, f2: 440, dur: 0.5, vol: 0.1, type: 'triangle' }); },
+    ritualTrigger: () => { const t = ctx.currentTime; bell(t, 86, 0.2, bus); tone({ f: 400, f2: 1200, dur: 0.3, vol: 0.08 }); },
+    transform: () => { noise({ f: 300, f2: 2400, q: 0.6, dur: 0.7, vol: 0.12, a: 0.2 }); tone({ f: 180, f2: 520, dur: 0.7, vol: 0.1, type: 'triangle' }); },
+    rollTick: (o) => tone({ f: 1400 + (o.k || 0) * 600, dur: 0.025, vol: 0.05, type: 'square', lp: 3000 }),
+    qualityUp: (o) => { const t = ctx.currentTime, k = o.k || 1; [74, 78, 81, 86, 90].slice(0, 3 + k).forEach((m, i) => bell(t + i * 0.05, m + k * 5, 0.22, bus)); noise({ f: 2000, f2: 8000, q: 0.5, dur: 0.4, vol: 0.1, ft: 'highpass' }); tone({ f: 110 * k, f2: 220 * k, dur: 0.4, vol: 0.12, type: 'triangle' }); },
+    flyIn: () => { noise({ f: 1200, f2: 5000, q: 0.8, dur: 0.45, vol: 0.08, a: 0.2 }); tone({ f: 600, f2: 1400, dur: 0.45, vol: 0.06 }); },
+    slotLand: () => { bell(ctx.currentTime, 88, 0.22, bus); tone({ f: 160, f2: 80, dur: 0.18, vol: 0.14, type: 'sine' }); },
+    engine: () => { tone({ f: 70, f2: 140, dur: 1.2, vol: 0.18, type: 'sawtooth', lp: 400, a: 0.6 }); noise({ f: 200, f2: 600, q: 0.8, dur: 1.2, vol: 0.1, a: 0.6, pan: -0.9 }); },
+    riftOpen: (o) => { tone({ f: 1200, f2: 200, dur: 0.9, vol: 0.1, type: 'sine', pan: o.pan }); noise({ f: 4000, f2: 400, q: 1, dur: 0.9, vol: 0.08, pan: o.pan }); },
+    riftSpit: (o) => tone({ f: 300, f2: 900, dur: 0.1, vol: 0.06, type: 'triangle', pan: o.pan }),
+    bell: () => { const t = ctx.currentTime; bell(t, 88, 0.26, bus); bell(t + 0.12, 93, 0.2, bus); },
+    hook: (o) => { tone({ f: 500, f2: 1100, dur: 0.12, vol: 0.08, type: 'triangle', pan: o.pan }); bell(ctx.currentTime + 0.05, 86, 0.14, bus); },
+    coreFly: (o) => tone({ f: 400, f2: 1600, dur: 0.35, vol: 0.1, pan: o.pan }),
+    wallBreak: () => { noise({ f: 400, f2: 60, q: 0.4, dur: 1.0, vol: 0.35, ft: 'lowpass' }); tone({ f: 70, f2: 30, dur: 0.9, vol: 0.3, type: 'sine' }); const t = ctx.currentTime; [69, 74, 81].forEach((m, i) => bell(t + 0.2 + i * 0.08, m, 0.16, bus)); },
+    podHit: (o) => tone({ f: 800, f2: 300, dur: 0.15, vol: 0.12, type: 'square', lp: 1800, pan: o.pan }),
+    houseShot: (o) => { bell(ctx.currentTime, 84, 0.12, bus); tone({ f: 900, f2: 1600, dur: 0.1, vol: 0.05, pan: o.pan }); },
+    wind: (o) => noise({ f: 300, f2: 2400, q: 0.4, dur: 1.4, vol: 0.2, a: 0.3, pan: o.pan }),
+    moonBlink: () => { tone({ f: 2000, f2: 1200, dur: 0.12, vol: 0.05 }); bell(ctx.currentTime + 0.1, 79, 0.12, bus); },
+    moonDetach: () => { tone({ f: 300, f2: 80, dur: 2, vol: 0.22, type: 'sine', a: 0.5 }); noise({ f: 200, f2: 2000, q: 0.4, dur: 2, vol: 0.14, a: 1 }); },
+    moonBreak: () => { noise({ f: 300, f2: 50, q: 0.4, dur: 1.6, vol: 0.4, ft: 'lowpass' }); const t = ctx.currentTime; [93, 90, 86, 81, 74].forEach((m, i) => bell(t + i * 0.09, m, 0.2, bus)); },
+    bite: () => { noise({ f: 800, f2: 200, q: 1, dur: 0.2, vol: 0.18 }); tone({ f: 200, f2: 90, dur: 0.2, vol: 0.14, type: 'square', lp: 900 }); },
+    peel: () => { noise({ f: 3000, f2: 800, q: 1.2, dur: 0.6, vol: 0.12 }); tone({ f: 600, f2: 1200, dur: 0.4, vol: 0.06 }); },
+    houseWake: () => { tone({ f: 90, f2: 140, dur: 1.0, vol: 0.24, type: 'sawtooth', lp: 600 }); const t = ctx.currentTime; [60, 63, 67].forEach((m, i) => bell(t + i * 0.15, m, 0.16, bus)); },
+    ultEnd: () => { const t = ctx.currentTime; [74, 81, 86].forEach((m, i) => bell(t + i * 0.08, m, 0.14, bus)); },
     graze: (o) => tone({ f: 2600 + rand(600), f2: 3600, dur: 0.07, vol: 0.05, type: 'sine', pan: o.pan }),
     cut: (o) => {
       noise({ f: 1400, f2: 5200, q: 0.7, dur: 0.14, vol: 0.2, pan: o.pan });
@@ -283,18 +316,18 @@ const Sound = (() => {
       tone({ f: 3100, dur: 0.25, vol: 0.05, delay: 0.05 });
     },
     swing: (o) => noise({ f: 800, f2: 2600, q: 0.6, dur: 0.12, vol: 0.1, pan: o.pan }),
-    parry: () => { bell(ctx.currentTime, 88, 0.3, sfxBus); tone({ f: 1760, f2: 2640, dur: 0.18, vol: 0.08 }); },
+    parry: () => { bell(ctx.currentTime, 88, 0.3, bus); tone({ f: 1760, f2: 2640, dur: 0.18, vol: 0.08 }); },
     parryPerfect: () => {
       const t = ctx.currentTime;
-      bell(t, 88, 0.34, sfxBus); bell(t + 0.05, 93, 0.26, sfxBus); bell(t + 0.1, 97, 0.2, sfxBus);
+      bell(t, 88, 0.34, bus); bell(t + 0.05, 93, 0.26, bus); bell(t + 0.1, 97, 0.2, bus);
       noise({ f: 5000, f2: 9000, q: 0.5, dur: 0.4, vol: 0.08, ft: 'highpass' });
     },
-    parryBlock: () => { bell(ctx.currentTime, 81, 0.2, sfxBus); },
+    parryBlock: () => { bell(ctx.currentTime, 81, 0.2, bus); },
     dash: () => { noise({ f: 600, f2: 2400, q: 0.5, dur: 0.2, vol: 0.14 }); tone({ f: 300, f2: 900, dur: 0.15, vol: 0.05 }); },
-    perfectDodge: () => { tone({ f: 1200, f2: 2400, dur: 0.25, vol: 0.1 }); bell(ctx.currentTime + 0.06, 90, 0.16, sfxBus); },
+    perfectDodge: () => { tone({ f: 1200, f2: 2400, dur: 0.25, vol: 0.1 }); bell(ctx.currentTime + 0.06, 90, 0.16, bus); },
     hurt: () => { tone({ f: 240, f2: 90, dur: 0.28, vol: 0.28, type: 'triangle' }); tone({ f: 370, f2: 150, dur: 0.22, vol: 0.12, type: 'square', lp: 1200 }); noise({ f: 600, q: 0.5, dur: 0.12, vol: 0.12 }); },
     shieldPop: () => { noise({ f: 2600, f2: 600, q: 1, dur: 0.3, vol: 0.18 }); tone({ f: 900, f2: 300, dur: 0.25, vol: 0.08, type: 'triangle' }); },
-    heart: () => { const t = ctx.currentTime; bell(t, 76, 0.2, sfxBus); bell(t + 0.08, 83, 0.18, sfxBus); },
+    heart: () => { const t = ctx.currentTime; bell(t, 76, 0.2, bus); bell(t + 0.08, 83, 0.18, bus); },
     dust: (o) => tone({ f: 1900 + rand(700), f2: 2600, dur: 0.06, vol: 0.035, pan: o.pan }),
     bubble: (o) => { tone({ f: 500, f2: 1400, dur: 0.1, vol: 0.09, pan: o.pan }); tone({ f: 900, f2: 1900, dur: 0.08, vol: 0.05, delay: 0.05 }); },
     warn: (o) => tone({ f: 700, f2: 1400, dur: 0.35, vol: 0.05, type: 'sine', slide: 0.3, pan: o.pan }),
@@ -303,12 +336,12 @@ const Sound = (() => {
     spawnBlue: (o) => tone({ f: 1320 + rand(200), dur: 0.09, vol: 0.045, type: 'triangle', pan: o.pan }),
     spawnGold: (o) => { tone({ f: 1760, f2: 2200, dur: 0.14, vol: 0.06, pan: o.pan }); },
     goldNear: () => tone({ f: 2640, f2: 3000, dur: 0.12, vol: 0.07 }),
-    resFull: () => { const t = ctx.currentTime; [74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.05, m, 0.16, sfxBus)); },
-    perf_echo: () => { const t = ctx.currentTime; tone({ f: 1200, f2: 300, dur: 0.9, vol: 0.14, type: 'sine', slide: 0.8 }); for (let i = 0; i < 4; i++) tick(t + i * 0.18, i % 2 === 0); bell(t, 71, 0.25, sfxBus); },
-    perf_melody: () => { const t = ctx.currentTime; [74, 78, 81, 85, 88].forEach((m, i) => bell(t + i * 0.06, m, 0.2, sfxBus)); },
+    resFull: () => { const t = ctx.currentTime; [74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.05, m, 0.16, bus)); },
+    perf_echo: () => { const t = ctx.currentTime; tone({ f: 1200, f2: 300, dur: 0.9, vol: 0.14, type: 'sine', slide: 0.8 }); for (let i = 0; i < 4; i++) tick(t + i * 0.18, i % 2 === 0); bell(t, 71, 0.25, bus); },
+    perf_melody: () => { const t = ctx.currentTime; [74, 78, 81, 85, 88].forEach((m, i) => bell(t + i * 0.06, m, 0.2, bus)); },
     perf_gravity: () => { tone({ f: 200, f2: 1200, dur: 0.6, vol: 0.14, type: 'triangle', slide: 0.5 }); tone({ f: 1200, f2: 200, dur: 0.6, vol: 0.08, type: 'sine', slide: 0.5, delay: 0.1 }); },
-    perf_still: () => { noise({ f: 8000, f2: 1500, q: 0.4, dur: 0.8, vol: 0.12, ft: 'highpass' }); bell(ctx.currentTime, 93, 0.24, sfxBus); bell(ctx.currentTime + 0.12, 86, 0.2, sfxBus); },
-    perfEnd: () => { const t = ctx.currentTime; bell(t, 81, 0.14, sfxBus); bell(t + 0.1, 74, 0.12, sfxBus); tone({ f: 900, f2: 300, dur: 0.3, vol: 0.05 }); },
+    perf_still: () => { noise({ f: 8000, f2: 1500, q: 0.4, dur: 0.8, vol: 0.12, ft: 'highpass' }); bell(ctx.currentTime, 93, 0.24, bus); bell(ctx.currentTime + 0.12, 86, 0.2, bus); },
+    perfEnd: () => { const t = ctx.currentTime; bell(t, 81, 0.14, bus); bell(t + 0.1, 74, 0.12, bus); tone({ f: 900, f2: 300, dur: 0.3, vol: 0.05 }); },
     burst: () => { noise({ f: 300, f2: 2400, q: 0.5, dur: 0.45, vol: 0.2 }); tone({ f: 110, f2: 55, dur: 0.5, vol: 0.2, type: 'triangle' }); },
     phase: () => {
       const t = ctx.currentTime;
@@ -323,63 +356,71 @@ const Sound = (() => {
     ui: () => tone({ f: 1320, f2: 1760, dur: 0.06, vol: 0.06, type: 'triangle' }),
     uiBack: () => tone({ f: 1100, f2: 700, dur: 0.07, vol: 0.05, type: 'triangle' }),
     card: () => { noise({ f: 2400, f2: 5000, q: 0.8, dur: 0.12, vol: 0.06 }); },
-    select: () => { const t = ctx.currentTime; bell(t, 79, 0.18, sfxBus); bell(t + 0.07, 86, 0.16, sfxBus); },
+    select: () => { const t = ctx.currentTime; bell(t, 79, 0.18, bus); bell(t + 0.07, 86, 0.16, bus); },
     denied: () => tone({ f: 300, f2: 220, dur: 0.14, vol: 0.08, type: 'square', lp: 900 }),
-    win: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90, 93].forEach((m, i) => bell(t + i * 0.12, m, 0.22, sfxBus)); },
-    lose: () => { const t = ctx.currentTime; [81, 78, 74, 69].forEach((m, i) => bell(t + i * 0.22, m, 0.18, sfxBus)); },
-    waveClear: () => { const t = ctx.currentTime; bell(t, 81, 0.12, sfxBus); bell(t + 0.08, 86, 0.1, sfxBus); },
+    win: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90, 93].forEach((m, i) => bell(t + i * 0.12, m, 0.22, bus)); },
+    lose: () => { const t = ctx.currentTime; [81, 78, 74, 69].forEach((m, i) => bell(t + i * 0.22, m, 0.18, bus)); },
+    waveClear: () => { const t = ctx.currentTime; bell(t, 81, 0.12, bus); bell(t + 0.08, 86, 0.1, bus); },
     weakOpen: () => { tone({ f: 2400, f2: 3200, dur: 0.12, vol: 0.09 }); tone({ f: 3200, dur: 0.12, vol: 0.06, delay: 0.12 }); },
     weakHit: (o) => tone({ f: 3000 + rand(300), dur: 0.05, vol: 0.05, pan: o.pan }),
-    crystal: () => { const t = ctx.currentTime; [79, 83, 86, 91].forEach((m, i) => bell(t + i * 0.045, m, 0.18, sfxBus)); noise({ f: 6000, f2: 9000, q: 0.6, dur: 0.3, vol: 0.06, ft: 'highpass' }); },
-    levelup: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90].forEach((m, i) => bell(t + i * 0.06, m, 0.2, sfxBus)); tone({ f: 400, f2: 1600, dur: 0.4, vol: 0.08, type: 'triangle' }); },
-    synergy: () => { const t = ctx.currentTime; [62, 66, 69, 74].forEach((m) => { tone({ f: mtof(m), dur: 1.2, vol: 0.09, type: 'sawtooth', lp: 2400, a: 0.02 }); }); [86, 90, 93, 98].forEach((m, i) => bell(t + 0.1 + i * 0.07, m, 0.22, sfxBus)); noise({ f: 300, f2: 5000, q: 0.5, dur: 0.6, vol: 0.14 }); },
-    stream: () => { const t = ctx.currentTime; [62, 69, 74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.08, m, 0.24, sfxBus)); tone({ f: 110, f2: 55, dur: 1, vol: 0.25, type: 'triangle' }); },
-    streak: (o) => { const t = ctx.currentTime, k = o.k || 0; [81, 86, 90].forEach((m, i) => bell(t + i * 0.05, m + k * 2, 0.16, sfxBus)); noise({ f: 1200, f2: 4000, q: 0.5, dur: 0.25, vol: 0.1 }); },
+    crystal: () => { const t = ctx.currentTime; [79, 83, 86, 91].forEach((m, i) => bell(t + i * 0.045, m, 0.18, bus)); noise({ f: 6000, f2: 9000, q: 0.6, dur: 0.3, vol: 0.06, ft: 'highpass' }); },
+    levelup: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90].forEach((m, i) => bell(t + i * 0.06, m, 0.2, bus)); tone({ f: 400, f2: 1600, dur: 0.4, vol: 0.08, type: 'triangle' }); },
+    synergy: () => { const t = ctx.currentTime; [62, 66, 69, 74].forEach((m) => { tone({ f: mtof(m), dur: 1.2, vol: 0.09, type: 'sawtooth', lp: 2400, a: 0.02 }); }); [86, 90, 93, 98].forEach((m, i) => bell(t + 0.1 + i * 0.07, m, 0.22, bus)); noise({ f: 300, f2: 5000, q: 0.5, dur: 0.6, vol: 0.14 }); },
+    stream: () => { const t = ctx.currentTime; [62, 69, 74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.08, m, 0.24, bus)); tone({ f: 110, f2: 55, dur: 1, vol: 0.25, type: 'triangle' }); },
+    streak: (o) => { const t = ctx.currentTime, k = o.k || 0; [81, 86, 90].forEach((m, i) => bell(t + i * 0.05, m + k * 2, 0.16, bus)); noise({ f: 1200, f2: 4000, q: 0.5, dur: 0.25, vol: 0.1 }); },
     nova: () => { noise({ f: 200, f2: 3000, q: 0.5, dur: 0.4, vol: 0.2 }); tone({ f: 160, f2: 60, dur: 0.4, vol: 0.2, type: 'triangle' }); },
     burstCut: () => { noise({ f: 400, f2: 6000, q: 0.4, dur: 0.45, vol: 0.2, a: 0.2 }); tone({ f: 220, f2: 880, dur: 0.45, vol: 0.1, type: 'sawtooth', lp: 2000, a: 0.2 }); },
-    b_moon: () => { const t = ctx.currentTime; tone({ f: 330, f2: 990, dur: 0.8, vol: 0.18, type: 'triangle' }); [74, 81, 86, 93].forEach((m, i) => bell(t + i * 0.1, m, 0.2, sfxBus)); },
+    b_moon: () => { const t = ctx.currentTime; tone({ f: 330, f2: 990, dur: 0.8, vol: 0.18, type: 'triangle' }); [74, 81, 86, 93].forEach((m, i) => bell(t + i * 0.1, m, 0.2, bus)); },
     b_cloud: () => { noise({ f: 200, f2: 1200, q: 0.4, dur: 1.4, vol: 0.3, a: 0.2 }); tone({ f: 90, f2: 60, dur: 1.2, vol: 0.2, type: 'sine' }); },
-    b_candy: () => { const t = ctx.currentTime; for (let i = 0; i < 10; i++) bell(t + i * 0.07, 84 + ((i * 5) % 12), 0.12, sfxBus); },
-    b_paper: () => { const t = ctx.currentTime; for (let i = 0; i < 5; i++) noise({ f: 1500, f2: 4000, q: 1, dur: 0.15, vol: 0.12, t: t + i * 0.08 }); bell(t + 0.4, 88, 0.2, sfxBus); },
+    b_candy: () => { const t = ctx.currentTime; for (let i = 0; i < 10; i++) bell(t + i * 0.07, 84 + ((i * 5) % 12), 0.12, bus); },
+    b_paper: () => { const t = ctx.currentTime; for (let i = 0; i < 5; i++) noise({ f: 1500, f2: 4000, q: 1, dur: 0.15, vol: 0.12, t: t + i * 0.08 }); bell(t + 0.4, 88, 0.2, bus); },
     b_whale: () => { tone({ f: 800, f2: 120, dur: 1, vol: 0.2, type: 'sine', slide: 0.9 }); tone({ f: 120, f2: 60, dur: 1.6, vol: 0.28, type: 'triangle', delay: 1 }); noise({ f: 200, f2: 2400, q: 0.4, dur: 1.2, vol: 0.25, delay: 1 }); },
     b_clock: () => { const t = ctx.currentTime; for (let i = 0; i < 6; i++) tick(t + i * 0.12, i % 2 === 0); tone({ f: 1400, f2: 200, dur: 0.8, vol: 0.14, type: 'sine' }); },
     timeResume: () => { tone({ f: 200, f2: 1400, dur: 0.5, vol: 0.14, type: 'sine' }); noise({ f: 300, f2: 3000, q: 0.5, dur: 0.6, vol: 0.2 }); },
-    portal: () => { tone({ f: 300, f2: 1200, dur: 0.6, vol: 0.12, type: 'sine' }); noise({ f: 500, f2: 3000, q: 0.6, dur: 0.6, vol: 0.14, a: 0.1 }); bell(ctx.currentTime + 0.2, 86, 0.18, sfxBus); },
+    portal: () => { tone({ f: 300, f2: 1200, dur: 0.6, vol: 0.12, type: 'sine' }); noise({ f: 500, f2: 3000, q: 0.6, dur: 0.6, vol: 0.14, a: 0.1 }); bell(ctx.currentTime + 0.2, 86, 0.18, bus); },
     explode: (o) => { noise({ f: 900, f2: 120, q: 0.5, dur: 0.3, vol: 0.14 * (o.v || 1), ft: 'lowpass', pan: o.pan }); tone({ f: 140, f2: 50, dur: 0.25, vol: 0.12 * (o.v || 1), type: 'sine', pan: o.pan }); },
     zap: (o) => { noise({ f: 3000, f2: 1200, q: 3, dur: 0.12, vol: 0.08, pan: o.pan }); tone({ f: 1800 + rand(600), f2: 600, dur: 0.1, vol: 0.05, type: 'sawtooth', lp: 4000 }); },
     freeze: (o) => { noise({ f: 7000, f2: 3000, q: 1, dur: 0.18, vol: 0.06, ft: 'highpass', pan: o.pan }); tone({ f: 2400, dur: 0.12, vol: 0.04 }); },
     shatter: (o) => { noise({ f: 5000, f2: 1500, q: 0.8, dur: 0.25, vol: 0.1, pan: o.pan }); tone({ f: 3200, f2: 2000, dur: 0.15, vol: 0.05, type: 'triangle' }); },
     beam: () => { tone({ f: 600, f2: 1200, dur: 0.8, vol: 0.07, type: 'sawtooth', lp: 3000 }); tone({ f: 900, f2: 1800, dur: 0.8, vol: 0.05, type: 'triangle' }); },
-    candy: () => { const t = ctx.currentTime; bell(t, 86, 0.14, sfxBus); bell(t + 0.05, 90, 0.12, sfxBus); },
-    gold: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90, 93, 98].forEach((m, i) => bell(t + i * 0.05, m, 0.2, sfxBus)); },
-    chest: () => { const t = ctx.currentTime; noise({ f: 800, f2: 300, q: 1, dur: 0.2, vol: 0.14 }); [81, 86, 90].forEach((m, i) => bell(t + 0.1 + i * 0.06, m, 0.2, sfxBus)); },
+    candy: () => { const t = ctx.currentTime; bell(t, 86, 0.14, bus); bell(t + 0.05, 90, 0.12, bus); },
+    gold: () => { const t = ctx.currentTime; [74, 78, 81, 86, 90, 93, 98].forEach((m, i) => bell(t + i * 0.05, m, 0.2, bus)); },
+    chest: () => { const t = ctx.currentTime; noise({ f: 800, f2: 300, q: 1, dur: 0.2, vol: 0.14 }); [81, 86, 90].forEach((m, i) => bell(t + 0.1 + i * 0.06, m, 0.2, bus)); },
     gachaRoll: () => { const t = ctx.currentTime; for (let i = 0; i < 12; i++) tone({ f: 500 + i * 80, dur: 0.06, vol: 0.05, type: 'triangle', t: t + i * 0.06 }); },
     reveal: (o) => {
       const t = ctx.currentTime, r = o.r || 'N';
       const seq = { N: [74, 78, 81], R: [74, 78, 81, 86], SR: [74, 78, 81, 86, 90], SSR: [62, 69, 74, 78, 81, 86, 90, 93] }[r];
-      seq.forEach((m, i) => bell(t + i * 0.07, m, 0.22, sfxBus));
+      seq.forEach((m, i) => bell(t + i * 0.07, m, 0.22, bus));
       if (r === 'SSR' || r === 'SR') { noise({ f: 300, f2: 6000, q: 0.4, dur: 1, vol: 0.18 }); tone({ f: 110, f2: 55, dur: 1.2, vol: 0.25, type: 'triangle' }); }
     },
-    starLight: () => { const t = ctx.currentTime; bell(t, 86, 0.2, sfxBus); bell(t + 0.08, 93, 0.18, sfxBus); tone({ f: 600, f2: 1800, dur: 0.3, vol: 0.06 }); },
+    starLight: () => { const t = ctx.currentTime; bell(t, 86, 0.2, bus); bell(t + 0.08, 93, 0.18, bus); tone({ f: 600, f2: 1800, dur: 0.3, vol: 0.06 }); },
     /* v0.6 地图互动 */
-    mapNear: (o) => { const t = ctx.currentTime; bell(t, 81, 0.1, sfxBus); bell(t + 0.09, 88, 0.08, sfxBus); tone({ f: 900, f2: 1300, dur: 0.25, vol: 0.03, pan: o.pan }); },
+    mapNear: (o) => { const t = ctx.currentTime; bell(t, 81, 0.1, bus); bell(t + 0.09, 88, 0.08, bus); tone({ f: 900, f2: 1300, dur: 0.25, vol: 0.03, pan: o.pan }); },
     mapCharge: (o) => tone({ f: 500 + (o.k || 0) * 900, f2: 560 + (o.k || 0) * 900, dur: 0.07, vol: 0.035, type: 'triangle', pan: o.pan }),
-    ringPass: (o) => { const t = ctx.currentTime, k = o.k || 0; bell(t, 79 + k * 4, 0.2, sfxBus); tone({ f: 700 + k * 200, f2: 1500 + k * 300, dur: 0.18, vol: 0.05 }); },
+    ringPass: (o) => { const t = ctx.currentTime, k = o.k || 0; bell(t, 79 + k * 4, 0.2, bus); tone({ f: 700 + k * 200, f2: 1500 + k * 300, dur: 0.18, vol: 0.05 }); },
     spin: () => { const t = ctx.currentTime; for (let i = 0; i < 9; i++) tone({ f: 1400 - i * 60, dur: 0.03, vol: 0.05, type: 'square', lp: 2600, delay: i * (0.05 + i * 0.012) }); },
-    mapDone: () => { const t = ctx.currentTime; [69, 74, 78, 81, 86, 90].forEach((m, i) => bell(t + i * 0.055, m, 0.2, sfxBus)); noise({ f: 400, f2: 4000, q: 0.5, dur: 0.5, vol: 0.12, a: 0.1 }); },
-    bridge: () => { const t = ctx.currentTime; [62, 66, 69, 74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.07, m, 0.2, sfxBus)); tone({ f: 220, f2: 440, dur: 0.9, vol: 0.12, type: 'triangle' }); },
-    rescue: () => { const t = ctx.currentTime; noise({ f: 2600, f2: 900, q: 1, dur: 0.2, vol: 0.12 }); [78, 83, 86, 90].forEach((m, i) => bell(t + 0.1 + i * 0.08, m, 0.2, sfxBus)); },
-    giantWake: () => { tone({ f: 70, f2: 110, dur: 1.6, vol: 0.3, type: 'sine', a: 0.4 }); tone({ f: 140, f2: 220, dur: 1.4, vol: 0.12, type: 'triangle', a: 0.5 }); const t = ctx.currentTime; [57, 64, 69].forEach((m, i) => bell(t + 0.5 + i * 0.18, m, 0.2, sfxBus)); },
+    mapDone: () => { const t = ctx.currentTime; [69, 74, 78, 81, 86, 90].forEach((m, i) => bell(t + i * 0.055, m, 0.2, bus)); noise({ f: 400, f2: 4000, q: 0.5, dur: 0.5, vol: 0.12, a: 0.1 }); },
+    bridge: () => { const t = ctx.currentTime; [62, 66, 69, 74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.07, m, 0.2, bus)); tone({ f: 220, f2: 440, dur: 0.9, vol: 0.12, type: 'triangle' }); },
+    rescue: () => { const t = ctx.currentTime; noise({ f: 2600, f2: 900, q: 1, dur: 0.2, vol: 0.12 }); [78, 83, 86, 90].forEach((m, i) => bell(t + 0.1 + i * 0.08, m, 0.2, bus)); },
+    giantWake: () => { tone({ f: 70, f2: 110, dur: 1.6, vol: 0.3, type: 'sine', a: 0.4 }); tone({ f: 140, f2: 220, dur: 1.4, vol: 0.12, type: 'triangle', a: 0.5 }); const t = ctx.currentTime; [57, 64, 69].forEach((m, i) => bell(t + 0.5 + i * 0.18, m, 0.2, bus)); },
   };
 
   function sfx(name, o = {}) {
     if (!ctx || ctx.state !== 'running' || cfg.muted) return;
     const now = performance.now(), gap = o.gap !== undefined ? o.gap : 28;
     if (throttle[name] && now - throttle[name] < gap) return;
-    throttle[name] = now;
+    // 分层与上限：破甲 / 终结 / 受击优先，短时间内压掉碎声；同屏声部最多 10 个碎声
+    if (LOW.has(name) && now < duckUntil) return;
+    while (recent.length && now - recent[0] > 60) recent.shift();
+    if (LOW.has(name) && recent.length >= 10) return;
+    recent.push(now); throttle[name] = now;
+    if (o.prio) duckUntil = now + 140;
     const fn = SFX[name];
+    bus = focusOn && !o.ui && duckBus ? duckBus : sfxBus;
     if (fn) { try { fn(o); } catch (e) { /* ignore a dropped voice */ } }
+    bus = sfxBus;
   }
+  function focus(on) { if (focusOn === !!on) return; focusOn = !!on; applyVolumes(); }
 
-  return { init, configure, setMode, setBoost, setBpm, setCardMods, sfx, get ready() { return !!ctx; }, get mode() { return mode; } };
+  return { init, configure, setMode, setBoost, setBpm, setCardMods, sfx, focus, get ready() { return !!ctx; }, get mode() { return mode; } };
 })();

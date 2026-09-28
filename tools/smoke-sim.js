@@ -19,42 +19,41 @@ const ctx = {
   navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
 };
 ctx.globalThis = ctx; vm.createContext(ctx);
-for (const f of ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'mapfx', 'offers', 'boss', 'captain']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
+for (const f of ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
 const R = (code) => vm.runInContext(code, ctx);
 R(`
 var settings = DEFAULT_SETTINGS();
 function pilot(w) {
   const p = w.player, mid = (TOP + BOTTOM) / 2; let tx = w.W * 0.22, ty = mid, busy = false;
-  // 子弹只会直飞：默认对准前方最近敌人的高度
-  let best = null, bd = 1e9; for (const e of w.enemies) { if (!e.alive || e.x < p.x + 30 || e.x > w.W) continue; const d = e.x - p.x + Math.abs(e.y - p.y) * 0.6; if (d < bd) { bd = d; best = e; } }
+  // 子弹只会直飞：优先对准主目标（带队精英举旗时更优先），否则对准前方最近敌人的高度
+  let best = null, bd = 1e9;
+  for (const e of w.enemies) { if (!e.alive || e.x < p.x + 30 || e.x > w.W) continue; const d = e.x - p.x + Math.abs(e.y - p.y) * 0.6 - (e.goal ? 260 : 0) - (e.type === 'cmdr' && e.rally > 0 ? 300 : 0) - (e.guarded ? -400 : 0); if (d < bd) { bd = d; best = e; } }
   if (best) ty = best.y;
-  const k = w.pickups.find((q) => q.kind === 'gold' || q.kind === 'chest' || q.kind === 'heart'); if (k) { tx = Math.max(k.x - 10, w.W * 0.15); ty = k.y; busy = true; }
-  if (w.portals.length) { const q = w.portals.find((q) => q.type === 'boss') || w.portals[(w.segIdx + w.pilotPick) % w.portals.length]; tx = Math.min(q.x, w.W * 0.6); ty = q.y; busy = true; }
-  const mo = w.mapObjs.find((o) => o.state === 'idle' && (o.kind === 'bridge' ? o.rings.some((q) => !q.lit && q.x < w.W) : o.x < w.W + 40));
-  if (mo && !w.portals.length) {
-    const c = w.mapCenter(mo); busy = true;
-    if (mo.kind === 'bridge') { const q = mo.rings.find((r) => !r.lit); tx = q.x < p.x + 60 ? q.x : Math.min(q.x - 20, w.W * 0.7); ty = q.y; }
-    else if (mo.kind === 'npc') { tx = c.x + mo.ringDx; ty = c.y; }
-    else { tx = c.x - 50; ty = c.y; }
-  }
-  if (w.offer && w.offer.st === 'choose') {
+  // Boss 正面护甲：像玩家一样对准还在的甲片（没有散兵时）
+  if (w.boss && w.boss.plates && !w.enemies.some((e) => e.alive && e.bossAdd)) { const pl = w.boss.plates.find((q) => q.alive); if (pl) ty = w.boss.y + pl.dy; }
+  const k = w.pickups.find((q) => q.kind === 'gold' || q.kind === 'chest' || q.kind === 'heart'); if (k && k.x > p.x - 40) { tx = Math.max(k.x - 10, w.W * 0.15); ty = k.y; busy = true; }
+  const gt = w.guideTarget && w.guideTarget(); if (gt && !(w.ritual && w.ritual.st === 'choose')) { tx = clamp(gt.x - 6, 40, w.W * 0.8); ty = gt.y; busy = true; }
+  if (w.ritual && w.ritual.st === 'choose') {
     // 选法 0：总选第一个；选法 1：像玩家一样优先升级已有的 / 联动，不随手换掉支援
-    const gs = w.offer.gates, score = (o) => (o.kind === 'link' ? 3 : o.from > 0 ? 2 : o.replace ? -1 : 1);
+    const gs = w.ritual.gates, score = (o) => (o.kind === 'link' ? 3 : o.from > 0 ? 2 : o.replace ? -1 : 1);
     const G = w.pilotPick === 0 ? gs[0] : (score(gs[1].opt) > score(gs[0].opt) ? gs[1] : gs[0]); tx = G.x; ty = G.y; busy = true;
   }
-  let dodge = 0; if (!busy) w.bullets.each((b) => { const dx = b.x - p.x, dy = b.y - p.y; if (dx > -20 && dx < 160 && Math.abs(dy) < 50) dodge += dy > 0 ? -1 : 1; });
+  let dodge = 0; if (!busy || w.pilotDodge) w.bullets.each((b) => { const dx = b.x - p.x, dy = b.y - p.y; if (dx > -20 && dx < 160 && Math.abs(dy) < 50) dodge += dy > 0 ? -1 : 1; });
+  for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
   Input.out.mx = Math.sign(tx - p.x) * Math.min(1, Math.abs(tx - p.x) / 60); Input.out.my = dodge ? Math.sign(dodge) : Math.sign(ty - p.y) * Math.min(1, Math.abs(ty - p.y) / 40);
-  if (p.stock >= 1 && !w.offer) w.tryBurst();
+  if (p.stock >= 1 && !w.ritual) w.tryBurst();
 }
 function run(stage, plane, level, cap, pickIdx, godmode) {
   let res = null; const meta = freshMeta(); meta.shared.level = level; meta.planes[plane] = newPlaneRecord(plane);
   const w = new World({ mode: 'run', W: 1280, plane, stage, ultCap: cap, stats: planeStats(meta, plane), first: stage === '1-1' && level === 1, settings, cb: { onEnd: (r) => res = r } });
+  const goalLog = []; let lastGoal = null;
   w.pilotPick = pickIdx;
   if (godmode) { w.player.hp = w.player.maxHp = 999; }
   const STEP = 1 / 120; let t = 0, frames = 0, maxE = 0, maxB = 0, pickLog = [];
   const _apply = w.applyOption.bind(w); w.applyOption = (o) => { pickLog.push(o.kind === 'link' ? SYNERGIES[o.id].name : (SKILLS[o.id] || BURST_MODS[o.id] || { name: o.id }).name + (o.to || '')); _apply(o); };
   while (!res && t < 900) {
     pilot(w); w.step(STEP); t += STEP; __now += STEP * 1000;
+    const gk = w.goal ? w.goal.id + ':' + w.D.st : null; if (gk !== lastGoal) { lastGoal = gk; goalLog.push(gk + '@' + Math.round(w.runT)); }
     if (++frames % 6 === 0) { w.render(document.createElement('canvas').getContext('2d')); w.hud(); w.events.length = 0; }
     maxE = Math.max(maxE, w.enemies.length); maxB = Math.max(maxB, w.bullets.count());
   }
@@ -62,7 +61,7 @@ function run(stage, plane, level, cap, pickIdx, godmode) {
   const ct = m.choiceTimes || [];
   return { stage, plane, lv: level, pick: pickIdx, win: res && res.win, run: f(res ? res.runT : t), boss: f(res && res.bossTime), kill: f(m.firstKill), choice1: f(m.firstSkill), choices: ct.length, choiceAvg: f(ct.length ? ct.reduce((a, b) => a + b, 0) / ct.length : null), miss: m.offerMiss || 0,
     avgKill: f(res && res.avgKill), gap: f(m.gapMax), kills: m.kills, kpm: f(m.kills / ((res ? res.runT : t) / 60)), leaks: m.leaks, backlogs: m.backlogs || 0, hits: m.hitsTaken, bursts: m.bursts, stockIdle: f(m.stockIdle), inter: m.interacts, interMax: f(m.interactMax), maxE, maxB,
-    build: pickLog.join(' > '), stream: res && res.stream, route: m.route.join('>') };
+    noGoal: f(m.noGoalMax), breaks: m.breaks, build: pickLog.join(' > '), stream: res && res.stream, goals: goalLog.join(' '), mem: res && res.memories && res.memories.join('/') };
 }
 `);
 const show = (o) => console.log(JSON.stringify(o));

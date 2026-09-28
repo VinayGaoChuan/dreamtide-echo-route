@@ -229,7 +229,7 @@ class ClockBoss {
     const w = this.w;
     this.nextPhase = n; this.transT = 1.9; this.gen = null; this.sweep = null; this.stuck = false; this.weakT = 0; this.ringT = 1.9;
     w.clearEnemyBullets(true); w.warns = [];
-    w.shake(0.8); w.flash = Math.max(w.flash, 0.55); w.hitstop = 0.12;
+    w.shake(0.8); w.flash = Math.max(w.flash, 0.55); w.hitStop(0.06);
     Sound.sfx('phase');
     Tele.log('boss_phase_change', { to: n });
     for (let i = 0; i < 26; i++) w.part(i % 2 ? 'petal' : 'shard', this.x, this.y, rand(-380, 380), rand(-380, 200), 1.2, rand(5, 9), pick(['#ffcf7a', '#c9a8ff', '#fff3c8']));

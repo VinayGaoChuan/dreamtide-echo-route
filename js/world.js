@@ -1,6 +1,7 @@
 'use strict';
-/* 梦潮：回声航线 v0.7 — 一关 = 一次出击：战斗段 → 洞口 → 下一段 … → 本关 Boss，只在出击结束时结算。
-   主炮自动开火但固定向右、单发、命中即消失；穿透 / 追踪 / 多重 / 爆破只能在局内二选一拿到，新一局清空。 */
+/* 梦潮：回声航线 v0.8 — 一关 = 一次出击：一串主目标（普通怪群 → 厚甲怪 → 厚甲编队 → 带队精英 → 场景惊喜 → Boss），只在出击结束时结算。
+   主炮自动开火但固定向右、单发、命中即消失；穿透 / 追踪 / 多重 / 爆破只能在局内升级仪式里拿到，新一局清空。
+   目标调度见 director.js，敌人阶梯与命中反馈见 foes.js，升级仪式见 offers.js，地图互动见 mapfx.js，场景惊喜见 surprise.js。 */
 
 const LH = 720, TOP = 64, BOTTOM = LH - 22;
 const B_RADIUS = { pink: 7, blue: 6.5, gold: 8, white: 4 };
@@ -38,7 +39,7 @@ class World {
     this.expColors = (expC && expC.colors) || this.P.colors.exp;
     const trC = COSMETICS.trail.find((c) => c.id === cos.trail) || COSMETICS.trail[0];
     this.trailColors = trC.colors; this.trailId = trC.id;
-    this.scene = o.scene || new SeaScene(); this.scene.speed = 90; this.scene.dir = 1; this.scene.dim = this.mode === 'run' ? 1 : 0;
+    this.scene = o.scene || new SeaScene(); this.scene.speed = 90; this.scene.dir = 1; this.scene.dim = this.mode === 'run' ? 1 : 0; this.scene.moonFx = null;
     this.low = this.settings.particles === 'low';
     this.diff = { warnBonus: 0.1 }; // 大众向：Boss 预警统一多给 0.1 秒
     this.t = 0; this.runT = 0; this.state = 'play'; this.phase = 'fight';
@@ -48,7 +49,7 @@ class World {
     this.bullets = new Pool(() => ({ on: false }), 420);
     this.shots = new Pool(() => ({ on: false }), 520);
     this.parts = new Pool(() => ({ on: false }), this.low ? 360 : 1100);
-    this.enemies = []; this.pickups = []; this.portals = []; this.arcs = []; this.beams = []; this.rings = []; this.walls = [];
+    this.enemies = []; this.incoming = []; this.pickups = []; this.portals = []; this.surprise = null; this.lastStop = -9; this.burstKills = []; this.arcs = []; this.beams = []; this.rings = []; this.walls = [];
     this.warns = []; this.texts = []; this.events = []; this.timers = []; this.wingmen = [];
     this.dragDX = 0; this.dragDY = 0;
     const midY = (TOP + BOTTOM) / 2;
@@ -64,7 +65,7 @@ class World {
     this.initMap(o);
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
     if (this.mode === 'preview') this.setupPreview();
-    else this.startSegment('normal');
+    else this.initDirector();
     this.syncWingmen();
   }
   emit(type, data) { this.events.push(Object.assign({}, data || {}, { type })); } // 事件名永远不被数据里的同名字段覆盖
@@ -73,29 +74,31 @@ class World {
 
   /* ================================================== main step ================================================== */
   step(dt) {
-    if (this.hitstop > 0) { this.hitstop -= dt; return; }
+    const rit = this.ritualFocus();
+    if (this.hitstop > 0 && !rit) { this.hitstop -= dt; return; }
+    this.focusK = approach(this.focusK, rit ? 0.1 : 1, dt / 0.25); // 奖励焦点：战场慢到 0.1 倍，仪式本身按真实时间走
     if (this.slowT > 0) { this.slowT -= dt; this.timeScale = smooth(this.timeScale, 0.3, 18, dt); } else this.timeScale = smooth(this.timeScale, 1, 8, dt);
     if (this.state === 'dying') this.timeScale = 0.35;
-    const sdt = dt * this.timeScale;
+    const sdt = dt * this.timeScale * this.focusK;
     this.t += sdt;
-    if (this.state === 'play' && this.mode === 'run') this.runT += sdt;
+    if (this.state === 'play' && this.mode === 'run' && !this.ritual) this.runT += sdt; // 仪式期间关卡计时暂停
     this.trauma = Math.max(0, this.trauma - dt * 1.8);
     this.flash = Math.max(0, this.flash - dt * 2.2); this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2);
     this.arena.top = approach(this.arena.top, this.arenaTarget.top, 60 * dt); this.arena.bottom = approach(this.arena.bottom, this.arenaTarget.bottom, 60 * dt);
     this.scene.dir = this.boss && this.boss.phase === 3 ? -1 : 1;
-    this.scene.speed = this.bursting ? 30 : this.offer ? 32 : this.phase === 'portal' ? 150 : this.mapCalm ? 45 : 90;
+    this.scene.speed = this.bursting ? 30 : this.ritual ? 20 : 90;
     this.scene.update(this.timeStop > 0 ? 0 : sdt);
     for (const tm of this.timers) { tm.t -= sdt; if (tm.t <= 0 && !tm.done) { tm.done = true; tm.fn(); } }
     this.timers = this.timers.filter((tm) => !tm.done);
     if (this.timeStop > 0) { this.timeStop -= sdt; if (this.timeStop <= 0) this.endTimeStop(); }
     if (this.reverseT > 0) this.reverseT -= sdt;
 
-    this.updatePlayer(sdt);
+    this.updatePlayer(this.ritual ? dt : sdt);
     if (this.state === 'play') {
-      this.updateSkills(sdt);
-      this.updateWingmen(sdt);
+      if (!rit) this.updateSkills(sdt); // 仪式期间：支援技能 / 冷却都暂停
+      this.updateWingmen(this.ritual ? dt : sdt, rit);
       this.updateBurst(sdt);
-      if (this.mode === 'run') this.updateDirector(sdt);
+      if (this.mode === 'run') { this.updateDirector(sdt); this.updateSurprise(sdt); }
       else this.updatePreview(sdt);
       if (this.boss) { this.boss.update(sdt); if (this.bossProxy) { this.bossProxy.x = this.boss.x; this.bossProxy.y = this.boss.y; } }
       if (this.bossIntroT > 0) this.bossIntroT -= sdt;
@@ -106,22 +109,25 @@ class World {
       if (Math.random() < 0.6) this.pickups.push({ kind: 'dust', x: rand(this.W * 0.2, this.W), y: -10, vx: rand(-40, 40), vy: rand(120, 260), t: 0, value: 3, big: true, rain: true, seed: 0 });
       if (this.stateT <= 0 && !this.done) this.finish(true);
     }
+    this.updateIncoming(sdt);
     this.updateEnemies(sdt);
     this.updateBullets(sdt);
     this.updateShots(sdt);
     this.updatePickups(sdt);
     this.updateWarns(sdt);
     this.updateFx(sdt);
-    this.updateStreak(sdt);
+    if (!rit) this.updateStreak(sdt); // 连杀倒计时在仪式期间暂停
     this.updateHints();
     this.updateMap(sdt);
-    this.updateOffer(sdt);
-    if (this.mode === 'run' && this.state === 'play' && this.player.stock >= this.ultCap) this.m.stockIdle += sdt;
-    if (this.mode === 'run' && (this.phase === 'fight' || this.phase === 'portal') && this.state === 'play') {
+    this.updateRitual(dt);
+    if (this.mode === 'run' && this.state === 'play' && this.player.stock >= this.ultCap && !this.ritual) this.m.stockIdle += sdt;
+    if (this.mode === 'run' && this.phase === 'fight' && this.state === 'play') {
       // 屏幕上有敌人，或 0.4 秒内刚击破过（敌人一进屏幕边缘就被打爆也算在战斗）
-      const onScreen = this.enemies.some((e) => e.alive && !e.isBoss && e.x - e.r < this.W) || (this.recentKills.length > 0 && this.t - this.recentKills[this.recentKills.length - 1] < 0.4);
+      const onScreen = this.enemies.some((e) => e.alive && !e.isBoss && e.x - e.r < this.W) || this.incoming.length > 0 || (this.recentKills.length > 0 && this.t - this.recentKills[this.recentKills.length - 1] < 0.4);
       // 时间暂停 / 大招演出不算空档
-      if (!onScreen && this.timeStop <= 0 && !this.bursting && !this.offer && !this.mapDwell) this.m.gapT += sdt; // 选择升级 / 地图互动时刻意停刷怪，不算空档 else { this.m.gapMax = Math.max(this.m.gapMax, this.m.gapT); this.m.gapT = 0; }
+      // 选择升级 / 地图互动时刻意停刷怪，不算空档
+      if (!onScreen && this.timeStop <= 0 && !this.bursting && !this.ritual && !(this.surprise && this.surprise.busy)) this.m.gapT += sdt;
+      else { this.m.gapMax = Math.max(this.m.gapMax, this.m.gapT); this.m.gapT = 0; }
     }
   }
 
@@ -132,7 +138,9 @@ class World {
     p.blinkT -= dt; if (p.blinkT <= 0) { p.blink = 1; p.blinkT = 2 + Math.random() * 3; } p.blink = Math.max(0, p.blink - dt * 8);
     if (!p.alive) return;
     let mx = 0, my = 0;
-    if (this.mode === 'run' && this.state === 'play') { mx = I.mx; my = I.my; }
+    const lock = this.ritual && this.ritual.st !== 'choose' && this.ritual.st !== 'resume'; // 仪式里飞机稳住，只有选择阶段能动
+    if (this.mode === 'run' && this.state === 'play' && !lock) { mx = I.mx; my = I.my; }
+    if (lock) { this.dragDX = 0; this.dragDY = 0; }
     if (this.mode === 'preview') my = clamp(((TOP + BOTTOM) / 2 + Math.sin(this.t * 1.2) * 60 - p.y) / 60, -1, 1);
     const spd = 400 * this.P.speed * (I.focus && this.mode === 'run' ? 0.5 : 1);
     const ox = p.x, oy = p.y;
@@ -148,13 +156,13 @@ class World {
     if (this.mode === 'run' && Input.consume('burst')) this.tryBurst();
     p.fireT -= dt;
     const rate = this.P.rate * (p.candy > 0 ? 1.5 : 1) * (this.streak.n >= 30 ? 1.1 : 1);
-    if (this.offer && this.offer.hold && this.offer.st !== 'confirm') p.fireT = Math.max(p.fireT, 0.05); // 第一次二选一整场暂停：主炮也先停
+    if (this.ritual && this.ritual.st !== 'resume') p.fireT = Math.max(p.fireT, 0.05); // 仪式期间自动射击暂停
     else if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
     if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud') && this.mode === 'run') {
       for (const e of this.enemies) {
         if (!e.alive || e.leaving) continue;
         const rr = (e.isBoss ? 110 : e.r) + 8;
-        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { this.hurtPlayer(1); if (!e.elite && !e.isBoss && e.type !== 'mirror') this.killEnemy(e, { contact: true }); break; }
+        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { this.hurtPlayer(1); if (!e.elite && !e.isBoss && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
       }
     }
   }
@@ -199,10 +207,10 @@ class World {
   hurtPlayer(n) {
     const p = this.player;
     if (!p.alive || p.inv > 0 || this.state !== 'play' || this.mode === 'preview') return;
-    if (this.offer && this.offer.st !== 'confirm') return; // 读卡、选择升级时不会受伤
+    if (this.ritual && this.ritual.st !== 'resume') return; // 升级仪式期间不会受伤
     if (p.cloudShield) { p.cloudShield = false; p.inv = 0.8; Sound.sfx('shieldPop'); this.text('缓冲云挡住了', p.x, p.y - 40, '#dcefff', 16, 4); for (let i = 0; i < 10; i++) this.part('puff', p.x, p.y, rand(-160, 160), rand(-160, 160), 0.6, rand(8, 14), 'rgba(255,255,255,0.9)'); return; }
     p.hp -= n; p.inv = 1.4; p.hurtT = 1; this.m.hitsTaken++;
-    this.hurtFlash = 1; this.shake(0.4); this.hitstop = 0.05; Sound.sfx('hurt');
+    this.hurtFlash = 1; this.hitStop(0.05); this.rumble(0.7, 0.9, 160); Sound.sfx('hurt', { prio: true }); // 受击：红色暗角 + 顿帧 + 手柄震，不晃镜头
     for (let i = 0; i < 12; i++) this.part('dot', p.x, p.y, rand(-220, 220), rand(-220, 220), 0.45, 3.5, 'rgba(255,122,107,0.95)');
     if (this.planeId === 'cloud' && p.cloudCd <= 0 && p.hp > 0) { p.cloudShield = true; p.cloudCd = 12; this.text('缓冲云层', p.x, p.y - 44, '#dcefff', 15, 3); }
     if (p.hp <= 0) { p.hp = 0; p.alive = false; this.state = 'dying'; this.stateT = 1.6; this.slowT = 1.4; Sound.sfx('lose'); this.clearBullets(false); }
@@ -274,7 +282,7 @@ class World {
   onGunHit(s, e, hx, hy) {
     const last = s.pierce <= 0, b = this.gun.bomb;
     if (b && !e.isBoss && Math.random() < [0, 0.45, 0.6, 0.75][b]) e.mark = true;
-    this.damageEnemy(e, s.dmg, { x: hx, y: hy, src: s.from, kind: s.kind });
+    this.damageEnemy(e, s.dmg, { x: hx, y: hy, src: s.from, kind: s.kind, dir: Math.atan2(s.vy, s.vx) });
     if (s.knock && !e.isBoss && !e.elite && e.alive) e.x += s.knock;
     if (s.side && this.hasSyn('multi', 'ice') && e.alive) this.freezeEnemy(e, 0.8);
     if (s.homLv && this.hasSyn('homing', 'thunder') && Math.random() < 0.5) { const n2 = this.nearestEnemy(hx, hy, 200, new Set([e.id])); if (n2) this.zap(hx, hy, n2, 0, 8 * this.stats.dmgK); }
@@ -287,11 +295,10 @@ class World {
   }
 
   /* ================================================== enemies ================================================== */
-  addEnemy(type, o = {}) {
+  makeEnemy(type, o = {}) {
     const elite = type.endsWith('E'), base = elite ? type.slice(0, -1) : type;
-    const tier = this.seg ? this.seg.tier || 0 : 0;
-    // 关卡基础配置固定：杂兵生命只随关卡变（8 / 9 / 10），精英在关内略有成长
-    const hpK = (this.stage ? this.stage.hpK : 1) * (elite || type === 'mirror' ? 1 + tier * 0.08 : 1);
+    // 关卡基础配置固定：生命只随关卡变（×1 / ×9/8 / ×10/8），不随玩家变强偷偷加血
+    const hpK = this.stage ? this.stage.hpK : 1;
     const e = Object.assign({
       id: _eid++, type, base, elite, x: this.W + 40, y: (TOP + BOTTOM) / 2, vx: -150, vy: 0, r: ENEMY_R[type] || 20, hp: (ENEMY_HP[type] || 10) * hpK,
       t: 0, seed: rand(10), path: 'line', amp: 0, freq: 0, phase: 0, fireT: rand(1.5, 3.5), charge: 0, alive: true, hitFlash: 0, frozen: 0, stun: 0,
@@ -299,9 +306,9 @@ class World {
     }, o);
     e.maxHp = e.hp; e.y0 = e.y;
     if (this.seg && this.seg.explosive && !elite) e.explosive = true;
-    this.enemies.push(e);
     return e;
   }
+  addEnemy(type, o = {}) { const e = this.makeEnemy(type, o); this.enemies.push(e); return e; }
   spawnFormation(kind) {
     const W = this.W, tier = this.seg ? this.seg.tier : 0, top = this.arena.top + 50, bot = this.arena.bottom - 50;
     const y0 = rand(top, bot), sp = 1 + tier * 0.05;
@@ -326,7 +333,7 @@ class World {
     if (this.cb.onSeenEnemy) this.cb.onSeenEnemy(type);
   }
   updateEnemies(dt) {
-    const p = this.player, frozenWorld = this.timeStop > 0 || !!(this.offer && this.offer.hold && this.offer.st !== 'confirm'); // 第一次二选一：整场暂停
+    const p = this.player, frozenWorld = this.timeStop > 0, quiet = this.ritualFocus();
     for (const e of this.enemies) {
       if (!e.alive || e.isBoss) continue;
       e.t += dt; e.hitFlash = Math.max(0, e.hitFlash - dt * 6);
@@ -335,8 +342,9 @@ class World {
       if (e.frozen > 0) e.frozen -= dt;
       if (e.stun > 0) { e.stun -= dt; continue; }
       if (e.pull) { const a = angTo(e.x, e.y, e.pull.x, e.pull.y); e.x += Math.cos(a) * e.pull.v * dt; e.y += Math.sin(a) * e.pull.v * dt; continue; }
-      this.moveEnemy(e, dt * (e.frozen > 0 ? 0.3 : 1), p);
-      if (e.frozen <= 0 && this.mode === 'run' && this.state === 'play' && !e.fodder) this.enemyFire(e, dt, p);
+      const mdt = dt * (e.frozen > 0 ? 0.3 : 1);
+      if (!this.moveFoe(e, mdt, p)) this.moveEnemy(e, mdt, p);
+      if (e.frozen <= 0 && this.mode === 'run' && this.state === 'play' && !e.fodder && !quiet && !this.foeFire(e, dt, p)) this.enemyFire(e, dt, p); // 仪式期间敌人不发起新攻击
       if (e.life && e.t > e.life && !e.leaving) { e.leaving = true; e.vx = -320; if (e.path !== 'line') e.path = 'line'; }
       if (e.x < -80 || e.x > this.W + 400 || e.y < -120 || e.y > LH + 120) { e.alive = false; if (e.x < -80 && !e.fodder && !e.escort && this.mode === 'run') this.m.leaks++; } // 漏过只影响额外评分
     }
@@ -358,7 +366,6 @@ class World {
     }
   }
   enemyFire(e, dt, p) {
-    if (this.offer && this.offer.st !== 'confirm') return; // 选择升级时敌人不发起新攻击
     const tier = this.seg && this.seg.tier !== undefined ? this.seg.tier : 2, spd = 1 + tier * 0.05;
     e.fireT -= dt;
     const onScreen = e.x < this.W - 30 && e.x > 40;
@@ -404,6 +411,9 @@ class World {
       if (this.carnival && Math.random() < 0.02) this.dropPickup('candy', e.x - 60, e.y + rand(-80, 80));
       return;
     }
+    const sk = this.shieldK(e, o);
+    if (sk !== 1) { dmg *= sk; if (sk < 0.5) Sound.sfx('clink', { pan: this.pan(e.x), gap: 90, k: 0 }); }
+    if (e.armorHp > 0) { dmg = this.armorDamage(e, dmg, o); if (dmg <= 0) return; } // 厚甲：先敲甲，碎了多出来的伤害才打到核心
     e.hp -= dmg * (e.frozen > 0 ? 1.25 : 1); e.hitFlash = 1;
     if (e.hp <= 0) this.killEnemy(e, o);
   }
@@ -415,16 +425,22 @@ class World {
     if (this.m.firstKill === null) this.m.firstKill = this.runT;
     if (small && e.seenT !== null && !e.fodder) { this.m.killTimeSum += this.t - e.seenT; this.m.killTimeN++; }
     this.streak.n++; this.streak.t = 2.5;
-    this.addCharge(e.elite ? 0.12 : 0.0032);
-    this.fx(e.x, e.y, e.elite ? 3 : 1, e.r);
-    Sound.sfx(e.elite ? 'explode' : 'kill', { pan: this.pan(e.x), gap: 35, v: e.elite ? 1.4 : 1 });
+    const armored = e.type === 'armor';
+    this.addCharge(e.elite ? 0.12 : armored ? 0.04 : 0.0032);
+    this.killPop(e, o);
     this.recentKills.push(this.t); while (this.recentKills.length && this.t - this.recentKills[0] > 0.4) this.recentKills.shift();
+    // 击杀声：连续击杀音高慢慢升（有上限）；精英 / 厚甲有自己的终结声
+    Sound.sfx(e.elite ? 'eliteKill' : armored ? 'armorKill' : 'kill', { pan: this.pan(e.x), gap: 35, k: Math.min(6, this.recentKills.length - 1), prio: e.elite });
+    if (e.elite) { this.hitStop(0.055); this.rumble(0.8, 0.6, 140); } else if (armored) this.rumble(0.3, 0.5, 70);
+    if (this.bursting) this.burstKills.push({ x: e.x, y: e.y, key: e.elite || armored });
     if (this.recentKills.length >= 4 && this.chainCd <= 0) { this.chainCd = 0.5; this.fx(e.x, e.y, 2, 90); if (this.chainHiCd <= 0) { this.chainHiCd = 8; this.highlight(); } }
     if (e.elite) {
       this.m.elites++; this.highlight();
       for (let i = 0; i < 14; i++) this.dropPickup('dust', e.x + rand(-30, 30), e.y + rand(-30, 30), { value: 2, big: i < 4 });
-      this.addCharge(0.15); this.shake(0.5);
-    } else if (e.type === 'mirror') {
+      this.addCharge(0.15); this.shake(0.4);
+    } else if (armored) {
+      for (let i = 0; i < 4; i++) this.dropPickup('dust', e.x, e.y, { value: 1, big: i === 0 });
+    } else if (e.type === 'mirror' || e.type === 'wreck') {
       for (let i = 0; i < 6; i++) this.dropPickup('dust', e.x, e.y, { value: 2 });
     } else {
       const n = e.fodder ? 3 : e.base === 'moth' ? 2 : Math.random() < 0.6 ? 1 : 0;
@@ -449,7 +465,7 @@ class World {
     }
     if (e.clockMark && !o.clock) this.later(0.02, () => this.explode(e.x, e.y, 60 * this.stats.blastK, 40, { level: 2 }));
     this.onCompanionKill(e);
-    if (this.seg && this.seg.waveGoal && !e.fodder && !e.escort && this.phase === 'fight') this.seg.waveKills++;
+    if (this.mode === 'run' && this.onGoalEvent) this.onGoalEvent('kill', e);
     if (this.cb.onKill) this.cb.onKill(e.type);
   }
   freezeEnemy(e, s) { if (e.isBoss || !e.alive) return; if (e.frozen <= 0) Sound.sfx('freeze', { pan: this.pan(e.x), gap: 60 }); e.frozen = Math.max(e.frozen, s); }
@@ -653,15 +669,15 @@ class World {
     }
     this.wingmen.push({ x: this.player.x, y: this.player.y, fireT: rand(0.1), temp: t, burst: !!burst, orbT: 1, beamT: 2 });
   }
-  updateWingmen(dt) {
+  updateWingmen(dt, noFire) {
     const p = this.player, wl = this.lvOf('wing');
     let pi = 0, ci = 0;
     for (const w of this.wingmen) {
       if (w.temp) { w.temp -= dt; if (w.temp <= 0) { w.dead = true; this.part('shard', w.x, w.y, rand(-100, 100), rand(-100, 100), 0.5, 6, '#fff4dc'); continue; } }
       const slot = w.burst ? CLONE_SLOTS[ci++ % CLONE_SLOTS.length] : WING_SLOTS[pi++ % WING_SLOTS.length];
       w.x = smooth(w.x, p.x + slot[0], 8, dt); w.y = smooth(w.y, clamp(p.y + slot[1], this.arena.top + 10, this.arena.bottom - 10), 8, dt);
-      w.fireT -= dt;
-      if (w.fireT <= 0) {
+      if (!noFire) w.fireT -= dt;
+      if (w.fireT <= 0 && !noFire) {
         // 分身和僚机：同样固定朝前，继承已经选到的主炮改造（蜂群同步开火时追踪 +1 级）
         const sync = this.hasSyn('homing', 'wing');
         w.fireT = w.burst ? 0.12 : sync ? 1 : wl >= 5 ? 0.16 : 0.22;
@@ -677,8 +693,9 @@ class World {
 
   /* ================================================== burst (专属大招) ================================================== */
   /* 大招库存：进度满一次 = 存 1 次，最多存到容量（账号共享：1 → 2 → 3）；满了之后多余能量只变成少量本局积分 */
-  addCharge(v) {
+  addCharge(v, force) {
     if (this.mode === 'preview') return;
+    if (this.ritual && !force) return; // 仪式期间击杀不充能（仪式本身给的资源除外）
     const p = this.player;
     if (p.stock >= this.ultCap) { this.m.dust += v * 30; return; }
     p.burst += v * this.stats.chargeK * (this.bursting ? 0.5 : 1);
@@ -694,13 +711,13 @@ class World {
   }
   tryBurst() {
     const p = this.player;
-    if (this.bursting || this.state !== 'play') return;
+    if (this.bursting || this.state !== 'play' || this.ritual) return;
     if (p.stock < 1) { Sound.sfx('denied', { gap: 250 }); return; }
     p.stock--;
     this.startBurst();
   }
   startBurst() {
-    this.bursting = { stage: 'cut', t: 0 }; this.slowT = 0.5;
+    this.bursting = { stage: 'cut', t: 0 }; this.slowT = 0.5; this.burstKills = [];
     if (this.mode === 'run') { this.m.bursts++; if (this.m.firstBurst === null) this.m.firstBurst = this.runT; this.highlight(); if (this.cb.onBurst) this.cb.onBurst(); }
     Sound.sfx('burstCut'); this.emit('burst', { plane: this.planeId });
   }
@@ -709,11 +726,11 @@ class World {
     if (!B) return;
     B.t += dt;
     if (B.stage === 'cut' && B.t >= 0.5) { B.stage = 'active'; B.t = 0; this.executeBurst(); }
-    else if (B.stage === 'active' && this.updateBfx(dt)) { this.bursting = null; this.bfx = null; this.gatherRewards(); }
+    else if (B.stage === 'active' && this.updateBfx(dt)) { this.bursting = null; this.bfx = null; this.gatherRewards(); this.burstAftermath(); }
   }
   executeBurst() {
     const p = this.player, st = this.stats.stars, big = st >= 2 ? 1.22 : 1, dK = this.stats.dmgK * (st >= 5 ? 1.2 : 1);
-    Sound.sfx('b_' + this.planeId); this.shake(0.6); this.flash = Math.max(this.flash, this.settings.reduceFlash ? 0.2 : 0.55); this.flashColor = '255,250,235';
+    Sound.sfx('b_' + this.planeId, { prio: true }); this.shake(0.6); this.flash = Math.max(this.flash, 0.55 * this.flashK()); this.flashColor = '255,250,235'; this.rumble(1, 0.8, 320);
     this.fx(p.x, p.y, 4, 500);
     if (st >= 5) for (let i = 0; i < 60; i++) this.part('confetti', p.x, p.y, rand(-700, 700), rand(-700, 300), 1.6, rand(5, 9), pick(['#ffd76a', '#fff6c8', '#ffb347']));
     switch (this.planeId) {
@@ -796,6 +813,16 @@ class World {
     }
     this.shake(0.5); this.flash = 0.3; this.flashColor = '255,236,170';
   }
+  /* 大招余波：最后倒下的关键目标（精英 / 厚甲）当作收尾点，爆出战利品 */
+  burstAftermath() {
+    if (this.mode !== 'run') return;
+    const L = this.burstKills, key = L.filter((k) => k.key).pop() || L[L.length - 1];
+    Sound.sfx('ultEnd');
+    if (!key) return;
+    this.fx(key.x, key.y, 3, 110); this.hitStop(0.04);
+    for (let i = 0; i < 6; i++) this.dropPickup('dust', key.x, key.y, { value: 1, big: i < 2 });
+    this.text(L.length >= 8 ? `收尾 · 一口气 ${L.length} 个` : '收尾！', key.x, key.y - 50, '#ffe38a', 20, 5);
+  }
   gatherRewards() {
     const p = this.player;
     for (const k of this.pickups) { k.gather = { x: Math.min(this.W - 60, p.x + 110 + rand(-20, 40)), y: clamp(p.y + rand(-60, 60), TOP + 20, BOTTOM - 20) }; k.gatherT = 0.6; }
@@ -834,7 +861,7 @@ class World {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       const rr = s.r + (e.isBoss ? 100 : e.r);
-      if (dist2(e.x, e.y, s.x, s.y) < rr * rr) { if (!e.elite && !e.isBoss && e.type !== 'mirror') this.killEnemy(e, { candify: true }); boom = true; break; }
+      if (dist2(e.x, e.y, s.x, s.y) < rr * rr) { if (!e.elite && !e.isBoss && e.type !== 'mirror' && !e.armorHp && e.type !== 'wreck') this.killEnemy(e, { candify: true }); boom = true; break; }
     }
     if (boom || s.t > s.life) { s.on = false; this.explode(s.x, s.y, 55 * this.stats.blastK, s.dmg, { level: 1, fireworks: true }); }
   }
@@ -914,118 +941,14 @@ class World {
     if (ms === 100) { this.dropPickup('gold', Math.min(this.W - 100, p.x + 260), p.y, { vx: -30, vy: 0 }); this.m.streak100 = 1; }
   }
 
-  /* ================================================== director: 战斗段 / 洞口 / Boss ================================================== */
-  startSegment(type) {
-    this.segIdx++;
-    const st = this.stage, tier = this.segIdx - 1 + STAGE_ORDER.indexOf(this.stageId); // 每关起点复杂一档，关内逐段加码
-    const dur = type === 'chest' ? 20 : type === 'heal' ? 22 : this.segIdx === 1 ? st.segDur - 4 : st.segDur;
-    this.seg = { type, idx: this.segIdx, tier, t: 0, dur, budget: 2, next: null, delay: 0, backlogT: 0, eliteAt: this.segIdx >= 2 && type !== 'chest' && type !== 'heal' ? dur * 0.45 : -1, eliteDone: false, over: false, overT: 0, explosive: type === 'bomb', chests: type === 'chest' ? [3, 8, 13] : [],
-      waveGoal: this.segIdx % 2 === 0 && type !== 'chest' && type !== 'heal' ? Math.round(st.avg * 7) : 0, waveKills: 0, waveDone: false };
-    this.scheduleMap(this.seg);
-    this.phase = 'fight';
-    this.m.route.push(type); this.m.segsDone = this.segIdx - 1;
-    const cx = this.W * 0.62, cy = (TOP + BOTTOM) / 2;
-    if (type === 'skill') this.queueOffer('portal');
-    if (type === 'rare') this.queueOffer('rare', { rare: true });
-    if (type === 'heal') { this.dropPickup('heart', cx, cy - 60, { vx: -40, vy: 0 }); this.dropPickup('heart', cx, cy + 60, { vx: -40, vy: 0 }); }
-    while (this.pendingOffers > 0) { this.pendingOffers--; this.queueOffer('retry'); } // 上一段错过的奖励：在新一段开头的安全位置重现
-    this.emit('segment', { idx: this.segIdx, segType: type });
-    if (this.cb.onPortal && type !== 'normal') this.cb.onPortal(type);
-  }
-  /* 出兵节奏：常规 → 3 秒高峰 → 清理窗口，循环；选择升级和地图互动时不刷新；同屏 48 只暂停入场，积压 > 24 持续 3 秒推迟下一队 */
-  pace(S, dt) {
-    const st = this.stage, calm = S.type === 'heal' || S.type === 'chest' || S.t < (S.calmT || 0);
-    if (this.segIdx === 1 && !this.firstWave) { this.firstWave = true; for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: this.W - 80 + i * 56, y: this.player.y, path: 'sine', vx: -150, amp: 14, freq: 2.2, phase: i * 0.5 }); return; }
-    if (this.offer || this.mapDwell) return;
-    const c = (S.t + S.idx * 5) % 16;
-    let rate = c < 9 ? st.avg : c < 12 ? st.peak : st.avg * 0.35;
-    if (this.runT < 6) rate = st.avg * 0.5;
-    else if (this.runT < 30) rate = Math.min(rate, st.avg * 0.75); // 每关开头 30 秒热身：不出高峰
-    if (this.first && this.runT < 25) rate *= 0.65;
-    if (calm) rate *= 0.45;
-    let alive = 0, active = 0, onScreen = false;
-    for (const e of this.enemies) { if (!e.alive || e.isBoss) continue; alive++; if (e.x < this.W + 60) active++; if (e.x - e.r < this.W) onScreen = true; }
-    if (alive > 24) S.backlogT += dt; else S.backlogT = 0;
-    if (S.backlogT >= 3) { S.backlogT = 0; S.delay = 3; this.m.backlogs = (this.m.backlogs || 0) + 1; this.emit('backlog'); }
-    if (S.delay > 0) { S.delay -= dt; return; }
-    S.budget = Math.min(S.budget + rate * dt, 18);
-    if (active >= 48) return;
-    const kind = S.next || (S.next = pick(this.formationPool(S.tier, calm)));
-    const size = FORMATION_SIZE[kind] || 5;
-    if (S.budget >= size || (!onScreen && S.budget >= size * 0.3)) { this.spawnFormation(kind); S.budget = Math.max(0, S.budget - size); S.next = null; }
-  }
-  formationPool(tier, calm) {
-    if (calm) return ['line', 'snake', 'vee'];
-    const L = ['line', 'vee', 'snake', 'wall'];
-    if (tier >= 1) L.push('boats', 'stars');
-    if (tier >= 2) L.push('ticks', 'swarm');
-    if (tier >= 3) L.push('beacon', 'swarm');
-    if (tier >= 5) L.push('ticks', 'stars', 'beacon');
-    return L;
-  }
-  updateDirector(dt) {
-    if (this.phase === 'fight') {
-      const S = this.seg; S.t += dt;
-      if (!S.over) {
-        this.pace(S, dt);
-        if (S.eliteAt > 0 && !S.eliteDone && S.t >= S.eliteAt && !this.mapCalm && !this.offer) { S.eliteDone = true; this.spawnElite(); }
-        while (S.chests.length && S.t >= S.chests[0]) { S.chests.shift(); this.dropPickup('chest', this.W + 30, rand(TOP + 80, BOTTOM - 80), { vx: -90, vy: 0 }); }
-        this.tickMapSchedule(S);
-        if (S.waveGoal && !S.waveDone && S.waveKills >= S.waveGoal) { S.waveDone = true; this.queueOffer('wave'); this.emit('flag', { text: '清波完成 · 升级二选一', dur: 1 }); }
-        if (S.t >= S.dur && !this.offer && !this.offerQueue.length && !this.mapObjs.some((o) => o.state === 'idle' && o.engaged)) S.over = true;
-      } else {
-        S.overT += dt;
-        const fighters = this.enemies.filter((e) => e.alive && !e.leaving && !e.fodder && e.x < this.W + 40);
-        if (fighters.length === 0 || S.overT > 6) this.openPortals();
-      }
-    } else if (this.phase === 'portal') this.updatePortals(dt);
-    // 第一次二选一保证在 30 秒左右出现；首局 45 秒给一次完整大招
-    if (this.offerN === 0 && !this.offer && !this.offerQueue.length && this.runT >= 28 && this.phase === 'fight') this.queueOffer('wave');
-    if ((this.first || this.tutorial) && !this.tutorCharge && this.runT >= 45 && this.m.bursts === 0 && this.player.stock === 0) { this.tutorCharge = true; this.addStock(1); this.emit('flag', { text: '大招充满了 · 按爆发键试试', dur: 1.6 }); }
-  }
-  choosePortals() {
-    const k = this.segIdx, p = this.player;
-    if (k >= this.stage.segs) return ['boss'];
-    if (this.first && k === 1) return ['skill', 'chest'];
-    const pool = ['skill', 'rare', 'bomb', 'chest', 'skill'];
-    if (p.hp < p.maxHp) pool.push('heal', 'heal');
-    const out = [], n = k >= 3 ? 3 : 2;
-    while (out.length < n) { const t = pick(pool); if (!out.includes(t)) out.push(t); }
-    if (this.nextRare && !out.includes('rare')) out[0] = 'rare'; // 星砂矿 / 月亮兔：下一次洞口必有稀有洞
-    this.nextRare = false;
-    return out;
-  }
-  openPortals() {
-    this.phase = 'portal';
-    const types = this.choosePortals(), mid = (this.arena.top + this.arena.bottom) / 2, span = (this.arena.bottom - this.arena.top) * 0.36;
-    const ys = types.length === 1 ? [mid] : types.length === 2 ? [mid - span * 0.7, mid + span * 0.7] : [mid - span, mid, mid + span];
-    this.portals = types.map((type, i) => ({ type, x: this.W + 80, y: ys[i], r: 60, t: 0 }));
-    this.portalFodder = 0.2; this.portalT = 0;
-    this.emit('portals', { types });
-    if (this.hintStep >= 0 && this.hintStep < 9 && !this.portalHinted) { this.portalHinted = true; this.hintPortal = true; }
-  }
-  updatePortals(dt) {
-    const p = this.player;
-    this.portalT += dt; this.portalFodder -= dt;
-    if (this.portalFodder <= 0) { this.portalFodder = 0.9; this.spawnFormation('dustmoths'); }
-    for (const q of this.portals) {
-      q.t += dt; q.x -= (this.portals.length === 1 ? 170 : 210) * dt;
-      if (p.alive && dist2(q.x, q.y, p.x, p.y) < (q.r * 0.85) ** 2) { this.enterPortal(q); return; }
-    }
-    if (this.portals.length && this.portals.every((q) => q.x < p.x - 90)) this.enterPortal(this.portals[Math.floor(this.portals.length / 2)]);
-  }
-  enterPortal(q) {
-    Sound.sfx('portal'); this.flash = Math.max(this.flash, 0.3); this.flashColor = '255,255,255';
-    this.fx(q.x, q.y, 3, 120, [PORTALS[q.type].color, '#ffffff', '#ffe38a']);
-    this.portals = []; this.hintPortal = false;
-    if (q.type === 'boss') this.startBoss(); else this.startSegment(q.type);
-  }
+  /* ================================================== Boss（目标链最后一步；调度见 director.js） ================================================== */
   startBoss() {
-    this.phase = 'boss'; this.bossEarly = false; this.m.route.push('boss'); this.m.segsDone = this.segIdx;
-    this.offer = null; this.offerQueue = [];
+    this.phase = 'boss'; this.bossEarly = false; this.m.route.push('boss'); this.m.segsDone = this.beatIdx;
+    this.ritualQueue = []; this.incoming = [];
     for (const e of this.enemies) if (e.alive) { e.leaving = true; e.vx = -380; e.path = 'line'; }
     this.clearBullets(true);
-    this.seg = { type: 'boss', idx: this.segIdx, tier: Math.max(3, this.segIdx - 1), t: 0, dur: 0 };
+    this.seg = { type: 'boss', tier: Math.max(3, this.beatIdx + STAGE_ORDER.indexOf(this.stageId)), t: 0, dur: 0 };
+    this.remember(this.stage.boss === 'clock' ? '闯进了失控闹钟的钟面' : `闯过了${this.stage.bossName}的防线`, 1);
     this.boss = this.stage.boss === 'clock' ? new ClockBoss(this) : new CaptainBoss(this, this.stage.boss, this.stage.bossHp);
     this.bossIntroT = 2.8;
     this.bossProxy = { id: 'boss', isBoss: true, type: 'boss', x: this.boss.x, y: this.boss.y, r: this.boss.radius || 118, alive: true };
@@ -1061,7 +984,7 @@ class World {
     this.clearBullets(true); this.warns = [];
     this.fx(this.boss.x, this.boss.y, 5, 900);
     this.highlight(); this.victoryT = 0;
-    this.shake(1); this.flash = this.settings.reduceFlash ? 0.25 : 0.8; this.flashColor = '255,243,200';
+    this.shake(1); this.flash = 0.8 * this.flashK(); this.flashColor = '255,243,200'; this.rumble(1, 1, 400);
   }
   finish(win) {
     this.done = true; this.phase = 'end';
@@ -1071,7 +994,8 @@ class World {
     const m = this.m;
     return {
       win, plane: this.planeId, runT: this.runT, stats: m,
-      stage: this.stageId, build: this.buildSummary(), progress: win ? 1 : clamp(m.segsDone / (this.stage.segs + 1), 0, 1),
+      stage: this.stageId, build: this.buildSummary(), progress: win ? 1 : clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1),
+      memories: this.pickMemories ? this.pickMemories() : [], clue: pick(STAGE_CLUES[this.stageId] || ['']), goalTimes: (m.goalTimes || []).slice(),
       choiceAvg: m.choiceTimes.length ? m.choiceTimes.reduce((a, b) => a + b, 0) / m.choiceTimes.length : null,
       skills: [...GUN_ORDER.filter((id) => this.gun[id] > 0).map((id) => ({ id, lv: this.gun[id] })), ...(this.support ? [{ id: this.support.id, lv: this.support.ulv }] : [])],
       syns: [...this.links], stream: this.buildName(), streamId: this.topId(),
@@ -1082,7 +1006,7 @@ class World {
 
   /* ================================================== burst preview (抽卡 / 机库里的大招预览) ================================================== */
   setupPreview() {
-    this.phase = 'preview'; this.player.x = this.W * 0.2; this.previewT = 0; this.previewFired = false;
+    this.phase = 'preview'; this.player.x = this.W * 0.2; this.previewT = 0; this.previewFired = false; this.plan = []; this.D = null;
     this.seg = { tier: 0 };
     this.spawnDummies();
   }
@@ -1104,8 +1028,7 @@ class World {
     if (this.hintStep === 0 && p.moved > 220) this.hintStep = 1;
     let want = null;
     if (this.hintStep === 0) want = 'move';
-    else if (this.hintPortal) want = 'portal';
-    else if (this.offer && this.offerN === 1 && this.offer.st !== 'confirm') want = 'offer';
+    else if (this.ritual && this.ritual.first && this.ritual.st === 'choose') want = 'offer';
     else if (p.stock >= 1 && !this.bursting && this.m.bursts === 0) want = 'burst';
     if (this.hintStep >= 9) want = null;
     if (want !== this.hintShown) { this.hintShown = want; this.emit('hint', { id: want }); }
@@ -1139,7 +1062,6 @@ class World {
       this.part('flash', x, y, 0, 0, 0.3, r * 0.8, C[0]);
       for (let i = 0; i < 3; i++) this.part('ring', x, y, 0, 0, 0.45 + i * 0.12, r * (0.8 + i * 0.35), C[i % C.length]);
       for (let i = 0; i < (low ? 10 : 26); i++) this.part('confetti', x, y, rand(-480, 480), rand(-480, 300), 0.9, rand(5, 9), pick(C));
-      this.shake(0.22);
     } else if (level === 4) {
       this.part('ring', x, y, 0, 0, 0.7, r, 'rgba(255,255,255,0.95)');
       this.part('ring', x, y, 0, 0, 0.9, r * 1.4, C[0]);
@@ -1153,7 +1075,7 @@ class World {
     this.parts.each((q) => {
       q.t += dt; if (q.t >= q.life) { q.on = false; return; }
       q.x += q.vx * dt; q.y += q.vy * dt; q.rot += q.vr * dt;
-      if (q.kind === 'petal' || q.kind === 'shard' || q.kind === 'confetti') { q.vy += 420 * dt; q.vx *= 1 - dt * 1.4; }
+      if (q.kind === 'petal' || q.kind === 'shard' || q.kind === 'confetti' || q.kind === 'plate') { q.vy += (q.kind === 'plate' ? 700 : 420) * dt; q.vx *= 1 - dt * 1.4; }
       else if (q.kind === 'snow') q.vx *= 1 - dt;
       else { q.vx *= 1 - dt * 3; q.vy *= 1 - dt * 3; }
     });
@@ -1167,12 +1089,12 @@ class World {
 
   /* ================================================== HUD snapshot ================================================== */
   hud() {
-    const p = this.player, S = this.seg;
-    const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: this.ultCap, ready: p.stock >= 1 && !this.bursting,
-      gun: Object.assign({}, this.gun), support: this.support ? { id: this.support.id, lv: this.support.ulv } : null, bmod: this.bmod ? Object.assign({}, this.bmod) : null,
-      syns: [...this.links], stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(this.m.dust), companions: (this.companions || []).map((c) => c.id),
-      clearLeft: S && S.over && this.phase === 'fight' ? this.enemies.filter((e) => e.alive && !e.leaving && !e.fodder && !e.isBoss && e.x < this.W + 40).length : null, moved: this.player.moved,
-      stage: this.stageId, segs: this.stage.segs, seg: S && S.idx, segType: S && S.type, segU: S && S.dur ? clamp(S.t / S.dur, 0, 1) : 0, wave: S && S.waveGoal && !S.waveDone ? [S.waveKills, S.waveGoal] : null, phase: this.phase, candy: p.candy };
+    const p = this.player, B = this.hudBuild || this.buildSummary(); // 槽位按“已经飞进槽里”的状态显示
+    const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: this.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual,
+      gun: Object.assign({}, B.gun), support: B.support ? Object.assign({}, B.support) : null, bmod: B.bmod ? Object.assign({}, B.bmod) : null, recent: (B.recent || []).slice(),
+      syns: B.links.slice(), stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(this.m.dust), companions: (this.companions || []).map((c) => c.id),
+      moved: this.player.moved, stage: this.stageId, phase: this.phase, candy: p.candy, ritual: this.ritualFocus(),
+      goal: this.mode === 'run' && this.phase === 'fight' && this.goalHud ? this.goalHud() : null };
     if (this.boss && this.phase === 'boss') h.boss = this.boss.hudInfo();
     return h;
   }
@@ -1191,11 +1113,11 @@ class World {
       g.strokeStyle = 'rgba(255,190,150,0.55)'; g.setLineDash([10, 8]); g.lineWidth = 2; g.lineDashOffset = -t * 30;
       g.beginPath(); g.moveTo(0, this.arena.top); g.lineTo(W, this.arena.top); g.moveTo(0, this.arena.bottom); g.lineTo(W, this.arena.bottom); g.stroke(); g.setLineDash([]);
     }
-    this.drawWarns(g);
     if (this.mapObjs) this.drawMap(g);
-    for (const q of this.portals) { const a = clamp((this.W + 80 - q.x) / 120, 0, 1); drawPortal(g, q.type, q.x, q.y, q.r, t + q.y * 0.01, a); drawPortalLabel(g, q.type, q.x - q.r - 100, q.y - 8, a); }
+    if (this.surprise) this.drawSurprise(g);
     for (const w of this.walls) { g.globalCompositeOperation = 'lighter'; const gr = g.createLinearGradient(w.x - 40, 0, w.x + 10, 0); gr.addColorStop(0, 'rgba(201,168,255,0)'); gr.addColorStop(1, 'rgba(255,243,200,0.7)'); g.fillStyle = gr; g.fillRect(w.x - 40, this.arena.top, 50, this.arena.bottom - this.arena.top); g.globalCompositeOperation = 'source-over'; }
     for (const k of this.pickups) if (k.kind !== 'crystal') drawPickup(g, k, t);
+    for (const q of this.incoming) this.drawIncoming(g, q);
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.drawEnemy(g, e);
     if (this.boss) this.boss.draw(g);
     this.drawBeams(g);
@@ -1204,7 +1126,10 @@ class World {
     for (const k of this.pickups) if (k.kind === 'crystal') drawPickup(g, k, t);
     this.drawPlayer(g);
     if (this.mapObjs) this.drawMapFront(g);
-    if (this.offer) this.drawOffer(g);
+    // 装饰性的爆炸在下面，危险轮廓（预警 / 入场提示 / 敌弹）永远压在上面
+    this.drawParticles(g);
+    this.drawWarns(g);
+    if (this.props) this.drawProps(g);
     const stop = this.timeStop > 0;
     this.bullets.each((b) => {
       if (b.ghost > 0) { g.globalAlpha = 0.25 + 0.25 * Math.sin(t * 20); BulletArt.draw(g, b.type, b.x, b.y, b.type === 'blue' || b.type === 'white' ? b.rot : 0, 1, cb); g.globalAlpha = 1; return; }
@@ -1214,9 +1139,15 @@ class World {
       if (stop) { g.strokeStyle = 'rgba(255,215,106,0.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(b.x, b.y, 11, 0, TAU); g.stroke(); }
     });
     if (p.alive && this.settings.showHitbox && this.mode === 'run') { g.fillStyle = '#ffffff'; g.strokeStyle = 'rgba(255,122,107,0.95)'; g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y, 3.4, 0, TAU); g.fill(); g.stroke(); }
-    this.drawParticles(g);
     this.drawTexts(g);
     g.restore();
+    // 奖励焦点：战场去饱和、压暗；奖励装置 / 候选 / 光轨 / 飞机画在上面保持鲜艳
+    const f = clamp((1 - this.focusK) / 0.9, 0, 1);
+    if (f > 0.01) {
+      g.globalCompositeOperation = 'saturation'; g.fillStyle = `rgba(128,128,128,${0.88 * f})`; g.fillRect(0, 0, W, LH);
+      g.globalCompositeOperation = 'source-over'; g.fillStyle = `rgba(14,10,40,${0.38 * f})`; g.fillRect(0, 0, W, LH);
+    }
+    if (this.ritual) { if (f > 0.01) this.drawPlayer(g); this.drawRitual(g); }
     this.drawOverlays(g, o);
   }
   drawPlayer(g) {
@@ -1267,6 +1198,16 @@ class World {
     if (e.clockMark) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2.5; g.beginPath(); g.arc(0, 0, e.r + 10, 0, TAU); g.stroke(); g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -e.r); g.moveTo(0, 0); g.lineTo(e.r * 0.6, 0); g.stroke(); }
     g.restore();
     if (e.elite) { const w = 80, y = e.y - e.r - 26; g.fillStyle = 'rgba(14,11,40,0.75)'; g.fillRect(e.x - w / 2, y, w, 7); g.fillStyle = '#ff9d8c'; g.fillRect(e.x - w / 2, y, (w * Math.max(0, e.hp)) / e.maxHp, 7); }
+    if (e.armorMax) drawArmorPips(g, e);
+    if (e.goal && this.mode === 'run') drawGoalMark(g, e, t);
+  }
+  /* 入场中的敌人：背景推近 / 裂缝钻出时从小变大、半透明；后方绕行时带虚线轮廓，都还不能碰撞 */
+  drawIncoming(g, q) {
+    const e = q.e, d = e.depth === undefined ? 0 : e.depth, s = q.mode === 'arc' || q.mode === 'drop' ? 1 : 0.35 + 0.65 * d;
+    g.save(); g.globalAlpha = q.mode === 'arc' ? 0.7 : 0.35 + 0.6 * d; g.translate(e.x, e.y); g.scale(s, s);
+    (EnemyArt[e.type] || EnemyArt.jelly)(g, e, this.t + e.seed);
+    g.restore();
+    if (q.mode === 'arc') { g.save(); g.strokeStyle = 'rgba(255,178,168,0.8)'; g.lineWidth = 2; g.setLineDash([4, 5]); g.beginPath(); g.arc(e.x, e.y, e.r + 8, 0, TAU); g.stroke(); g.setLineDash([]); g.restore(); }
   }
   drawShot(g, s) {
     const a = Math.atan2(s.vy, s.vx), t = this.t;
@@ -1345,6 +1286,15 @@ class World {
         case 'shard': g.save(); g.translate(q.x, q.y); g.rotate(q.rot); g.globalAlpha = a; g.fillStyle = q.color; g.beginPath(); g.moveTo(q.size, 0); g.lineTo(-q.size * 0.6, -q.size * 0.5); g.lineTo(-q.size * 0.4, q.size * 0.5); g.closePath(); g.fill(); g.restore(); break;
         case 'puff': g.globalAlpha = a * 0.9; g.fillStyle = q.color; g.beginPath(); g.arc(q.x, q.y, q.size * (0.6 + u * 0.6), 0, TAU); g.fill(); g.globalAlpha = 1; break;
         case 'snow': g.globalAlpha = a; g.fillStyle = q.color; BulletArt.star(g, q.x, q.y, 3, q.size, q.size * 0.3); g.fill(); g.globalAlpha = 1; break;
+        case 'squash': { // 击杀瞬间：朝受力方向压扁的轮廓，一闪就没
+          g.save(); g.translate(q.x, q.y); g.rotate(q.rot); g.globalAlpha = a * 0.85; g.fillStyle = q.color;
+          g.beginPath(); g.ellipse(0, 0, q.size * (0.55 - u * 0.3), q.size * (1.1 + u * 0.5), 0, 0, TAU); g.fill(); g.restore(); break;
+        }
+        case 'plate': { // 破甲掉下来的大甲片
+          g.save(); g.translate(q.x, q.y); g.rotate(q.rot); g.globalAlpha = Math.min(1, a * 1.5); g.fillStyle = q.color; g.strokeStyle = PAL.ink; g.lineWidth = 2;
+          g.beginPath(); g.roundRect ? g.roundRect(-q.size / 2, -q.size * 0.4, q.size, q.size * 0.8, 5) : g.rect(-q.size / 2, -q.size * 0.4, q.size, q.size * 0.8); g.fill(); g.stroke();
+          g.fillStyle = '#5b6798'; g.beginPath(); g.arc(-q.size * 0.25, 0, 2, 0, TAU); g.arc(q.size * 0.25, 0, 2, 0, TAU); g.fill(); g.restore(); break;
+        }
       }
     });
     g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
@@ -1391,7 +1341,7 @@ class World {
       g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText(this.P.burst.name, x + 60, 20); g.fillStyle = '#ffffff'; g.fillText(this.P.burst.name, x + 60, 20);
       g.restore();
     }
-    if (this.flash > 0) { g.fillStyle = `rgba(${this.flashColor},${Math.min(reduce ? 0.14 : 0.55, this.flash * 0.6)})`; g.fillRect(0, 0, W, LH); }
+    if (this.flash > 0) { g.fillStyle = `rgba(${this.flashColor},${Math.min(0.55 * this.flashK(), this.flash * 0.6)})`; g.fillRect(0, 0, W, LH); }
     if (this.state === 'victory' && this.victoryT !== undefined) {
       const s = Ease.outBack(clamp(this.victoryT / 0.6, 0, 1));
       g.save(); g.translate(W / 2, LH * 0.42); g.scale(s, s); g.rotate(Math.sin(t * 2) * 0.05);

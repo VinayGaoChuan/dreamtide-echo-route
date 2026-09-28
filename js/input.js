@@ -97,6 +97,25 @@ const Input = (() => {
     out.mx = mx; out.my = my; out.focus = isHeld('focus') || pad.focus; out.dragging = drag.id !== null;
   }
 
+  /* 手柄短震：同一帧内的多次请求合并成一次，强度取最大（设置里可调 0 / 半 / 全） */
+  let rumbleReq = null, rumbleAt = 0;
+  function rumble(strong, weak, ms) {
+    if (device !== 'pad') return;
+    if (!rumbleReq) rumbleReq = { s: 0, w: 0, ms: 0 };
+    rumbleReq.s = Math.max(rumbleReq.s, strong); rumbleReq.w = Math.max(rumbleReq.w, weak); rumbleReq.ms = Math.max(rumbleReq.ms, ms);
+  }
+  function flushRumble(scale) {
+    const r = rumbleReq; rumbleReq = null;
+    if (!r || scale <= 0) return;
+    const now = performance.now(); if (now - rumbleAt < 60) return; rumbleAt = now;
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const p of pads) if (p && p.connected && p.vibrationActuator && p.vibrationActuator.playEffect) {
+      try { const q = p.vibrationActuator.playEffect('dual-rumble', { duration: r.ms, strongMagnitude: clamp(r.s * scale, 0, 1), weakMagnitude: clamp(r.w * scale, 0, 1) }); if (q && q.catch) q.catch(() => {}); } catch (e) { /* 不支持震动的手柄 */ }
+    }
+  }
+  let onPadLost = null;
+  window.addEventListener('gamepaddisconnected', () => { if (onPadLost) onPadLost(); });
+
   function keyLabel(code) {
     if (!code) return '—';
     const m = { Space: '空格', Escape: 'Esc', ShiftLeft: 'Shift', ShiftRight: '右Shift', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: 'Enter' };
@@ -112,7 +131,8 @@ const Input = (() => {
   }
 
   return {
-    update, consume, press, clearPresses, consumeNav, bindDrag, consumeDrag, keyLabel, hintFor, out, ACTION_NAMES, DEFAULT_BINDS,
+    update, consume, press, clearPresses, consumeNav, bindDrag, consumeDrag, keyLabel, hintFor, out, ACTION_NAMES, DEFAULT_BINDS, rumble, flushRumble,
+    set onPadLost(fn) { onPadLost = fn; },
     get device() { return device; }, get keyboardNav() { return keyboardNav; },
     set onDevice(fn) { onDevice = fn; },
     set gameActive(v) { gameActive = v; if (!v) drag.id = null; }, get gameActive() { return gameActive; },
