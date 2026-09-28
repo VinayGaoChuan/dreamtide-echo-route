@@ -15,7 +15,7 @@ const PLANES = {
   moon: {
     id: 'moon', name: '月兔号', rarity: 'N', look: '白色月灯兔', hearts: 5, speed: 1, rate: 8, dmg: 10, shot: '月牙弹',
     burst: { name: '月轮清屏', desc: '放出巨型月轮，穿过敌人后分裂成六枚小月轮四处弹射。' },
-    passive: { name: '月光回收', desc: '月轮命中敌人后回收星尘。' },
+    passive: { name: '月光回收', desc: '月轮命中敌人后回收星砂。' },
     star3: '月轮分裂数量翻倍',
     colors: { body: '#fff6ee', accent: '#ffd76a', exp: ['#fff3c8', '#c9a8ff', '#ffffff'] },
   },
@@ -42,7 +42,7 @@ const PLANES = {
   },
   whale: {
     id: 'whale', name: '星鲸号', rarity: 'SR', look: '深蓝小鲸鱼', hearts: 6, speed: 0.95, rate: 8, dmg: 10, shot: '泡泡弹',
-    burst: { name: '星尘海啸', desc: '先把屏幕里的敌人和子弹吸进来，再吐出一道星尘海啸。' },
+    burst: { name: '星砂海啸', desc: '先把屏幕里的敌人和子弹吸进来，再吐出一道星砂海啸。' },
     passive: { name: '越多越大', desc: '屏幕上敌人越多，海啸范围越大。' },
     star3: '海啸之后再追加一道小浪',
     colors: { body: '#4f63d6', accent: '#ffe38a', exp: ['#6ff0ff', '#ffe38a', '#8f9dff'] },
@@ -80,8 +80,8 @@ const SKILLS = {
     lv: ['定期扫出一道彩虹光束', '光束更宽，击败的敌人掉糖果强化', '双彩虹交叉扫射'] },
   ice: { id: 'ice', slot: 'support', name: '冰晶', stream: '冰晶', icon: 's-ice', canvas: 'snow', color: '#bff4ff', glow: 'rgba(191,244,255,0.9)', max: 3,
     lv: ['扇形冰晶，命中可能冻结', '必定冻结，冻住的敌人碎裂伤害周围', '暴风雪：定期冻结身边所有敌人'] },
-  magnet: { id: 'magnet', slot: 'support', name: '磁吸星尘', stream: '吸星', icon: 's-magnet', canvas: 'magnet', color: '#c9a8ff', glow: 'rgba(201,168,255,0.9)', max: 3,
-    lv: ['吸附变大，每吸一颗星尘射出一枚星弹', '每 6 秒一次磁暴，吸来全屏掉落物', '星尘海啸：定期掀起一道星尘浪'] },
+  magnet: { id: 'magnet', slot: 'support', name: '磁吸星砂', stream: '吸星', icon: 's-magnet', canvas: 'magnet', color: '#c9a8ff', glow: 'rgba(201,168,255,0.9)', max: 3,
+    lv: ['吸附变大，每吸一颗星砂射出一枚星弹', '每 6 秒一次磁暴，吸来全屏掉落物', '星砂海啸：定期掀起一道星尘浪'] },
 };
 const GUN_ORDER = ['pierce', 'homing', 'multi', 'bomb'];
 const SUPPORT_ORDER = ['thunder', 'wing', 'rainbow', 'ice', 'magnet'];
@@ -95,7 +95,7 @@ const BURST_MODS = {
   thunderB: { id: 'thunderB', name: '雷霆大招', icon: 's-thunder', color: '#8fd3ff', lv: ['大招时降下 8 道落雷', '落雷增加到 14 道'] },
   iceB: { id: 'iceB', name: '冰封大招', icon: 's-ice', color: '#bff4ff', lv: ['大招冻结全场敌人 1.5 秒', '冻结 3 秒，冻住的敌人碎裂'] },
   bombB: { id: 'bombB', name: '连爆大招', icon: 's-bomb', color: '#ff9a6b', lv: ['大招标记全场敌人，死亡即爆炸', '爆炸范围再大一半'] },
-  dustB: { id: 'dustB', name: '星尘回收', icon: 's-magnet', color: '#c9a8ff', lv: ['大招吸回全场星尘，返还 25% 充能', '返还 45% 充能'] },
+  dustB: { id: 'dustB', name: '星砂回收', icon: 's-magnet', color: '#c9a8ff', lv: ['大招吸回全场星砂，返还 25% 充能', '返还 45% 充能'] },
 };
 const BURST_MOD_ORDER = ['thunderB', 'iceB', 'bombB', 'dustB'];
 
@@ -107,17 +107,17 @@ const SYNERGIES = {
   'multi+ice': { name: '散射冰晶', desc: '多重的侧翼子弹命中即冻结。', need: ['multi', 'ice'], stream: '散射冰晶流' },
   'bomb+thunder': { name: '雷爆连锁', desc: '雷击会标记目标，标记爆炸再放电。', need: ['bomb', 'thunder'], stream: '雷爆流' },
   'bomb+rainbow': { name: '彩虹烟火', desc: '标记爆炸变成彩色烟火，范围 +40%。', need: ['bomb', 'rainbow'], stream: '烟火流' },
-  'multi+magnet': { name: '星尘散射', desc: '吸到星尘时一次射出三枚星弹。', need: ['multi', 'magnet'], stream: '星尘散射流' },
+  'multi+magnet': { name: '星砂散射', desc: '吸到星砂时一次射出三枚星弹。', need: ['multi', 'magnet'], stream: '星砂散射流' },
 };
 
 /* 分岔洞口：图标 + 颜色 + 运动特效，不弹说明框 */
 const PORTALS = {
-  skill: { id: 'skill', name: '技能洞', icon: 'bolt', color: '#5fb8ff', effect: '进洞后马上来一次升级二选一' },
-  rare: { id: 'rare', name: '稀有洞', icon: 'star', color: '#ffd54a', effect: '二选一的方案一次升 2 级，或直接给联动' },
-  bomb: { id: 'bomb', name: '爆破洞', icon: 'bomb', color: '#ff8a5c', effect: '这一段的敌人死亡时会爆开，星尘更多' },
-  chest: { id: 'chest', name: '宝箱洞', icon: 'chest', color: '#ffb347', effect: '宝箱给星尘、招募券碎片' },
-  heal: { id: 'heal', name: '回复洞', icon: 'heart', color: '#6fe39a', effect: '恢复生命，敌人更少' },
-  boss: { id: 'boss', name: 'Boss 门', icon: 'crown', color: '#ff5a6e', effect: '进入本关 Boss；大招库存为 0 时补到 1 次' },
+  skill: { id: 'skill', name: '技能洞', icon: 'bolt', color: '#5fb8ff', effect: '进洞后马上来一次升级二选一', short: '进洞马上升级二选一' },
+  rare: { id: 'rare', name: '稀有洞', icon: 'star', color: '#ffd54a', effect: '进洞马上来一次稀有二选一：方案一次升 2 级，或直接给联动', short: '稀有二选一 · 一次升 2 级' },
+  bomb: { id: 'bomb', name: '爆破洞', icon: 'bomb', color: '#ff8a5c', effect: '这一段的敌人死亡时会爆开，星砂更多', short: '敌人死亡会爆开 · 星砂更多' },
+  chest: { id: 'chest', name: '宝箱洞', icon: 'chest', color: '#ffb347', effect: '这一段出现 3 个宝箱：星砂 + 飞机碎片', short: '3 个宝箱：星砂 + 飞机碎片' },
+  heal: { id: 'heal', name: '回复洞', icon: 'heart', color: '#6fe39a', effect: '恢复 2 颗心，这一段敌人更少', short: '回 2 颗心 · 敌人更少' },
+  boss: { id: 'boss', name: 'Boss 门', icon: 'crown', color: '#ff5a6e', effect: '进入本关 Boss；大招库存为 0 时补到 1 次', short: '挑战本关 Boss' },
 };
 
 /* 飞机随机天赋树：解锁飞机时按种子生成一次并保存；共享等级每升一级给 1 个天赋点，默认高亮推荐节点。
@@ -130,17 +130,17 @@ const ROUTES = {
 };
 const ROUTE_ORDER = ['fire', 'blast', 'collect', 'burst'];
 const NODE_TYPES = {
-  dmg: { name: '火力', icon: 'n-fire', min: 5, max: 8, fmt: (v) => `普通攻击伤害 +${v}%`, score: 3 },
-  blast: { name: '爆炸', icon: 'n-blast', min: 12, max: 20, fmt: (v) => `爆炸范围 +${v}%`, score: 2 },
-  charge: { name: '大招充能', icon: 'n-charge', min: 10, max: 16, fmt: (v) => `大招充能速度 +${v}%`, score: 3 },
-  magnet: { name: '吸附', icon: 's-magnet', min: 25, max: 40, fmt: (v) => `掉落物吸附范围 +${v}%`, score: 1 },
-  repeat: { name: '重复', icon: 'n-repeat', min: 6, max: 10, fmt: (v) => `支援技能 ${v}% 概率再触发一次`, score: 2 },
-  heart: { name: '生命', icon: 'i-heart', min: 1, max: 1, fmt: () => '最大生命 +1', score: 3 },
-  boss: { name: 'Boss 伤害', icon: 'n-crown', min: 12, max: 20, fmt: (v) => `Boss 伤害 +${v}%`, score: 2 },
-  pierceX: { name: '穿透强化', icon: 's-pierce', min: 1, max: 1, fmt: () => '已获得穿透时：额外多命中 1 个', score: 2, needs: 'pierce' },
-  homingX: { name: '追踪强化', icon: 's-homing', min: 15, max: 15, fmt: (v) => `已获得追踪时：转向 +${v}%`, score: 2, needs: 'homing' },
-  houseFast: { name: '地图充能', icon: 'i-hangar', min: 15, max: 20, fmt: (v) => `梦灯屋 / 星砂矿充能快 ${v}%`, score: 2 },
-  npcBoost: { name: '伙伴辅助', icon: 'i-heart', min: 25, max: 35, fmt: (v) => `伙伴射击与效果 +${v}%`, score: 1 },
+  dmg: { name: '火力', icon: 'n-fire', min: 5, max: 8, fmt: (v) => `普通攻击伤害 +${v}%`, score: 3, why: '所有关卡的主炮都更快清怪' },
+  blast: { name: '爆炸', icon: 'n-blast', min: 12, max: 20, fmt: (v) => `爆炸范围 +${v}%`, score: 2, why: '爆破类改造和爆炸范围更大' },
+  charge: { name: '大招充能', icon: 'n-charge', min: 10, max: 16, fmt: (v) => `大招充能速度 +${v}%`, score: 3, why: '更早、更常放专属大招' },
+  magnet: { name: '吸附', icon: 's-magnet', min: 25, max: 40, fmt: (v) => `掉落物吸附范围 +${v}%`, score: 1, why: '捡星砂更轻松' },
+  repeat: { name: '重复', icon: 'n-repeat', min: 6, max: 10, fmt: (v) => `支援技能 ${v}% 概率再触发一次`, score: 2, why: '支援技能有概率多放一次' },
+  heart: { name: '生命', icon: 'i-heart', min: 1, max: 1, fmt: () => '最大生命 +1', score: 3, why: '多一次失误的余地' },
+  boss: { name: 'Boss 伤害', icon: 'n-crown', min: 12, max: 20, fmt: (v) => `Boss 伤害 +${v}%`, score: 2, why: '打 Boss 更快' },
+  pierceX: { name: '穿透强化', icon: 's-pierce', min: 1, max: 1, fmt: () => '已获得穿透时：额外多命中 1 个', score: 2, why: '拿到穿透后，每颗子弹多穿 1 个', needs: 'pierce' },
+  homingX: { name: '追踪强化', icon: 's-homing', min: 15, max: 15, fmt: (v) => `已获得追踪时：转向 +${v}%`, score: 2, why: '拿到追踪后转弯更快', needs: 'homing' },
+  houseFast: { name: '地图充能', icon: 'i-hangar', min: 15, max: 20, fmt: (v) => `梦灯屋 / 星砂矿充能快 ${v}%`, score: 2, why: '梦灯屋和星砂矿更快出奖励' },
+  npcBoost: { name: '伙伴辅助', icon: 'i-heart', min: 25, max: 35, fmt: (v) => `伙伴射击与效果 +${v}%`, score: 1, why: '救出的伙伴更能打' },
 };
 /* 大招容量：账号共享的固定里程碑 */
 const ULT_CAP = [{ cap: 1, need: null, text: '初始' }, { cap: 2, need: '1-1', text: '1-1 首次通关' }, { cap: 3, need: '1-3', text: '1-3 首次通关' }];
@@ -201,7 +201,7 @@ const COSMETICS = {
 
 const ENEMY_INFO = {
   jelly: { name: '泡泡水母', desc: '成排漂过来的小怪，一发就散。偶尔吐一颗粉色圆弹。' },
-  moth: { name: '梦尘蛾', desc: '成群乱飞，会掉很多星尘，是连杀的好材料。' },
+  moth: { name: '梦尘蛾', desc: '成群乱飞，会掉很多星砂，是连杀的好材料。' },
   boat: { name: '纸船灯', desc: '横渡梦海，沿途往下投粉色圆弹。' },
   tick: { name: '小闹钟', desc: '跳到位置后摇铃，炸开一圈子弹，圈上留着缝。' },
   star: { name: '星星鱼', desc: '朝你所在的高度俯冲，射出一枚金色星弹。' },
@@ -257,7 +257,7 @@ const NPC_ORDER = ['bunny', 'grandpa', 'miner', 'merchant', 'clockling'];
 /* 巨型梦境生物：可以互动的活景观 */
 const GIANTS = {
   whale: { id: 'whale', name: '睡鲸', effect: '张嘴吸走前方的敌人和弹幕' },
-  turtle: { id: 'turtle', name: '云龟', effect: '展开背甲，7 秒安全航道：靠近飞机的敌弹全部化成星尘' },
+  turtle: { id: 'turtle', name: '云龟', effect: '展开背甲，7 秒安全航道：靠近飞机的敌弹全部化成星砂' },
   deer: { id: 'deer', name: '花海鹿', effect: '撒下彩色强化花瓣：最低级技能 +1 级，射速提高 8 秒' },
   moonbunny: { id: 'moonbunny', name: '月亮兔', effect: '让下一颗技能晶体变成稀有，下一次洞口必有稀有洞' },
 };

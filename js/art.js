@@ -547,7 +547,7 @@ class SeaScene {
     for (const s of this.stars) {
       const x = ((s.x + sx) % 1600 + 1600) % 1600;
       if (x > W) continue;
-      g.globalAlpha = 0.35 + 0.35 * Math.sin(t * 1.7 + s.p); g.fillRect(x, s.y, s.s, s.s);
+      g.globalAlpha = (0.35 + 0.35 * Math.sin(t * 1.7 + s.p)) * (this.dim ? 0.45 : 1); g.fillRect(x, s.y, s.s, s.s);
     }
     g.globalAlpha = 1;
     // moon + halo (kept soft so it never outshines bullets)
@@ -602,10 +602,10 @@ class SeaScene {
       g.restore();
     }
     // dream motes & paper fragments
-    for (const m of this.motes) {
-      const x = m.x % (W + 40), y = m.y + Math.sin(t + m.p) * 10;
+    for (let mi = 0; mi < this.motes.length; mi += this.dim ? 2 : 1) { // 战斗中背景光点减半、变暗，不和敌弹抢眼
+      const m = this.motes[mi], x = m.x % (W + 40), y = m.y + Math.sin(t + m.p) * 10;
       if (m.paper) { g.save(); g.translate(x, y); g.rotate(t * 0.8 + m.p); g.fillStyle = 'rgba(235,228,255,0.3)'; g.fillRect(-4, -3, 8, 6); g.restore(); }
-      else { g.fillStyle = `rgba(201,168,255,${0.3 + 0.2 * Math.sin(t * 2 + m.p)})`; g.beginPath(); g.arc(x, y, m.s, 0, TAU); g.fill(); }
+      else { g.fillStyle = `rgba(201,168,255,${(0.3 + 0.2 * Math.sin(t * 2 + m.p)) * (this.dim ? 0.45 : 1)})`; g.beginPath(); g.arc(x, y, m.s, 0, TAU); g.fill(); }
     }
     if (!o.noForeground) this.drawForeground(g, W, H);
   }
@@ -978,7 +978,7 @@ function drawPortal(g, type, x, y, r, t, alpha = 1) {
 /* ---------- 掉落物 ---------- */
 function drawPickup(g, k, t) {
   if (k.kind === 'dust') {
-    g.globalCompositeOperation = 'lighter'; drawGlow(g, k.x, k.y, 11, k.big ? GLOW.gold : GLOW.purple, 0.95); g.globalCompositeOperation = 'source-over';
+    g.globalCompositeOperation = 'lighter'; drawGlow(g, k.x, k.y, k.big ? 11 : 8, k.big ? GLOW.gold : GLOW.purple, 0.7); g.globalCompositeOperation = 'source-over';
     g.fillStyle = k.big ? '#fff3c8' : '#efe4ff'; BulletArt.star(g, k.x, k.y, 4, k.big ? 5 : 3.5, 1.3); g.fill();
   } else if (k.kind === 'crystal') drawCrystal(g, k.skill, k.x, k.y, t + k.seed, k.rare, k.fade !== undefined ? k.fade : 1);
   else if (k.kind === 'candy') {

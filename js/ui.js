@@ -211,11 +211,20 @@ function showHub() {
   $('#hub-records', el).onclick = () => { Sound.sfx('ui'); showRecords(showHub); };
   $('#hub-settings', el).onclick = () => { Sound.sfx('ui'); showSettings(showHub); };
 }
+/* 大厅“下一步”：每次都按当前余额、成本、天赋点实时计算，不用结算时存下的旧建议 */
+function nextStep() {
+  const m = G.meta, cost = nextLevelCost(), pts = treePoints(m, m.planes[m.current]), next = nextStage(), lv = m.shared.level;
+  if (canLevelUp()) return `星尘够升级了：共享等级 Lv${lv} → Lv${lv + 1}（${cost} 星尘）`;
+  if (pts > 0) return `${PLANES[m.current].name}还有 ${pts} 个天赋点没点`;
+  if (m.tickets > 0 && Object.keys(m.planes).length < PLANE_ORDER.length) return `有 ${m.tickets} 张招募券，可以招募新飞机`;
+  return `挑战 ${next} ${STAGES[next].name}${cost !== null ? ` · 升级还差 ${Math.ceil(cost - m.stardust)} 星尘` : ''}`;
+}
 function lureRows(L) {
   const path = (L.path || []).map((id, i) => `${i ? '<span class="arrow">›</span>' : ''}<span class="chip" style="color:${(SKILLS[id] || { color: '#ffd76a' }).color}">${SKILLS[id] ? SKILLS[id].name : SYNERGIES[id] ? SYNERGIES[id].name : id}</span>`).join('');
   return `<div class="lure-row"><span class="label">本局</span><span><b>${esc(L.stream || '还没成型')}</b></span></div>
     <div class="lure-row"><span class="label">想完成</span><span class="lure-path"><b>${esc(L.buildName || '')}</b>${path}</span></div>
-    ${L.next ? `<div class="lure-row"><span class="label">下一步</span><span>${esc(L.next)}</span></div>` : ''}${L.npc ? `
+    <div class="lure-row"><span class="label">下一步</span><span>${esc(nextStep())}</span></div>${L.advice ? `
+    <div class="lure-row"><span class="label">缺什么</span><span class="advice">${L.advice}</span></div>` : ''}${L.npc ? `
     <div class="lure-row"><span class="label">想救的</span><span class="lure-npc"><canvas width="64" height="64" data-npc="${L.npc}" data-mood="sleep"></canvas>${esc(NPCS[L.npc].name)}还困在航线上</span></div>` : ''}`;
 }
 
@@ -232,8 +241,9 @@ function startRun(stageId) {
   m.records.runs++; Tele.log('run_started', { stage: stageId });
   applySettings(); clearScreens(); stopPreview();
   G.bg = 'world'; G.paused = false; G.mapHint = null; G.hintId = null;
+  G.tutorial = { on: !m.tutorialDone };
   G.world = new World({
-    mode: 'run', W: G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first, settings: m.settings, scene: G.sea, cos: m.cosmetics, seenMap: Object.keys(m.codex.map || {}),
+    mode: 'run', W: G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first, tutorial: !m.tutorialDone, settings: m.settings, scene: G.sea, cos: m.cosmetics, seenMap: Object.keys(m.codex.map || {}),
     cb: {
       onEnd: onRunEnd,
       onSkill: (sid) => { m.codex.skills[sid] = 1; },
@@ -251,10 +261,15 @@ function startRun(stageId) {
   persist();
 }
 function onRunEnd(res) {
+  if (G.world && G.world._rewarded) return; // 奖励只发一次
+  if (G.world) G.world._rewarded = true;
   const m = G.meta, st = res.stats, S = STAGES[res.stage], P = m.progress, first = !m.firstRunDone;
   const firstClear = res.win && !P.cleared[res.stage];
   // 星尘：首通约 120（1-1），重复通关 60%，失败按完成进度 30~90；另加少量本局收集
-  const dust = (res.win ? (firstClear ? S.reward : Math.round(S.reward * 0.6)) : Math.round(lerp(S.fail[0], S.fail[1], res.progress))) + Math.floor(st.dust / 100);
+  // 星尘 = 关卡奖励（首通 / 重复通关 60% / 失败按完成度）+ 本局星砂折算（每 50 星砂 = 1 星尘）
+  const base = res.win ? (firstClear ? S.reward : Math.round(S.reward * 0.6)) : Math.round(lerp(S.fail[0], S.fail[1], res.progress));
+  const sand = Math.floor(st.dust), sandStar = Math.floor(sand / 50), dust = base + sandStar, before = Math.floor(m.stardust);
+  const baseLabel = res.win ? (firstClear ? '首通奖励' : '重复通关 60%') : `完成度 ${Math.round(res.progress * 100)}%`;
   const newRescues = (res.companions || []).filter((id) => !P.rescued[id]);
   const tickets = (res.win ? (firstClear ? (res.stage === '1-1' ? 10 : 5) : 2) : 1) + newRescues.length;
   const cos = firstClear ? 1 : 0, frags = Object.assign({}, st.frags);
@@ -283,7 +298,7 @@ function onRunEnd(res) {
   const lure = makeLure(res);
   m.nextHint = lure;
   persist();
-  G.lastRes = { res, rewards: { dust, tickets, cos, frags, firstClear, capUp, newRescues, newbie: first && res.stage === '1-1' && firstClear }, lure };
+  G.lastRes = { res, rewards: { dust, base, baseLabel, sand, sandStar, before, after: Math.floor(m.stardust), tickets, cos, frags, firstClear, capUp, newRescues, newbie: first && res.stage === '1-1' && firstClear }, lure };
   showEnd(G.lastRes);
 }
 /* “下次想完成的 Build”：给一条和这局不同的成长路线（取自两条示例流派和各联动） */
@@ -297,13 +312,22 @@ const BUILD_PATHS = [
 function makeLure(res) {
   const m = G.meta, stream = res.stream;
   const opts = BUILD_PATHS.filter((b) => b.name !== stream), B = opts[(m.records.runs || 0) % opts.length];
-  const nextId = STAGE_ORDER[STAGE_ORDER.indexOf(res.stage) + 1];
-  let next = null;
-  if (res.win && nextId) next = `挑战 ${nextId} ${STAGES[nextId].name}`;
-  else if (!res.win && canLevelUp()) next = '星尘够了：先升一级再回来打';
-  else if (!res.win) next = `完成度 ${Math.round(res.progress * 100)}% · 回打更熟悉的关卡也能攒星尘`;
   const saved = new Set(res.companions || []), npc = NPC_ORDER.find((id) => !m.progress.rescued[id] && !saved.has(id)) || null;
-  return { stream, buildName: B.name, path: B.path, buildHint: B.hint, next, npc };
+  return { stream, buildName: B.name, path: B.path, buildHint: B.hint, npc, advice: buildAdvice(res.build) };
+}
+/* “缺什么”：找一个只差一样就能成立的联动，写清已有 / 缺少 / 组合效果 */
+function buildAdvice(b, now) {
+  if (!b) return '';
+  const own = (id) => (b.gun && b.gun[id] > 0) || (b.support && b.support.id === id);
+  for (const [k, L] of Object.entries(SYNERGIES)) {
+    if ((b.links || []).includes(k)) continue;
+    const [a, c] = L.need; if (own(a) === own(c)) continue;
+    const have = own(a) ? a : c, miss = own(a) ? c : a, S = SKILLS[miss];
+    const rep = S.slot === 'support' && b.support && b.support.id !== miss ? `（支援只能带一个，会替换${SKILLS[b.support.id].name}）` : '';
+    return `<b>已有</b> ${SKILLS[have].name} · <b>缺少</b> ${S.name}${rep} · <b>凑齐后</b>「${L.name}」：${L.desc}`;
+  }
+  if (!own('pierce') && !own('homing')) return `<b>${now ? '先拿' : '下局先拿'}</b> 穿透或追踪：梦灯屋的第一次二选一就会给。`;
+  return '';
 }
 function buildChips(r) {
   const b = r.build || { gun: {}, support: null, bmod: null, links: [] }, out = [];
@@ -325,14 +349,14 @@ function showEnd(E) {
   const journey = (r.journey || []).map((j) => `<span class="jchip" style="--jc:${MAP_OBJECTS[j.kind].color}" title="${esc(j.desc || '')}"><canvas width="72" height="72" ${j.kind === 'npc' ? `data-npc="${j.sub}"` : `data-map="${j.kind}"${j.sub ? ` data-sub="${j.sub}"` : ''}`}></canvas><b>${j.verb}</b>${esc(j.name)}</span>`).join('');
   const grow = cost === null ? '<p class="dim-text">共享等级已满</p>'
     : m.stardust >= cost ? `<p><b class="good">这次已攒够升级！</b> 星尘 ${Math.floor(m.stardust)} / ${cost}</p><button class="btn primary small" id="end-lv" type="button">${icon('i-dust')} 一键升到 Lv${m.shared.level + 1}</button>`
-    : `<p>星尘 ${Math.floor(m.stardust)} / ${cost}</p><div class="bar-mini"><i style="width:${(m.stardust / cost) * 100}%"></i></div><p class="dim-text" style="font-size:var(--fs-xs)">还差 ${Math.ceil(cost - m.stardust)}，再打一局就够</p>`;
+    : `<p>星尘 ${Math.floor(m.stardust)} / ${cost}</p><div class="bar-mini"><i style="width:${(m.stardust / cost) * 100}%"></i></div><p class="dim-text" style="font-size:var(--fs-xs)">还差 ${Math.ceil(cost - m.stardust)} 星尘${rw.dust > 0 ? `（按这局 +${rw.dust} 估算，约还要 ${Math.ceil((cost - m.stardust) / rw.dust)} 局）` : ''}</p>`;
   const el = showScreen('end', `
     <div class="center-col">
       <div class="h-display" style="font-size:var(--fs-xl);color:${r.win ? 'var(--lamp2)' : 'var(--paper)'}">${r.win ? `${r.stage} ${S.name} 通关！` : r.abandoned ? '本局结束' : `${P.name}被击落了`}</div>
       <div class="dim-text">${r.win ? `出击 ${fmtTime(r.runT)} · ${S.bossName} ${fmtTime(r.bossTime)}${rw.capUp ? ` · <b class="good">大招容量升到 ${rw.capUp} 次（所有飞机）</b>` : ''}` : `出击 ${fmtTime(r.runT)} · 完成度 ${Math.round(r.progress * 100)}% · 成长资源照常结算`}</div>
       <div class="statrow">${[['击破', st.kills], ['最高连杀', st.maxStreak], ['升级选择', st.crystals], ['联动', st.syns], ['大招', st.bursts], ['漏怪', st.leaks]].map(([k, v]) => `<div class="stat-pill"><span class="num">${v}</span><span>${k}</span></div>`).join('')}</div>
       <div class="rewards">
-        <span class="reward">${icon('i-dust').replace('class="ic"', 'class="ic" style="fill:#dcc8ff"')}星尘 +${rw.dust}</span>
+        <span class="reward" title="星尘到账：${rw.before} → ${rw.after}">${icon('i-dust').replace('class="ic"', 'class="ic" style="fill:#dcc8ff"')}星尘 +${rw.dust} <small class="dim-text">= 关卡奖励 ${rw.base}（${rw.baseLabel}）+ 本局星砂 ${rw.sand} ÷ 50 = ${rw.sandStar} · 账户 ${rw.before} → ${rw.after}</small></span>
         <span class="reward">${icon('i-ticket').replace('class="ic"', 'class="ic" style="fill:#ffe38a"')}招募券 +${rw.tickets}${rw.newRescues.length ? `（含救援 ${rw.newRescues.length}）` : ''}</span>
         ${rw.cos ? `<span class="reward">${icon('i-cos').replace('class="ic"', 'class="ic" style="fill:#ff9fcf"')}外观票 +${rw.cos}</span>` : ''}
         ${fragTxt ? `<span class="reward">${icon('i-frag').replace('class="ic"', 'class="ic" style="fill:#aeeaff"')}${esc(fragTxt)}</span>` : ''}
@@ -341,7 +365,7 @@ function showEnd(E) {
         <div class="panel end-card"><div class="label">① 成长 · 共享等级 Lv${m.shared.level}</div>${grow}<span class="dim-text" style="font-size:var(--fs-xs)">${sharedLine()} · 所有飞机一起变强</span></div>
         <div class="panel end-card"><div class="label">② Build ${r.stream ? `· <span style="color:var(--lamp2)">${esc(r.stream)}</span>` : ''}</div><div class="row wrap">${buildChips(r)}</div>
           ${journey ? `<div class="jrow">${journey}</div>` : ''}
-          <div class="lure-mini"><span class="label">下次想完成</span> <b>${esc(E.lure.buildName)}</b><span class="dim-text"> · ${esc(E.lure.buildHint)}</span></div></div>
+          ${E.lure.advice ? `<div class="advice">${E.lure.advice}</div>` : `<div class="lure-mini"><span class="label">下次想完成</span> <b>${esc(E.lure.buildName)}</b><span class="dim-text"> · ${esc(E.lure.buildHint)}</span></div>`}</div>
         <div class="panel end-card"><div class="label">③ 继续挑战</div>
           ${r.win && nextId ? `<button class="btn primary" id="end-next" type="button" autofocus>${icon('i-play')} 挑战 ${nextId} ${STAGES[nextId].name}</button>` : ''}
           <button class="btn ${r.win && nextId ? '' : 'primary'}" id="end-again" type="button" ${r.win && nextId ? '' : 'autofocus'}>${icon('i-play')} ${r.win ? '再打一次' : '再来一局'} ${r.stage}</button>
@@ -448,36 +472,47 @@ function doPull(n, back) {
   Sound.sfx('gachaRoll');
   setTimeout(() => showReveal(res, 0, back), 700);
 }
+/* 招募结果：只有第一次获得的飞机单独展示；重复的直接并进汇总；随时可以“跳过，查看全部” */
 function showReveal(res, i, back) {
-  if (i >= res.length) return res.length > 1 ? showRevealSummary(res, back) : showGacha(back);
-  const it = res[i], P = PLANES[it.pid], R = RARITY[it.r];
+  while (i < res.length && !res[i].isNew) i++;
+  if (i >= res.length) return res.length > 1 ? showRevealSummary(res, back) : res[0] && !res[0].isNew ? showRevealSummary(res, back) : showGacha(back);
+  const it = res[i], P = PLANES[it.pid], R = RARITY[it.r], left = res.slice(i + 1).some((x) => x.isNew);
   Sound.sfx('reveal', { r: it.r });
   const el = showScreen('reveal', `
     <div class="reveal-card" style="--rc:${R.color};--rg:${R.glow}">
-      ${it.isNew ? '<span class="newbadge">NEW!</span>' : ''}
+      <span class="newbadge">NEW!</span>
       <canvas width="420" height="420" data-plane="${it.pid}" data-glow="${R.glow}" data-happy="1"></canvas>
       <div class="row">${rarityChip(it.r)}<span class="dim-text">${P.look}</span></div>
       <h3>${P.name}</h3>
       <div class="burst-name">专属大招 · ${P.burst.name}</div>
       <div class="dim-text" style="font-size:var(--fs-s);max-width:36em">${P.burst.desc}</div>
-      ${it.isNew ? '' : `<div class="chip cyan">${icon('i-frag')} 已拥有，转为 ${P.name}碎片 +${it.frags}</div>`}
     </div>
     <div class="row wrap" style="justify-content:center">
       <button class="btn cyan" id="rv-prev" type="button">${icon('i-play')} 大招预览</button>
-      <button class="btn" id="rv-go" type="button">立即出战</button>
-      <button class="btn primary" id="rv-next" type="button" autofocus>${i + 1 < res.length ? `下一个（${i + 1}/${res.length}）` : '完成'}</button>
-    </div>`, { bg: 'hub', cls: 'dim', label: '招募结果', back: () => showReveal(res, i + 1, back) });
+      <button class="btn" id="rv-use" type="button">设为出战</button>
+      ${res.length > 1 ? `<button class="btn" id="rv-skip" type="button">跳过，查看全部</button>` : ''}
+      <button class="btn primary" id="rv-next" type="button" autofocus>${left ? '下一架新飞机' : res.length > 1 ? '查看全部' : '完成'}</button>
+    </div>`, { bg: 'hub', cls: 'dim', label: '招募结果', back: () => showRevealSummary(res, back) });
   $('#rv-next', el).onclick = () => { Sound.sfx('card'); showReveal(res, i + 1, back); };
-  $('#rv-go', el).onclick = () => { G.meta.current = it.pid; persist(); Sound.sfx('select'); startRun(); };
+  const sk = $('#rv-skip', el); if (sk) sk.onclick = () => { Sound.sfx('card'); showRevealSummary(res, back); };
+  $('#rv-use', el).onclick = () => { G.meta.current = it.pid; persist(); Sound.sfx('select'); toast(`${P.name} 已设为出战`, '#ffe38a'); $('#rv-use', el).disabled = true; };
   $('#rv-prev', el).onclick = () => openPreview(it.pid, () => showReveal(res, i, back));
 }
 function showRevealSummary(res, back) {
+  const news = res.filter((x) => x.isNew), frags = {};
+  for (const x of res) if (!x.isNew) frags[x.pid] = (frags[x.pid] || 0) + x.frags;
+  const fragList = Object.entries(frags).map(([k, v]) => `<span class="chip r-${PLANES[k].rarity}">${PLANES[k].name}碎片 +${v}</span>`).join('');
   const el = showScreen('reveal', `
     <div class="h-display" style="font-size:var(--fs-xl);color:var(--paper)">招募结果</div>
-    <div class="reveal-sum">${res.map((it) => `<div class="mini" style="--rc:${RARITY[it.r].color}"><canvas width="120" height="120" data-plane="${it.pid}"></canvas>${rarityChip(it.r)}<span>${it.isNew ? 'NEW' : `+${it.frags} 碎片`}</span></div>`).join('')}</div>
-    <div class="row wrap" style="justify-content:center"><button class="btn" id="rs-planes" type="button">${icon('i-hangar')} 去机库</button><button class="btn primary" id="rs-back" type="button" autofocus>完成</button></div>`, { bg: 'hub', cls: 'dim', label: '召唤结果', back: () => showGacha(back) });
+    <div class="dim-text">新飞机 ×${news.length} · 重复转碎片 ×${res.length - news.length}</div>
+    <div class="reveal-sum">${res.map((it) => `<div class="mini ${it.isNew ? 'isnew' : ''}" style="--rc:${RARITY[it.r].color}"><canvas width="120" height="120" data-plane="${it.pid}"></canvas>${rarityChip(it.r)}<span>${it.isNew ? 'NEW' : `+${it.frags} 碎片`}</span></div>`).join('')}</div>
+    ${fragList ? `<div class="row wrap" style="justify-content:center">${fragList}</div>` : ''}
+    <div class="row wrap" style="justify-content:center">
+      ${news.map((it) => `<button class="btn small cyan" data-pv="${it.pid}" type="button">${icon('i-play')} ${PLANES[it.pid].name} 大招预览</button>`).join('')}
+      <button class="btn" id="rs-planes" type="button">${icon('i-hangar')} 去机库</button><button class="btn primary" id="rs-back" type="button" autofocus>完成</button></div>`, { bg: 'hub', cls: 'dim', label: '招募结果', back: () => showGacha(back) });
   $('#rs-back', el).onclick = () => showGacha(back);
   $('#rs-planes', el).onclick = () => showPlanes(back);
+  $$('[data-pv]', el).forEach((b) => b.onclick = () => openPreview(b.dataset.pv, () => showRevealSummary(res, back)));
 }
 
 /* ================================================== PLANES（机库 / 升星 / 碎片兑换）================================================== */
@@ -541,18 +576,31 @@ function recommendNode(rec) {
   for (const r of ROUTE_ORDER) { const i = rec.lit[r]; if (i >= rec.map[r].length) continue; const n = rec.map[r][i], T = NODE_TYPES[n.type], sc = T.score - i * 0.2 + (T.needs ? -0.5 : 0); if (sc > bs) { bs = sc; best = r; } }
   return best;
 }
-function showStarMap(pid, back, fromLevel) {
+/* 选中节点的说明：效果、前置、是否已生效、成本；只有“点亮”按钮才花天赋点 */
+function nodeDetail(rec, sel, pts, recR) {
+  if (!sel || !rec.map[sel.r] || !rec.map[sel.r][sel.i]) return '<p class="dim-text">点一个节点查看说明</p>';
+  const n = rec.map[sel.r][sel.i], T = NODE_TYPES[n.type], R = ROUTES[sel.r], lit = rec.lit[sel.r];
+  const state = sel.i < lit ? '已点亮' : sel.i === lit ? (pts > 0 ? '可以点亮' : '需要天赋点（共享等级升级获得）') : `先点亮${R.name}路线前面的 ${sel.i - lit} 个节点`;
+  const active = T.needs ? `条件型：本局拿到「${SKILLS[T.needs].name}」后才生效，没拿到时保持待激活` : '点亮后立刻生效，所有关卡都有用';
+  const can = sel.i === lit && pts > 0;
+  return `<div class="node-card" style="--rc:${R.color}">
+    <div class="row">${icon(T.icon)}<b>${T.name}</b><span class="chip">${R.name} · 第 ${sel.i + 1} 个</span>${sel.r === recR && sel.i === lit && pts > 0 ? '<span class="chip gold">推荐</span>' : ''}</div>
+    <p>${T.fmt(n.v)}</p><p class="dim-text">为什么选它：${T.why || ''}</p><p class="dim-text">${active}</p><p class="dim-text">状态：${state} · 成本 1 天赋点</p>
+    <button class="btn ${can ? 'primary' : ''}" id="sm-light" type="button" ${can ? 'autofocus' : 'disabled'}>${icon('i-starmap')} 点亮（花 1 天赋点）</button></div>`;
+}
+function showStarMap(pid, back, fromLevel, sel) {
   Sound.setMode('hub');
   const m = G.meta, rec = m.planes[pid], P = PLANES[pid];
   if (!rec) return showPlanes(back, pid);
-  const pts = treePoints(m, rec), recR = pts > 0 ? recommendNode(rec) : null, stats = planeStats(m, pid).raw, cap = ultCapNow();
+  const pts = treePoints(m, rec), recR = recommendNode(rec), stats = planeStats(m, pid).raw, cap = ultCapNow();
+  if (!sel && recR) sel = { r: recR, i: rec.lit[recR] }; // 默认选中推荐节点（只是选中，不花点）
   let rows = '';
   for (const r of ROUTE_ORDER) {
     const list = rec.map[r], lit = rec.lit[r], R = ROUTES[r];
     const nodes = list.map((n, i) => {
-      const T = NODE_TYPES[n.type], cls = i < lit ? 'lit' : i === lit ? (pts > 0 ? 'next' : 'wait') : '', isRec = r === recR && i === lit;
+      const T = NODE_TYPES[n.type], cls = i < lit ? 'lit' : i === lit ? (pts > 0 ? 'next' : 'wait') : '', isRec = r === recR && i === lit && pts > 0, isSel = sel && sel.r === r && sel.i === i;
       const lab = i < lit ? (T.needs ? '待激活' : T.max > 1 ? `+${n.v}${n.type === 'pierceX' ? '' : '%'}` : '+1') : i === lit && pts > 0 ? (isRec ? '推荐' : '可点亮') : T.name;
-      return `<button class="snode ${cls} ${isRec ? 'rec' : ''} ${T.needs ? 'pending' : ''}" type="button" data-r="${r}" data-i="${i}" ${cls === 'next' ? '' : 'tabindex="-1"'} title="${T.fmt(n.v)}" aria-label="${R.name} 第 ${i + 1} 个：${T.fmt(n.v)}">${icon(T.icon)}<small>${lab}</small></button>`;
+      return `<button class="snode ${cls} ${isRec ? 'rec' : ''} ${isSel ? 'sel' : ''} ${T.needs ? 'pending' : ''}" type="button" data-r="${r}" data-i="${i}" title="${T.fmt(n.v)}" aria-label="${R.name} 第 ${i + 1} 个：${T.fmt(n.v)}">${icon(T.icon)}<small>${lab}</small></button>`;
     }).join('');
     const pct = list.length > 1 ? Math.min(1, Math.max(0, lit - 1) / (list.length - 1)) * 100 : 0;
     rows += `<div class="srow" style="--rc:${R.color}"><span class="route-label">${icon(R.icon)}${R.name}</span><div class="strack"><i class="strack-lit" style="width:${lit ? pct : 0}%"></i>${nodes}</div></div>`;
@@ -566,21 +614,22 @@ function showStarMap(pid, back, fromLevel) {
       <div class="panel smap-side">
         ${curRow()}
         <div class="row wrap"><span class="chip gold">共享等级 Lv${m.shared.level}</span><span class="chip">天赋点 ${pts}</span></div>
-        ${pts > 0 && recR ? `<button class="btn primary" id="sm-rec" type="button" autofocus>${icon('i-starmap')} 点亮推荐节点</button>` : canLevelUp() ? `<button class="btn primary" id="sm-lv" type="button">${icon('i-dust')} 升级 Lv${m.shared.level + 1}（${nextLevelCost()} 星尘）</button>` : ''}
+        ${nodeDetail(rec, sel, pts, recR)}
+        ${canLevelUp() ? `<button class="btn small" id="sm-lv" type="button">${icon('i-dust')} 升级 Lv${m.shared.level + 1}（${nextLevelCost()} 星尘）</button>` : ''}
         <h3>当前收益</h3>
         <div class="effect-list">${eff.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('')}</div>
         <p class="dim-text" style="margin:0;font-size:var(--fs-xs);line-height:1.6">穿透 / 追踪节点只强化本局已经选到的能力，没选到时保持“待激活”，不会让开局子弹变追踪。天赋树在飞机解锁时生成一次并保存，不会重抽。</p>
       </div>
     </div>`, { bg: 'map', back, label: '天赋树' });
   const light = (r) => {
-    const i = rec.lit[r], n = rec.map[r][i]; if (!n || treePoints(m, rec) < 1) { Sound.sfx('denied'); return; }
+    const i = rec.lit[r], n = rec.map[r][i]; if (!n || treePoints(m, rec) < 1 || !sel || sel.i !== i) { Sound.sfx('denied'); return; }
     rec.lit[r]++; persist(); Sound.sfx('starLight'); toast(NODE_TYPES[n.type].fmt(n.v), ROUTES[r].color, NODE_TYPES[n.type].icon);
     showStarMap(pid, back);
   };
-  $$('.snode.next', el).forEach((b) => b.onclick = () => light(b.dataset.r));
-  const rb = $('#sm-rec', el); if (rb) rb.onclick = () => light(recR);
+  $$('.snode', el).forEach((b) => b.onclick = () => { Sound.sfx('ui'); showStarMap(pid, back, false, { r: b.dataset.r, i: +b.dataset.i }); }); // 点节点只是选中看说明
+  const lb2 = $('#sm-light', el); if (lb2) lb2.onclick = () => light(sel.r);
   const lb = $('#sm-lv', el); if (lb) lb.onclick = () => { if (levelUp()) showStarMap(pid, back, true); };
-  if (fromLevel && pts > 0) toast('天赋点 +1：推荐节点已高亮', '#ffe38a', 'i-starmap');
+  if (fromLevel && pts > 0) toast('天赋点 +1：推荐节点已选中，看完说明再点亮', '#ffe38a', 'i-starmap');
 }
 
 /* ================================================== TASKS / COSMETICS ================================================== */
@@ -719,30 +768,61 @@ function pauseGame() {
   const w = G.world;
   if (!w || G.paused || w.state !== 'play' || !Input.gameActive) return;
   G.paused = true; Input.gameActive = false;
-  const r0 = { build: w.buildSummary() };
-  const skills = `<div class="row wrap">${buildChips(r0)}</div>` + (w.picks.length ? '' : '<span class="dim-text">还没选到升级：清波、地图互动、技能洞都会给二选一。</span>');
-  const syns = [...w.syn].map((k) => `<div class="row"><span class="chip gold">${SYNERGIES[k].name}</span><span class="dim-text" style="font-size:var(--fs-xs)">${SYNERGIES[k].desc}</span></div>`).join('');
-  const comps = w.companions.map((c) => `<div class="row"><span class="chip pink">伙伴 · ${NPCS[c.id].name}</span><span class="dim-text" style="font-size:var(--fs-xs)">${NPCS[c.id].effect}</span></div>`).join('');
+  showPauseMenu();
+}
+/* 暂停菜单：设置 / 图鉴 / 操作说明返回都回到这里；期间战斗一直冻结，点“继续”才恢复 */
+function showPauseMenu() {
+  const w = G.world; if (!w) return;
+  G.paused = true; Input.gameActive = false;
+  const b = w.buildSummary(), rows = [];
+  for (const id of GUN_ORDER) if (b.gun[id]) rows.push(`<div class="row"><span class="chip" style="color:${SKILLS[id].color};border-color:${SKILLS[id].color}">${icon(SKILLS[id].icon)} 主炮 · ${SKILLS[id].name} Lv${b.gun[id]}</span><span class="dim-text" style="font-size:var(--fs-xs)">${SKILLS[id].lv[b.gun[id] - 1]}</span></div>`);
+  if (b.support) rows.push(`<div class="row"><span class="chip" style="color:${SKILLS[b.support.id].color};border-color:${SKILLS[b.support.id].color}">${icon(SKILLS[b.support.id].icon)} 支援 · ${SKILLS[b.support.id].name} Lv${b.support.lv}</span><span class="dim-text" style="font-size:var(--fs-xs)">${SKILLS[b.support.id].lv[b.support.lv - 1]}（支援只能带一个，选新的会替换它）</span></div>`);
+  if (b.bmod) rows.push(`<div class="row"><span class="chip" style="color:${BURST_MODS[b.bmod.id].color}">${icon(BURST_MODS[b.bmod.id].icon)} 大招 · ${BURST_MODS[b.bmod.id].name} Lv${b.bmod.lv}</span><span class="dim-text" style="font-size:var(--fs-xs)">${BURST_MODS[b.bmod.id].lv[b.bmod.lv - 1]}</span></div>`);
+  for (const k of b.links) rows.push(`<div class="row"><span class="chip gold">联动 · ${SYNERGIES[k].name}</span><span class="dim-text" style="font-size:var(--fs-xs)">${SYNERGIES[k].desc}</span></div>`);
+  for (const c of w.companions) rows.push(`<div class="row"><span class="chip pink">伙伴 · ${NPCS[c.id].name}</span><span class="dim-text" style="font-size:var(--fs-xs)">${NPCS[c.id].effect}</span></div>`);
+  const adv = buildAdvice(b, true);
+  $('#banner').innerHTML = ''; $('#toast').innerHTML = ''; banner._until = 0; // 暂停时收起横幅和轻提示，不压住菜单
   const el = showScreen('pause', `
-    <div class="center-col" style="max-width:calc(820px*var(--u))">
-      <div class="h-display" style="font-size:var(--fs-xl);color:var(--paper)">暂停</div>
-      <div class="panel build-list" style="width:100%"><div class="label">当前 Build ${w.stream ? `· ${w.stream.name}` : ''}（主炮改造可叠加 · 支援一个 · 大招改造一个）</div>${skills}${syns}${comps}</div>
+    <div class="center-col" style="max-width:calc(860px*var(--u))">
+      <div class="h-display" style="font-size:var(--fs-xl);color:var(--paper)">暂停 <span class="dim-text" style="font-size:var(--fs-s)">战斗已冻结</span></div>
+      <div class="panel build-list" style="width:100%"><div class="label">当前 Build ${w.stream ? `· ${w.stream.name}` : ''}</div>${rows.join('') || '<span class="dim-text">还没选到升级：清波、梦灯屋、星砂矿、救援站、技能洞都会给二选一。</span>'}
+        ${adv ? `<div class="advice">${adv}</div>` : ''}</div>
       <div class="row wrap" style="justify-content:center">
         <button class="btn primary" id="p-resume" type="button" autofocus>${icon('i-play')} 继续</button>
+        <button class="btn" id="p-help" type="button">${icon('i-book')} 操作说明</button>
         <button class="btn" id="p-settings" type="button">${icon('i-gear')} 设置</button>
         <button class="btn" id="p-codex" type="button">${icon('i-book')} 图鉴</button>
         <button class="btn coral" id="p-quit" type="button">结束本局</button>
       </div>
-      <span class="dim-text" style="font-size:var(--fs-xs)">结束本局会直接结算，已收集的星尘和碎片全部保留。</span>
+      <span class="dim-text" style="font-size:var(--fs-xs)">结束本局按当前完成度结算：关卡奖励 × 完成度（现在 ${Math.round(w.result(false).progress * 100)}%）+ 本局星砂折算（每 50 星砂 = 1 星尘）。</span>
     </div>`, { bg: 'world', cls: 'dim', back: resumeGame, label: '暂停' });
   $('#p-resume', el).onclick = resumeGame;
-  $('#p-settings', el).onclick = () => showSettings(() => { G.paused = false; pauseGame(); });
-  $('#p-codex', el).onclick = () => showCodex('skills', () => { G.paused = false; pauseGame(); });
+  $('#p-help', el).onclick = () => { Sound.sfx('ui'); showHelp(showPauseMenu); };
+  $('#p-settings', el).onclick = () => { Sound.sfx('ui'); showSettings(showPauseMenu); };
+  $('#p-codex', el).onclick = () => { Sound.sfx('ui'); showCodex('gun', showPauseMenu); };
   let armed = false;
   $('#p-quit', el).onclick = () => {
     if (!armed) { armed = true; $('#p-quit', el).textContent = '确认结束本局'; return; }
-    Tele.log('run_abandoned'); G.paused = false; const ww = G.world; ww.done = true; const r = ww.result(false); r.abandoned = true; onRunEnd(r);
+    Tele.log('run_abandoned'); const ww = G.world; ww.done = true; const r = ww.result(false); r.abandoned = true; G.paused = false; onRunEnd(r);
   };
+}
+/* 操作说明：随时可从暂停里重看；按当前输入设备显示对应按键 */
+function showHelp(back) {
+  const pad = Input.device === 'pad', key = pad ? 'A / 任意主按钮' : Input.keyLabel(Input.binds.burst[0]);
+  const rows = [
+    ['移动', pad ? '左摇杆或十字键。' : 'WASD / 方向键；也可以按住鼠标左键拖动。按住 Shift 慢速精确飞行。'],
+    ['射击', '自动开火，但子弹只会笔直向右：移动飞机对准敌人。拿到“追踪”“穿透”等升级后，子弹行为会改变。'],
+    ['升级二选一', '清波、梦灯屋、星砂矿、救援站、技能洞都会给出两个方案。飞进一个的圆圈停 0.35 秒确认，离开可取消；选择期间不会受伤，第一次选择时整场暂停。'],
+    ['地图装置', '梦灯屋：进入光圈停 2 秒；星砂矿：停 2.5 秒；救援站：飞过前面的光环。装置旁会写着下一步该做什么。'],
+    ['大招', `击败敌人、精英、挖开星砂矿都会充能。右下角写着“充能 xx%”或“可释放”，满了按 ${key} 释放；最多存 ${ultCapNow()} 次。`],
+    ['路线', '每段结束后出现 2~3 个洞口，旁边写着名字和收益；飞进去就选好了。'],
+    ['受击', '只有飞机正中的小白点会被打中（设置里可以把它显示出来）。敌弹都有一圈深色底，和背景光点区分。'],
+  ];
+  const el = showScreen('help', `${backBtn()}
+    <div class="screen-title"><h2>操作说明</h2><p>${pad ? '手柄' : '键鼠'}（换输入设备后会自动切换说明）</p></div>
+    <div class="panel help-list">${rows.map(([k, v]) => `<div class="help-row"><b>${k}</b><span>${v}</span></div>`).join('')}</div>
+    <div class="row wrap" style="margin-top:12px"><button class="btn" id="help-tut" type="button">${icon('i-play')} 重看开局三步教学</button></div>`, { bg: G.world ? 'world' : 'hub', cls: G.world ? 'dim' : '', back, label: '操作说明' });
+  $('#help-tut', el).onclick = () => { G.meta.tutorialDone = false; persist(); G.tutorial = { on: true, t: 0 }; toast('开局教学已打开：回到战斗就能看到三步清单', '#ffe38a'); };
 }
 function resumeGame() {
   if (!G.world) return;
@@ -782,7 +862,7 @@ function buildHud() {
   hud.innerHTML = `
     <div class="hud-tl">
       <div class="hearts" id="h-hearts" aria-label="生命"></div>
-      <div class="row"><span class="cur">${icon('i-dust').replace('class="ic"', 'class="ic" style="fill:#dcc8ff"')}<span class="num" id="h-dust">0</span></span><span class="stream-badge" id="h-stream"></span></div>
+      <div class="row"><span class="cur" title="本局星砂：结算时每 50 星砂折 1 星尘">${icon('i-dust').replace('class="ic"', 'class="ic" style="fill:#dcc8ff"')}<small class="curname">星砂</small><span class="num" id="h-dust">0</span></span><span class="stream-badge" id="h-stream"></span></div>
       <div class="slots" id="h-slots">
         <div class="slot gunslot" title="主炮改造链"><svg class="ic"><use href="#s-pierce"/></svg><b class="sl">主炮</b></div>
         <div class="slot" title="自动支援"><svg class="ic"><use href="#s-thunder"/></svg><div class="lv"><i></i><i></i><i></i></div><b class="sl">支援</b></div>
@@ -796,6 +876,8 @@ function buildHud() {
     <div class="bossbar" id="h-boss" hidden><div class="bname"><span id="h-bname">Boss</span><small id="h-bphase"></small></div><div class="bar boss" id="h-bbar"><i id="h-bf"></i><span id="h-bticks"></span><span class="shield" id="h-bs"></span></div></div>
     <div class="hud-tr"><button class="pause-btn hb" id="h-pause" type="button" aria-label="暂停">${icon('i-pause')}</button></div>
     <div class="streak" id="h-streak" hidden><div class="n" id="h-sn">0</div><div class="t">连杀</div></div>
+    <div class="tut hb" id="h-tut" hidden></div>
+    <div class="bstate" id="h-bstate"></div>
     <button class="burst-btn hb" id="h-burst" type="button" aria-label="爆发：${PLANES[w.planeId].burst.name}"><div class="face"><canvas width="160" height="160" data-plane="${w.planeId}"></canvas></div><span class="stock" id="h-stock">0/1</span><span class="k kbd" id="h-bk"></span></button>
     <div class="hint-box" id="h-hint" hidden></div>`;
   hud.hidden = false;
@@ -804,7 +886,7 @@ function buildHud() {
   $('#h-pause').addEventListener('pointerdown', (e) => e.stopPropagation());
   const bb = $('#h-burst');
   bb.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); Input.press('burst'); });
-  G.hudRefs = { hearts: $('#h-hearts'), dust: $('#h-dust'), stream: $('#h-stream'), slots: $$('#h-slots .slot'), mods: $('#h-mods'), syns: $('#h-syns'), comps: $('#h-comps'), tc: $('#h-tc'), seg: $('#h-seg'), segf: $('#h-segf'), wave: $('#h-wave'), boss: $('#h-boss'), bname: $('#h-bname'), bphase: $('#h-bphase'), bbar: $('#h-bbar'), bf: $('#h-bf'), bticks: $('#h-bticks'), bs: $('#h-bs'), streak: $('#h-streak'), sn: $('#h-sn'), burst: bb, stock: $('#h-stock'), bk: $('#h-bk'), hint: $('#h-hint') };
+  G.hudRefs = { hearts: $('#h-hearts'), dust: $('#h-dust'), stream: $('#h-stream'), slots: $$('#h-slots .slot'), mods: $('#h-mods'), syns: $('#h-syns'), comps: $('#h-comps'), tc: $('#h-tc'), seg: $('#h-seg'), segf: $('#h-segf'), wave: $('#h-wave'), boss: $('#h-boss'), bname: $('#h-bname'), bphase: $('#h-bphase'), bbar: $('#h-bbar'), bf: $('#h-bf'), bticks: $('#h-bticks'), bs: $('#h-bs'), streak: $('#h-streak'), sn: $('#h-sn'), burst: bb, stock: $('#h-stock'), bk: $('#h-bk'), hint: $('#h-hint'), bstate: $('#h-bstate'), tut: $('#h-tut') };
   G.hudLast = {};
   updateHud(true);
   showHint();
@@ -852,10 +934,10 @@ function updateHud(force) {
     const pc = 'bar boss p' + h.boss.phase; if (L.bcls !== pc) { L.bcls = pc; R.bbar.className = pc; }
   } else {
     if (L.bossOn !== false) { L.bossOn = false; R.boss.hidden = true; R.tc.hidden = false; }
-    const lbl = h.phase === 'portal' ? `${h.stage} · 前方分岔 · 飞进一个洞口` : h.phase === 'boss' ? STAGES[h.stage].bossName : `${h.stage} · 第 ${h.seg}/${h.segs} 段 · ${h.segType === 'normal' ? '航行' : PORTALS[h.segType] ? PORTALS[h.segType].name : ''}`;
+    const lbl = h.phase === 'portal' ? `${h.stage} · 前方分岔 · 看清收益再飞进一个洞口` : h.phase === 'boss' ? STAGES[h.stage].bossName : h.clearLeft !== null && h.clearLeft !== undefined ? `${h.stage} · 第 ${h.seg}/${h.segs} 段 · 清理剩余敌人${h.clearLeft ? ` · 还剩 ${h.clearLeft}` : ' · 马上分岔'}` : `${h.stage} · 第 ${h.seg}/${h.segs} 段 · ${h.segType === 'normal' ? '航行' : PORTALS[h.segType] ? PORTALS[h.segType].name : ''}`;
     setText(R.seg, 'seg', lbl);
     const sw = h.phase === 'portal' ? '100%' : `${Math.round(h.segU * 100)}%`; if (L.segw !== sw) { L.segw = sw; R.segf.style.width = sw; }
-    const wv = h.wave ? `清波 ${Math.min(h.wave[0], h.wave[1])}/${h.wave[1]} · 达成后升级二选一` : '';
+    const wv = h.wave ? `清波目标 ${Math.min(h.wave[0], h.wave[1])}/${h.wave[1]} · 达成后再来一次升级二选一` : '';
     if (L.wave !== wv) { L.wave = wv; R.wave.hidden = !wv; R.wave.textContent = wv; }
   }
   const sn = h.streak;
@@ -874,8 +956,33 @@ function updateHud(force) {
   if (L.bp !== p) { L.bp = p; R.burst.style.setProperty('--p', p); }
   if (L.ready !== h.ready) { L.ready = h.ready; R.burst.classList.toggle('ready', h.ready); }
   setText(R.stock, 'stock', `${h.stock}/${h.cap}`);
+  const bs = h.stock >= h.cap ? `可释放 · 已存满 ${h.stock}/${h.cap}` : h.stock > 0 ? `可释放 · 还能再存 ${h.cap - h.stock} 次` : `大招充能 ${p}%`;
+  if (L.bs !== bs) { L.bs = bs; R.bstate.textContent = bs; R.bstate.classList.toggle('ready', h.stock > 0); }
+  updateTutorial(h, R);
   const key = Input.hintFor('burst');
   if (L.bk !== key) { L.bk = key; R.bk.textContent = key; R.bk.hidden = !key; }
+}
+/* 开局三步教学：移动 → 进入装置 → 释放一次大招；可跳过，暂停里的“操作说明”可以重看 */
+function updateTutorial(h, R) {
+  const T = G.tutorial; if (!T || !T.on || !R.tut) { if (R.tut && !R.tut.hidden) R.tut.hidden = true; return; }
+  const w = G.world, pad = Input.device === 'pad';
+  const steps = [
+    [w.player.moved > 220, pad ? '用左摇杆移动飞机' : '移动飞机（WASD 或按住鼠标拖动）'],
+    [w.m.interacts > 0, '飞进发光装置的光圈（梦灯屋）'],
+    [w.m.bursts > 0, `释放一次大招（${pad ? 'A 键' : Input.keyLabel(Input.binds.burst[0])}）`],
+  ];
+  const k = steps.map((x) => (x[0] ? 1 : 0)).join('') + (pad ? 'p' : 'k');
+  if (G.hudLast.tut !== k) {
+    G.hudLast.tut = k; R.tut.hidden = false;
+    R.tut.innerHTML = `<div class="tut-h">开局三步 <button type="button" id="tut-skip">跳过</button></div>${steps.map(([ok, txt], i) => `<div class="tut-s ${ok ? 'ok' : ''}"><i>${ok ? '✓' : i + 1}</i>${txt}</div>`).join('')}`;
+    const sk = $('#tut-skip', R.tut); sk.addEventListener('pointerdown', (e) => e.stopPropagation()); sk.onclick = () => endTutorial(true);
+    if (steps.every((x) => x[0])) endTutorial(false);
+  }
+}
+function endTutorial(skipped) {
+  G.tutorial = { on: false }; G.meta.tutorialDone = true; persist();
+  if (G.hudRefs && G.hudRefs.tut) setTimeout(() => { if (G.hudRefs && G.hudRefs.tut) G.hudRefs.tut.hidden = true; }, skipped ? 0 : 1600);
+  if (!skipped) toast('开局教学完成！暂停里的“操作说明”随时可以重看', '#9ff2c8', null, 2600);
 }
 function drainWorldEvents() {
   const w = G.world; if (!w) return;
@@ -883,7 +990,7 @@ function drainWorldEvents() {
   while (w.events.length) {
     const e = w.events.shift();
     switch (e.type) {
-      case 'pick': toast(`${e.tag} · ${e.name} ${e.lv}：${e.desc}`, e.color, null, 2600); break;
+      case 'pick': if (e.first) banner(`新能力：${e.name} ${e.lv}`, e.desc, 2.2, hexA(e.color, 0.8), 4); else toast(`${e.tag} · ${e.name} ${e.lv}：${e.desc}`, e.color, null, 2600); break;
       case 'offer': if (!e.first) toast(e.source === 'house' ? '梦灯屋转出两个主炮改造' : e.source === 'mine' ? '矿脉里是两个兼容强化' : e.source === 'npc' ? '伙伴搬出两个支援技能' : e.source === 'retry' ? '上次错过的奖励又出现了' : e.source === 'rare' ? '稀有二选一' : '升级二选一', '#ffe38a', null, 1500); break;
       case 'backlog': toast('敌人太多了：飞向附近的梦灯屋或星砂矿，互动时附近不会再刷怪', '#ffb2a8', null, 2600); break;
       case 'stream': banner(`${e.name}成型！`, '这一局的 Build 有名字了', 1.9, 'rgba(255,215,106,.8)', 3); break;
@@ -894,7 +1001,10 @@ function drainWorldEvents() {
       case 'bossResponse': banner(e.title, e.sub, 2.6, 'rgba(255,215,106,.8)', 3); break;
       case 'phase': banner(e.name, e.captain ? '攻击更密，还带着散兵' : e.n === 2 ? '攻击越来越快，安全区在缩小' : '弹幕会逆行，消失的弹幕会重演', 1.8, null, 3); break;
       case 'flag': banner('', e.text, e.dur || 1, null, 1); break;
-      case 'burstReady': toast(`${PLANES[w.planeId].burst.name} 可用 · 库存 ${e.stock || 1}/${e.cap || 1}`, '#ffe38a', 'i-play', 1600); break;
+      case 'burstReady':
+        if (!G.meta.burstTipShown) { G.meta.burstTipShown = true; persist(); banner(`${PLANES[w.planeId].burst.name} 可以放了！`, `按 ${Input.device === 'pad' ? 'A' : Input.keyLabel(Input.binds.burst[0])} 或点右下角头像 · 击败敌人、精英、挖开星砂矿都会充能`, 2.6, 'rgba(255,215,106,.85)', 3); }
+        else toast(`${PLANES[w.planeId].burst.name} 可用 · 库存 ${e.stock || 1}/${e.cap || 1}`, '#ffe38a', 'i-play', 1600);
+        break;
       case 'gold': banner('金色强化！', '大招充满 · 射速提高', 1.6, 'rgba(255,215,106,.9)'); break;
       case 'hint': G.hintId = e.id; showHint(); break;
       case 'maphint': G.mapHint = e.kind; showHint(); break;
@@ -911,7 +1021,7 @@ function showHint() {
   const T = {
     move: [d === 'touch' ? '按住屏幕任意位置拖动飞机' : d === 'pad' ? '左摇杆移动飞机' : 'WASD / 方向键移动，也可以按住鼠标拖动', '自动开火，但子弹只会笔直向右：移动飞机对准敌人。'],
     offer: ['飞进一个方案，停一下就选好了', '靠近只是预览；进确认圈停 0.35 秒才生效，另一个会关掉。'],
-    portal: ['前方分岔：飞进一个洞口', '蓝色闪电 = 技能 · 金色星星 = 稀有 · 红色王冠 = Boss · 绿色爱心 = 回复'],
+    portal: ['前方分岔：看清再飞进一个洞口', '每个洞口旁都写着名字和收益，飞进去就选好了。'],
     burst: [d === 'touch' ? '点右下角头像（或双击屏幕）释放专属大招' : d === 'pad' ? '按 A 释放专属大招' : `按 ${Input.hintFor('burst')} 释放专属大招`, `${PLANES[G.world.planeId].burst.name}：${PLANES[G.world.planeId].burst.desc}`],
   }[id];
   if (!T) { R.hint.hidden = true; return; }

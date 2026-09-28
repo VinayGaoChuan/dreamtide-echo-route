@@ -31,14 +31,14 @@ class World {
     this.settings = o.settings; this.cb = o.cb || {};
     this.planeId = o.plane || 'moon'; this.P = PLANES[this.planeId];
     this.stats = o.stats || planeStats(null, this.planeId);
-    this.first = !!o.first;
+    this.first = !!o.first; this.tutorial = !!o.tutorial;
     this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id; this.ultCap = o.ultCap || 1;
     const cos = o.cos || {};
     const expC = COSMETICS.exp.find((c) => c.id === cos.exp);
     this.expColors = (expC && expC.colors) || this.P.colors.exp;
     const trC = COSMETICS.trail.find((c) => c.id === cos.trail) || COSMETICS.trail[0];
     this.trailColors = trC.colors; this.trailId = trC.id;
-    this.scene = o.scene || new SeaScene(); this.scene.speed = 90; this.scene.dir = 1;
+    this.scene = o.scene || new SeaScene(); this.scene.speed = 90; this.scene.dir = 1; this.scene.dim = this.mode === 'run' ? 1 : 0;
     this.low = this.settings.particles === 'low';
     this.diff = { warnBonus: 0.1 }; // 大众向：Boss 预警统一多给 0.1 秒
     this.t = 0; this.runT = 0; this.state = 'play'; this.phase = 'fight';
@@ -148,7 +148,8 @@ class World {
     if (this.mode === 'run' && Input.consume('burst')) this.tryBurst();
     p.fireT -= dt;
     const rate = this.P.rate * (p.candy > 0 ? 1.5 : 1) * (this.streak.n >= 30 ? 1.1 : 1);
-    if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
+    if (this.offer && this.offer.hold && this.offer.st !== 'confirm') p.fireT = Math.max(p.fireT, 0.05); // 第一次二选一整场暂停：主炮也先停
+    else if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
     if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud') && this.mode === 'run') {
       for (const e of this.enemies) {
         if (!e.alive || e.leaving) continue;
@@ -198,6 +199,7 @@ class World {
   hurtPlayer(n) {
     const p = this.player;
     if (!p.alive || p.inv > 0 || this.state !== 'play' || this.mode === 'preview') return;
+    if (this.offer && this.offer.st !== 'confirm') return; // 读卡、选择升级时不会受伤
     if (p.cloudShield) { p.cloudShield = false; p.inv = 0.8; Sound.sfx('shieldPop'); this.text('缓冲云挡住了', p.x, p.y - 40, '#dcefff', 16, 4); for (let i = 0; i < 10; i++) this.part('puff', p.x, p.y, rand(-160, 160), rand(-160, 160), 0.6, rand(8, 14), 'rgba(255,255,255,0.9)'); return; }
     p.hp -= n; p.inv = 1.4; p.hurtT = 1; this.m.hitsTaken++;
     this.hurtFlash = 1; this.shake(0.4); this.hitstop = 0.05; Sound.sfx('hurt');
@@ -324,7 +326,7 @@ class World {
     if (this.cb.onSeenEnemy) this.cb.onSeenEnemy(type);
   }
   updateEnemies(dt) {
-    const p = this.player, frozenWorld = this.timeStop > 0;
+    const p = this.player, frozenWorld = this.timeStop > 0 || !!(this.offer && this.offer.hold && this.offer.st !== 'confirm'); // 第一次二选一：整场暂停
     for (const e of this.enemies) {
       if (!e.alive || e.isBoss) continue;
       e.t += dt; e.hitFlash = Math.max(0, e.hitFlash - dt * 6);
@@ -879,7 +881,7 @@ class World {
       case 'chest': {
         this.m.dust += 30; this.m.chests++;
         const pl = pick(PLANE_ORDER); this.m.frags[pl] = (this.m.frags[pl] || 0) + 3;
-        Sound.sfx('chest'); this.text(`宝箱：星尘 +30 · ${PLANES[pl].name}碎片 +3`, p.x, p.y - 44, '#ffe38a', 16, 4); this.fx(p.x, p.y, 2, 80, ['#ffd76a', '#ffb347', '#fff6c8']);
+        Sound.sfx('chest'); this.text(`宝箱：星砂 +30 · ${PLANES[pl].name}碎片 +3`, p.x, p.y - 44, '#ffe38a', 16, 4); this.fx(p.x, p.y, 2, 80, ['#ffd76a', '#ffb347', '#fff6c8']);
         break;
       }
       case 'gold':
@@ -979,7 +981,7 @@ class World {
     } else if (this.phase === 'portal') this.updatePortals(dt);
     // 第一次二选一保证在 30 秒左右出现；首局 45 秒给一次完整大招
     if (this.offerN === 0 && !this.offer && !this.offerQueue.length && this.runT >= 28 && this.phase === 'fight') this.queueOffer('wave');
-    if (this.first && !this.tutorCharge && this.runT >= 45 && this.m.bursts === 0 && this.player.stock === 0) { this.tutorCharge = true; this.addStock(1); this.emit('flag', { text: '大招充满了 · 按爆发键试试', dur: 1.6 }); }
+    if ((this.first || this.tutorial) && !this.tutorCharge && this.runT >= 45 && this.m.bursts === 0 && this.player.stock === 0) { this.tutorCharge = true; this.addStock(1); this.emit('flag', { text: '大招充满了 · 按爆发键试试', dur: 1.6 }); }
   }
   choosePortals() {
     const k = this.segIdx, p = this.player;
@@ -1045,7 +1047,7 @@ class World {
     if (sid === 'thunder') { b.conductive = true; title = '外壳开始导电！'; sub = '雷暴流：击中闹钟时跳电次数 +2，雷击伤害提高'; }
     else if (sid === 'wing') { title = '闹钟召唤了镜像！'; sub = '分身流：分身会自动锁定镜像闹钟'; for (let i = 0; i < 3; i++) { const ty = lerp(this.arena.top + 90, this.arena.bottom - 90, i / 2); this.addEnemy('mirror', { x: this.W + 60, y: ty, path: 'mirror', tx: this.W * (0.5 + i * 0.07), ty, fireT: 2 + i * 0.6 }); } }
     else if (sid === 'bomb') { b.marked = true; title = '护甲被标记了！'; sub = '爆破流：爆炸会撬开闹钟的核心，伤害 +50%'; }
-    else if (sid === 'magnet') { title = '星尘海！'; sub = '吸星流：闹钟洒出一整片星尘，全部吸进来'; for (let i = 0; i < 70; i++) this.dropPickup('dust', b.x + rand(-160, 60), b.y + rand(-220, 220), { value: 2, vx: rand(-260, -60), vy: rand(-160, 160) }); }
+    else if (sid === 'magnet') { title = '星砂海！'; sub = '吸星流：闹钟洒出一整片星砂，全部吸进来'; for (let i = 0; i < 70; i++) this.dropPickup('dust', b.x + rand(-160, 60), b.y + rand(-220, 220), { value: 2, vx: rand(-260, -60), vy: rand(-160, 160) }); }
     else if (sid === 'rainbow') { this.carnival = true; title = '彩色狂欢阶段！'; sub = '彩虹流：击中闹钟会掉落更多糖果强化'; }
     else if (sid === 'ice') { b.iceHands = true; title = '指针被冻住了！'; sub = '冰晶流：闹钟指针会周期性冻结，核心更常暴露'; }
     this.emit('bossResponse', { title, sub, id: sid });
@@ -1169,6 +1171,7 @@ class World {
     const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: this.ultCap, ready: p.stock >= 1 && !this.bursting,
       gun: Object.assign({}, this.gun), support: this.support ? { id: this.support.id, lv: this.support.ulv } : null, bmod: this.bmod ? Object.assign({}, this.bmod) : null,
       syns: [...this.links], stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(this.m.dust), companions: (this.companions || []).map((c) => c.id),
+      clearLeft: S && S.over && this.phase === 'fight' ? this.enemies.filter((e) => e.alive && !e.leaving && !e.fodder && !e.isBoss && e.x < this.W + 40).length : null, moved: this.player.moved,
       stage: this.stageId, segs: this.stage.segs, seg: S && S.idx, segType: S && S.type, segU: S && S.dur ? clamp(S.t / S.dur, 0, 1) : 0, wave: S && S.waveGoal && !S.waveDone ? [S.waveKills, S.waveGoal] : null, phase: this.phase, candy: p.candy };
     if (this.boss && this.phase === 'boss') h.boss = this.boss.hudInfo();
     return h;
@@ -1190,7 +1193,7 @@ class World {
     }
     this.drawWarns(g);
     if (this.mapObjs) this.drawMap(g);
-    for (const q of this.portals) drawPortal(g, q.type, q.x, q.y, q.r, t + q.y * 0.01, clamp((this.W + 80 - q.x) / 120, 0, 1));
+    for (const q of this.portals) { const a = clamp((this.W + 80 - q.x) / 120, 0, 1); drawPortal(g, q.type, q.x, q.y, q.r, t + q.y * 0.01, a); drawPortalLabel(g, q.type, q.x - q.r - 100, q.y - 8, a); }
     for (const w of this.walls) { g.globalCompositeOperation = 'lighter'; const gr = g.createLinearGradient(w.x - 40, 0, w.x + 10, 0); gr.addColorStop(0, 'rgba(201,168,255,0)'); gr.addColorStop(1, 'rgba(255,243,200,0.7)'); g.fillStyle = gr; g.fillRect(w.x - 40, this.arena.top, 50, this.arena.bottom - this.arena.top); g.globalCompositeOperation = 'source-over'; }
     for (const k of this.pickups) if (k.kind !== 'crystal') drawPickup(g, k, t);
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.drawEnemy(g, e);
@@ -1206,6 +1209,7 @@ class World {
     this.bullets.each((b) => {
       if (b.ghost > 0) { g.globalAlpha = 0.25 + 0.25 * Math.sin(t * 20); BulletArt.draw(g, b.type, b.x, b.y, b.type === 'blue' || b.type === 'white' ? b.rot : 0, 1, cb); g.globalAlpha = 1; return; }
       if (this.reverseT > 0) { g.globalAlpha = 0.22; BulletArt.draw(g, b.type, b.x + b.vx * 0.06, b.y + b.vy * 0.06, b.rot, 1, false); g.globalAlpha = 1; }
+      g.fillStyle = 'rgba(16,10,40,0.55)'; g.beginPath(); g.arc(b.x, b.y, (b.r || 6) + 5, 0, TAU); g.fill(); // 敌弹统一压一圈深色底，和紫色场景、光点拉开
       BulletArt.draw(g, b.type, b.x, b.y, b.type === 'blue' || b.type === 'white' ? b.rot : b.type === 'gold' ? b.t * 3 : 0, 1, cb);
       if (stop) { g.strokeStyle = 'rgba(255,215,106,0.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(b.x, b.y, 11, 0, TAU); g.stroke(); }
     });

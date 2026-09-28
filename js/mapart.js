@@ -54,6 +54,27 @@ function drawMapTag(g, x, y, icon, text, color, a = 1) {
   g.fillStyle = '#fff6ee'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText(text, x - w / 2 + 31, y + 1);
   g.textBaseline = 'alphabetic'; g.restore();
 }
+/* 操作步骤小字条 */
+function drawStepPill(g, x, y, text, color, a = 1) {
+  g.save(); g.globalAlpha = a; g.font = '700 14px "Noto Sans SC", sans-serif';
+  const w = g.measureText(text).width + 22, h = 24;
+  g.fillStyle = 'rgba(12,9,34,0.86)'; g.beginPath(); g.roundRect ? g.roundRect(x - w / 2, y - h / 2, w, h, 12) : g.rect(x - w / 2, y - h / 2, w, h); g.fill();
+  g.strokeStyle = hexA(color.startsWith('#') ? color : '#ffffff', 0.6); g.lineWidth = 1.5; g.stroke();
+  g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, x, y + 1);
+  g.textBaseline = 'alphabetic'; g.restore();
+}
+/* 洞口旁的名字 + 主要收益：不用进去也能比较 */
+function drawPortalLabel(g, type, x, y, a) {
+  const P = PORTALS[type]; if (!P || a <= 0.05) return;
+  g.save(); g.globalAlpha = a; g.textAlign = 'center';
+  const t1 = P.name, t2 = P.short || '';
+  g.font = '700 13px "Noto Sans SC", sans-serif'; const w = Math.max(g.measureText(t2).width, 60) + 26;
+  g.fillStyle = 'rgba(12,9,34,0.9)'; g.strokeStyle = P.color; g.lineWidth = 2;
+  g.beginPath(); g.roundRect ? g.roundRect(x - w / 2, y - 18, w, 46, 12) : g.rect(x - w / 2, y - 18, w, 46); g.fill(); g.stroke();
+  g.font = mapFont(18); g.fillStyle = P.color; g.fillText(t1, x, y + 2);
+  g.font = '700 13px "Noto Sans SC", sans-serif'; g.fillStyle = '#fff6ee'; g.fillText(t2, x, y + 21);
+  g.restore();
+}
 /* 从物件飞回飞机的奖励 */
 function drawRewardOrb(g, x, y, icon, color, t, s = 1) {
   glowAt(g, x, y, 38 * s, hexA(color, 0.9), 0.95);

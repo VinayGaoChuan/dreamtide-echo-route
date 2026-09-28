@@ -287,8 +287,8 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .hud-tr{position:absolute;top:calc(10px*var(--u));right:calc(14px*var(--u));display:flex;gap:8px;align-items:center}
 .pause-btn{width:max(40px,calc(48px*var(--u)));height:max(40px,calc(48px*var(--u)));border-radius:14px;background:rgba(20,16,54,.72);border:1.5px solid var(--edge);display:grid;place-items:center}
 .pause-btn svg{width:50%;height:50%;fill:var(--text)}
-.streak{position:absolute;right:calc(24px*var(--u));top:34%;text-align:right;font-family:var(--f-display);color:#fff;pointer-events:none;transition:opacity .3s}
-.streak .n{font-family:var(--f-num);font-weight:800;font-size:max(34px,calc(64px*var(--u)));line-height:1;text-shadow:0 0 18px var(--hc,#6ff0ff),0 4px 0 #2d2358;color:var(--hc2,#fff)}
+.streak{position:absolute;right:calc(24px*var(--u));top:56%;opacity:.8;text-align:right;font-family:var(--f-display);color:#fff;pointer-events:none;transition:opacity .3s}
+.streak .n{font-family:var(--f-num);font-weight:800;font-size:max(26px,calc(42px*var(--u)));line-height:1;text-shadow:0 0 18px var(--hc,#6ff0ff),0 4px 0 #2d2358;color:var(--hc2,#fff)}
 .streak .t{font-size:var(--fs-m);color:var(--hc,#aeeaff)}
 .streak.bump .n{animation:bump .25s}
 @keyframes bump{0%{transform:scale(1.35)}100%{transform:none}}
@@ -345,6 +345,30 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .modrow:empty{display:none}
 .burst-btn .stock{position:absolute;right:-4px;bottom:-4px;min-width:2.4em;padding:.1em .45em;border-radius:999px;background:#2d2358;border:2px solid var(--lamp);color:var(--lamp2);font-family:var(--f-num);font-weight:800;font-size:max(11px,calc(14px*var(--tb)))}
 .wave-label{margin-top:4px;font-size:var(--fs-xs);color:var(--lamp2);text-align:center;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+#narrow{position:absolute;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;background:rgba(10,8,30,.96);color:var(--paper)}
+#narrow b{font-family:var(--f-display);font-weight:400;font-size:28px;color:var(--lamp2)}
+#narrow span{color:var(--dim);font-size:15px}
+.curname{font-size:max(10px,calc(12px*var(--u)));color:var(--dim);margin-right:2px}
+.bstate{position:absolute;right:calc(26px*var(--u));bottom:calc(22px*var(--u) + 118px*var(--tb) + 18px);padding:.2em .7em;border-radius:999px;background:rgba(20,16,54,.85);border:1.5px solid rgba(255,255,255,.2);font-size:max(11px,calc(13px*var(--u)));font-weight:700;color:var(--dim);white-space:nowrap;pointer-events:none}
+.bstate.ready{color:#2d2358;background:linear-gradient(180deg,#fff0b0,#ffc94a);border-color:#fff3c8;box-shadow:0 0 12px rgba(255,201,74,.7)}
+.tut{position:absolute;right:calc(16px*var(--u));top:calc(70px*var(--u));width:max(220px,calc(270px*var(--u)));padding:10px 12px;border-radius:14px;background:rgba(20,16,54,.9);border:1.5px solid rgba(255,215,106,.55);font-size:max(12px,calc(14px*var(--u)));display:flex;flex-direction:column;gap:6px}
+.tut-h{display:flex;justify-content:space-between;align-items:center;font-family:var(--f-display);color:var(--lamp2)}
+.tut-h button{font-size:12px;padding:2px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.3);background:transparent;color:var(--dim);cursor:pointer;pointer-events:auto}
+.tut-s{display:flex;align-items:center;gap:8px;color:var(--text)}
+.tut-s i{display:grid;place-items:center;width:1.5em;height:1.5em;border-radius:50%;border:1.5px solid rgba(255,255,255,.35);font-style:normal;font-size:.85em;flex:none}
+.tut-s.ok{color:#9ff2c8}
+.tut-s.ok i{background:#9ff2c8;color:#2d2358;border-color:#9ff2c8}
+.advice{font-size:var(--fs-xs);line-height:1.6;padding:6px 10px;border-radius:10px;background:rgba(255,215,106,.08);border:1px dashed rgba(255,215,106,.4)}
+.advice b{color:var(--lamp2)}
+.help-list{padding:calc(14px*var(--u));display:flex;flex-direction:column;gap:10px;max-width:60em}
+.help-row{display:grid;grid-template-columns:6em 1fr;gap:12px;font-size:var(--fs-s);line-height:1.6}
+.help-row b{font-family:var(--f-display);font-weight:400;color:var(--lamp2)}
+.node-card{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;border:1.5px solid var(--rc);background:rgba(15,12,42,.6)}
+.node-card p{margin:0;font-size:var(--fs-xs);line-height:1.5}
+.node-card .row svg.ic{width:1.4em;height:1.4em;fill:var(--rc)}
+.snode.sel{box-shadow:0 0 0 3px #fff,0 0 18px var(--rc)}
+.reveal-sum .mini.isnew{box-shadow:0 0 16px var(--rc)}
+.reward small{font-size:var(--fs-xs);margin-left:4px}
 #banner,#toast{transition:opacity .25s}
 #stage.offering #banner,#stage.offering #toast{opacity:.1}
 @media (max-width:760px){.end-grid3{grid-template-columns:1fr 1fr}}
@@ -406,6 +430,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
     <div id="banner" aria-live="polite"></div>
     <div id="toast" role="status" aria-live="polite"></div>
   </div>
+  <div id="narrow" hidden><b>梦潮是横版游戏</b><span>把窗口拉宽一些（建议 16:9），游戏会自动暂停等你</span></div>
 </div>
 
 <script src="js/util.js" charset="utf-8"></script>

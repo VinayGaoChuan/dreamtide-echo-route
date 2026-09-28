@@ -25,6 +25,8 @@
     document.documentElement.style.setProperty('--u', scale.toFixed(4));
     applySettings();
     if (G.world) G.world.W = W;
+    // 只做 Steam 横版：窗口被拉成竖长条时暂停并提示拉宽，不暴露挤在一起的界面
+    const narrow = h > w * 1.02; $('#narrow').hidden = !narrow; if (narrow) pauseGame();
   }
   resize();
   window.addEventListener('resize', resize);
@@ -78,6 +80,7 @@
         if (G.world) { G.world.render(ctx); return; }
         G.sea.draw(ctx, W, LH); break;
       case 'title':
+        G.sea.dim = 0;
         G.sea.draw(ctx, W, LH); drawTrail(W * 0.3, LH * 0.56, t); drawHero(cur, W * 0.3, LH * 0.56, 2.6, t); break;
       case 'hub':
         G.hub.draw(ctx, W, LH); if (G.screen === 'hub') { drawTrail(W / 2, LH * 0.4, t); drawHero(cur, W / 2, LH * 0.4, 2.2, t); } break;

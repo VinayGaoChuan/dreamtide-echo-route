@@ -113,6 +113,7 @@ Object.assign(World.prototype, {
     const hasUp = opts.some((o) => o && o.from > 0);
     this.dryOffers = hasUp || this.offerN < 2 ? 0 : this.dryOffers + 1;
     this.offerN++; this.m.offers = (this.m.offers || 0) + 1;
+    if (this.offerN === 1) { this.offer.hold = true; this.clearBullets(true); } // 第一次二选一：战场暂停，读完再选
     Sound.sfx('spin');
     this.emit('offer', { source: q.source, first: this.offerN === 1 });
   },
@@ -183,7 +184,7 @@ Object.assign(World.prototype, {
     this.syncWingmen();
     this.updateStream();
     Sound.setCardMods([this.support ? { thunder: 'echo', wing: 'mirror', magnet: 'gentle', ice: 'tide', rainbow: 'paperboat' }[this.support.id] : null, this.gun.bomb ? 'overheat' : null].filter(Boolean));
-    this.emit('pick', { kind: o.kind, id: o.id, name: info.name, lv: info.lv, desc: info.desc, color: info.color, tag: info.tag });
+    this.emit('pick', { kind: o.kind, id: o.id, name: info.name, lv: info.lv, desc: info.desc, color: info.color, tag: info.tag, first: this.picks.length === 1 });
     this.onCompanionSkill();
     this.fx(p.x, p.y, 2, 70, [info.color, '#ffffff', '#ffe38a']);
     if (this.hintStep >= 0 && this.hintStep < 2) this.hintStep = 2;
@@ -221,7 +222,7 @@ Object.assign(World.prototype, {
       g.save(); g.globalAlpha = G.alpha; g.translate(G.x, G.y); g.scale(s, s);
       const w = 212, h = 132;
       glowAt(g, 0, 0, 130, hexA(I.color, 0.7), 0.35 + G.near * 0.3);
-      g.fillStyle = 'rgba(24,19,64,0.9)'; g.strokeStyle = show ? I.color : 'rgba(255,255,255,0.4)'; g.lineWidth = 3;
+      g.fillStyle = 'rgba(24,19,64,0.97)'; g.strokeStyle = show ? I.color : 'rgba(255,255,255,0.4)'; g.lineWidth = 3;
       g.beginPath(); g.roundRect ? g.roundRect(-w / 2, -40, w, h, 18) : g.rect(-w / 2, -40, w, h); g.fill(); g.stroke();
       // 确认圈
       g.strokeStyle = show ? I.color : 'rgba(255,255,255,0.5)'; g.lineWidth = 3; g.setLineDash([8, 7]); g.lineDashOffset = -t * 30;
@@ -236,10 +237,13 @@ Object.assign(World.prototype, {
         const lines = wrapText(I.desc, 15); lines.slice(0, 2).forEach((ln, k) => g.fillText(ln, 0, 34 + k * 17));
         g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = I.color; g.fillText(I.tag, -w / 2 + 26, -24);
         if (I.replace) { g.fillStyle = '#ffb2a8'; g.fillText(I.replace, 0, 84); }
+        if (O.st === 'choose') { g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.55)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / OFFER_T.dwell) * 100)}% · 离开可取消` : G.near > 0.5 ? '飞进圆圈停一下' : '', 0, -94); }
       }
       g.restore();
       if (O.st === 'choose' && this.offerN === 1 && p.alive && G.near < 0.5) drawPointer(g, p.x, p.y, G.x, G.y - 40, I.color, t + i);
     });
+    // 选择中：飞机外面一圈保护泡，表示这段时间不会受伤
+    if (O.st !== 'confirm' && p.alive) { g.save(); g.globalAlpha = 0.55 + Math.sin(t * 6) * 0.15; g.strokeStyle = '#dff2ff'; g.lineWidth = 2.5; g.setLineDash([5, 6]); g.beginPath(); g.arc(p.x, p.y, 38, 0, TAU); g.stroke(); g.setLineDash([]); g.font = '700 12px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.fillStyle = '#dff2ff'; g.fillText(O.hold ? '选择中 · 战场暂停' : '选择中 · 不会受伤', p.x, p.y + 56); g.restore(); }
   },
 });
 /* 中文按字数折行 */

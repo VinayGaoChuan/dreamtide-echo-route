@@ -348,7 +348,7 @@ Object.assign(World.prototype, {
       switch (o.kind) {
         case 'house':
           drawLampHouse(g, o.x, o.y, { lit: Math.max(o.charge, moon && idle ? 0.35 : 0), done: o.state === 'done', open: o.open, turn: o.turn * o.near, look: o.look, bulb: this.trailId && this.trailId !== 'default' ? this.trailColors[0] : null }, t); // 所选尾焰点亮屋顶颜色
-          if (o.state === 'done') drawHouseWheel(g, o.x, o.y - 175, 50, o.wheelRot || 0, t, clamp(o.doneT * 3, 0, 1) * clamp(o.linger * 2, 0, 1), o.launched ? o.pickIds : null);
+          if (o.state === 'done') { drawHouseWheel(g, o.x, o.y - 175, 50, o.wheelRot || 0, t, clamp(o.doneT * 3, 0, 1) * clamp(o.linger * 2, 0, 1), o.launched ? o.pickIds : null); if (!o.launched) drawStepPill(g, o.x, o.y - 100, '转盘转动 · 马上出现二选一', M.color, 1); }
           break;
         case 'mine': if (o.state !== 'done') drawMine(g, c.x, o.y, { r: o.r, charge: o.charge, crackA: o.crackA || Math.PI, seed: o.seed, shake: o.charge > 0.05, colors: o.opts ? o.opts.map((q) => this.optInfo(q).color) : null }, t); break;
         case 'npc':
@@ -386,6 +386,10 @@ Object.assign(World.prototype, {
         const tagY = o.kind === 'house' ? o.y - 150 : o.kind === 'giant' ? c.y : o.kind === 'bridge' ? o.rings[0].y - 70 : o.kind === 'npc' ? c.y - o.ringR - 34 : c.y - 90;
         const tagX = o.kind === 'bridge' ? o.rings[0].x : o.kind === 'giant' ? c.x - 120 : o.kind === 'npc' ? c.x + o.ringDx : c.x;
         if (!(o.kind === 'bridge' && o.lit.length)) drawMapTag(g, tagX, tagY, M.icon, M.tag, M.color, o.alpha * (0.7 + 0.3 * Math.sin(t * 4)));
+        // 按状态给出一步一步的操作指令
+        const step = o.kind === 'house' || o.kind === 'mine' ? (o.inside ? `充能 ${Math.round(o.charge * 100)}% · ${this.planeId === 'paper' ? '离开也会保留' : '离开会慢慢回落'}` : o.charge > 0.02 ? `回到光圈继续充能（${Math.round(o.charge * 100)}%）` : `进入光圈停 ${o.kind === 'house' ? 2 : 2.5} 秒充能`)
+          : o.kind === 'npc' ? '飞过光环就能救出' : o.kind === 'giant' ? (o.charge > 0.02 ? `唤醒中 ${Math.round(o.charge * 100)}%` : '飞到眼睛旁边') : o.lit.length ? '' : '穿过三个灯环';
+        if (step) drawStepPill(g, tagX, tagY + 30, step, M.color, o.alpha);
         if (o.near > 0.2 && p.alive && o.charge < 0.99) drawPointer(g, p.x, p.y, o.kind === 'npc' ? c.x + o.ringDx : c.x, c.y, M.color, t);
       }
       g.restore();
@@ -393,6 +397,9 @@ Object.assign(World.prototype, {
   },
   drawMapFront(g) {
     const t = this.t, p = this.player;
+    // 在光圈里充能时，飞机头顶也有一条充能条（不用盯着装置看）
+    const dw = this.mapObjs.find((o) => o.state === 'idle' && o.inside);
+    if (dw && p.alive) { const M = MAP_OBJECTS[dw.kind], w = 64, x = p.x - w / 2, y = p.y - 50; g.fillStyle = 'rgba(20,16,54,0.8)'; g.fillRect(x - 2, y - 2, w + 4, 10); g.fillStyle = M.color; g.fillRect(x, y, w * clamp(dw.charge, 0, 1), 6); }
     if (this.laneT > 0 && p.alive) { // 云龟的安全航道：飞机周围一圈云
       const a = Math.min(1, this.laneT) * 0.8;
       glowAt(g, p.x, p.y, 150, 'rgba(220,240,255,0.6)', a * 0.5);
