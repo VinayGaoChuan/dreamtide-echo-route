@@ -49,10 +49,10 @@ Object.assign(World.prototype, {
     const mid = (this.arena.top + this.arena.bottom) / 2, from = G.B.from;
     if (w === 0) { // 先两只并排
       for (const k of [-1, 1]) this.entrance(from, 'armor', { goal: true, ty: mid + k * 120 }, 1);
-    } else if (w === 2) { // 最后一波：一只从另一个方向来 + 一只正面 + 纸船掩护
-      this.entrance(from === 'drop' ? 'front' : 'drop', 'armor', { goal: true, ty: mid - 110 }, 1);
-      this.entrance('front', 'armor', { goal: true, ty: mid + 110, tx: this.W * 0.68 }, 1, 0.8);
-      this.spawnFormation('boats');
+    } else if (w === 2) { // 最后一波只换一个变量：从另一个方向进来
+      const side = this.player.y < mid ? 1 : -1; // 两只都从离飞机远的那一边进，不会上下同时封住
+      this.entrance(from === 'drop' ? 'front' : 'drop', 'armor', { goal: true, ty: mid - 110, side }, 1);
+      this.entrance(from === 'drop' ? 'front' : 'drop', 'armor', { goal: true, ty: mid + 110, tx: this.W * 0.68, side }, 1, 0.8);
     } else { // 再一整队：同一高度排成纵队 + 前面两只护卫 —— 穿透在这里最值
       const ty = clamp(this.player.y, this.arena.top + 90, this.arena.bottom - 90);
       for (let i = 0; i < 3; i++) this.entrance(from === 'drop' ? 'front' : from, 'armor', { goal: true, ty, tx: this.W * (0.66 + i * 0.07), bob: 26, phase: 0 }, 1, i * 0.25);
@@ -111,6 +111,7 @@ Object.assign(World.prototype, {
   },
   /* 升级仪式结束：验证编队 + 优势窗口 */
   onRitualDone(src, opt) {
+    this.D.verify = null;
     this.verifyFormation(opt, src);
     if (this.D.st === 'reward') { this.D.st = 'adv'; this.D.advT = ADV_T; this.D.reward = null; }
   },
@@ -119,29 +120,45 @@ Object.assign(World.prototype, {
     const D = this.D; D.t += dt;
     this.updateProps(dt);
     if (D.st === 'goal') this.goalTick(dt);
-    else if (D.st === 'adv') { if (!this.ritual) D.advT -= dt; if (D.advT <= 0) this.previewNext(); }
+    else if (D.st === 'adv') { if (!this.ritual && !D.demo) D.advT -= dt; if (D.advT <= 0) this.previewNext(); }
     else if (D.st === 'preview') {
       const busy = this.enemies.filter((e) => e.alive && !e.fodder && e.x < this.W + 40).length;
-      if (D.t >= PREVIEW_T && (busy < 10 || D.t > 5) && !this.focusBusy()) this.beginBeat(this.beatIdx + 1);
+      if (D.t >= PREVIEW_T && (busy < 10 || D.t > 5) && !this.focusBusy() && !D.demo) this.beginBeat(this.beatIdx + 1);
     } else if (D.st === 'reward' && D.reward === 'core' && D.t > 30 && !this.props.some((p) => p.kind === 'core') && !this.ritual && !this.ritualQueue.length) { D.st = 'adv'; D.advT = 3; }
     // 验收记录：没有主目标、屏幕上也没有可打的东西的时长（优势窗口里验证编队还在就不算）
     const idle = D.st === 'preview' || (D.st === 'adv' && !this.enemies.some((e) => e.alive && !e.isBoss && e.x < this.W));
     if (idle && !this.ritual) { D.noGoalT += dt; this.m.noGoalMax = Math.max(this.m.noGoalMax, D.noGoalT); } else D.noGoalT = 0;
     this.fill(dt);
-    // 首局 45 秒给一次完整大招，教一次
-    if ((this.first || this.tutorial) && !this.tutorCharge && this.runT >= 45 && this.m.bursts === 0 && this.player.stock === 0 && !this.ritual) { this.tutorCharge = true; this.addStock(1); this.emit('flag', { text: '大招充满了 · 按爆发键试试', dur: 1.6 }); }
+    this.burstDemo(dt);
   },
   previewNext() {
     const nb = this.plan[this.beatIdx + 1]; if (!nb) return;
-    this.D.st = 'preview'; this.D.t = 0;
+    this.D.st = 'preview'; this.D.t = 0; this.D.verify = null;
     this.emit('goalNext', { title: nb.goal, kind: nb.kind, portrait: nb.kind === 'surprise' ? nb.surprise : PORTRAIT_OF[nb.kind] || 'jelly', boss: nb.kind === 'boss' });
   },
   focusBusy() { return !!(this.ritual || (this.surprise && this.surprise.busy) || this.bursting); },
+  /* 首次大招教学：只在“预告下一个目标”的空档里开（不和验证编队、装置操作抢）；清掉敌弹、停刷怪、摆一排好打的靶子，
+     同一时间只有这一个中央教学；放过一次（或 9 秒后）就收回，之后只剩大招按钮发光 */
+  burstDemo(dt) {
+    const D = this.D, p = this.player;
+    if (D.demo) {
+      D.demo.t += dt; this.bullets.each((b) => { b.on = false; });
+      if (this.m.bursts > 0 || D.demo.t > 9) { D.demo = null; this.emit('burstDemoEnd'); }
+      return;
+    }
+    if (!(this.first || this.tutorial) || this.tutorCharge || this.m.bursts > 0 || this.runT < 40 || this.ritual || this.ritualQueue.length) return;
+    if (D.st !== 'preview' || this.mapObjs.some((o) => ['idle', 'tow', 'blow', 'boom'].includes(o.state) && o.x < this.W) || (this.surprise && this.surprise.busy)) return;
+    this.tutorCharge = true; D.demo = { t: 0 };
+    if (p.stock < 1) this.addStock(1, false, true);
+    this.clearBullets(true); this.warns = [];
+    for (let r = 0; r < 3; r++) for (let i = 0; i < 6; i++) this.addEnemy(i % 2 ? 'moth' : 'jelly', { x: this.W + 20 + i * 46, y: clamp(p.y + (r - 1) * 70, this.arena.top + 40, this.arena.bottom - 40), path: 'line', vx: -70, fodder: true });
+    this.emit('burstDemo', { name: this.P.burst.name });
+  },
 
   /* ---------- 背景杂兵：一直都有，主目标在场 / 预告 / 仪式时减少 ---------- */
   fill(dt) {
     const D = this.D, st = this.stage;
-    if (this.ritual || (this.surprise && this.surprise.busy)) return;
+    if (this.ritual || (this.surprise && this.surprise.busy) || D.demo) return;
     let rate = st.fill || 2.3;
     if (this.runT < 6) rate *= 0.5;
     if (D.st === 'preview') rate *= 0.35;
@@ -185,8 +202,11 @@ Object.assign(World.prototype, {
     else if (id === 'bomb') { for (let i = 0; i < 10; i++) this.addEnemy('moth', { x: W + 30 + rand(-30, 30), y: clamp(y + rand(-50, 50), top, bot), path: 'line', vx: -120 }); label = '挤成一团：一炸一片'; }
     else { this.spawnFormation('swarm'); label = '一群蛾子：试试新支援'; }
     // 刚拿到打厚甲的能力：再来一只单独的厚甲怪，看看现在几秒能敲碎
-    if ((src === 'wind' || src === 'armor') && this.goal && this.goal.kind === 'armor1') { this.later(1.2, () => { if (this.phase === 'fight') { this.addArmor({ x: W + 60, ty: clamp(p.y + 90, top, bot) }); this.text('再来一只：看看现在几秒敲碎', W * 0.72, clamp(p.y + 30, top, bot), '#e6ecff', 17, 4); } }); }
-    if (label) this.text(`试试看 · ${label}`, W * 0.68, clamp(y - 70, top, bot), '#fff3c8', 17, 4);
+    if ((src === 'wind' || src === 'armor') && this.goal && this.goal.kind === 'armor1') { this.later(1.2, () => { if (this.phase === 'fight') { this.addArmor({ x: W + 60, ty: clamp(p.y + 60, top, bot), verify: true }); this.text('同样的厚甲怪：看看现在几秒敲碎', W * 0.72, clamp(p.y, top, bot), '#e6ecff', 17, 4); } }); }
+    const armorCheck = (src === 'wind' || src === 'armor') && this.goal && this.goal.kind === 'armor1';
+    const info = this.optInfo(opt);
+    this.D.verify = { name: `${info.name} ${info.lv}`, label: armorCheck ? '再来一只厚甲怪：看看现在几秒敲碎' : label };
+    if (label && !armorCheck) this.text(`试试看 · ${label}`, W * 0.68, clamp(y - 70, top, bot), '#fff3c8', 17, 4);
   },
 
   /* ---------- 入场方式 ---------- */
@@ -210,7 +230,7 @@ Object.assign(World.prototype, {
       case 'rift': this.openRift(Math.max(W * 0.6, this.player.x + 340), ty, type === 'armor' && this.goal && this.goal.kind === 'armor1' ? ['moth', 'moth', 'moth', 'moth', 'moth', 'armor'] : [type], { goal: o.goal, tx, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
       case 'rear': this.rearChase(1, null, { type, goal: o.goal, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
       case 'drop': {
-        const side = (this.D.dropSide = -this.D.dropSide), x = rand(W * 0.62, W * 0.8); // 上下交替，一次只从一边进，不会同时封死
+        const side = o.side || (this.D.dropSide = -this.D.dropSide), x = rand(W * 0.62, W * 0.8); // 上下交替，一次只从一边进，不会同时封死
         this.props.push({ kind: 'drop', side, x, t: 0, warn: 1.0, spawn: () => make('drop', { x0: x + 60, y0: side < 0 ? TOP - 50 : BOTTOM + 50, x1: tx, y1: ty, dur: 0.9 }) });
         if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1;
         break;
@@ -234,6 +254,7 @@ Object.assign(World.prototype, {
     }
   },
   spawnFromTrace(tr, type, n) {
+    tr.flash = 1;
     for (let i = 0; i < n; i++) this.addIncoming(type, { path: 'line', vx: -150 }, 'emerge', { x0: tr.x, y0: tr.y, x1: tr.x - 90 - i * 30, y1: clamp(tr.y + tr.side * -1 * (60 + i * 26), this.arena.top + 30, this.arena.bottom - 30), dur: 0.7 + i * 0.08 });
   },
   /* 后方追兵：左边缘先有引擎声和影子，沿看得见的弧线从飞机上方或下方绕到右前方；不要求向后射击 */
@@ -347,8 +368,8 @@ Object.assign(World.prototype, {
     const t = this.t, W = this.W;
     // 持续的场景痕迹：岩壁裂口 / 风吹开的门
     const tr = this.traces;
-    if (tr.crack) drawCrackTrace(g, tr.crack, t);
-    if (tr.door) drawDoorTrace(g, tr.door, t);
+    if (tr.crack) { drawCrackTrace(g, tr.crack, t); drawTraceLabel(g, tr.crack, '岩壁裂口 · 之后会有敌人从这里钻出', '#c9a8ff', t, W); tr.crack.flash = Math.max(0, (tr.crack.flash || 0) - 0.03); }
+    if (tr.door) { drawDoorTrace(g, tr.door, t); drawTraceLabel(g, tr.door, '风吹开的暗门 · 之后会有敌人从这里出来', '#9fe3f0', t, W); tr.door.flash = Math.max(0, (tr.door.flash || 0) - 0.03); }
     for (const P of this.props) {
       switch (P.kind) {
         case 'shell': drawShell(g, P.x, P.y, P.st === 'crack' ? P.t / 0.9 : P.st === 'open' ? 1 : P.st === 'guard' ? 0.95 : 0, P.st === 'open' ? clamp(1 - P.t / 3, 0, 1) : 1, t, P.st === 'guard'); break;
@@ -374,12 +395,26 @@ Object.assign(World.prototype, {
       }
     }
   },
+  /* 奖励装置的当前一步：穿过风环 → 已激活 → 选择强化（之后是“验证新能力”） */
+  rewardStep(k) {
+    if (this.ritual) return this.ritual.st === 'choose' ? '选择强化 · 飞进一个方案' : '强化来了 · 看它转出什么';
+    if (this.ritualQueue.length) return '强化装置启动中…';
+    if (k === 'core') return this.props.some((p) => p.kind === 'core') ? '碰一下精英掉下的核心' : '强化装置启动中…';
+    const o = this.mapObjs.find((q) => q.kind === k && q.reward);
+    if (!o) return REWARD_GOAL[k] || '拿奖励';
+    const st = o.state;
+    if (k === 'wind') return st === 'idle' ? '穿过风车前的风环' : st === 'blow' ? '风环已激活 · 一排敌人被推到炮口前' : '选择强化';
+    if (k === 'mine') return st === 'idle' ? '碰一下发光的矿核' : st === 'tow' ? '把矿核拖到发光的岩壁' : '岩壁炸开了 · 选择强化';
+    if (k === 'npc') return st === 'idle' ? '碰一下伙伴的吊舱' : st === 'tow' ? `沿光带护送到修理点 · 耐久 ${o.pod.hp}/3` : st === 'bail' ? '伙伴自己跳伞去修理点了' : '选择支援';
+    if (k === 'house') return st === 'idle' ? '碰一下梦灯屋的铃铛' : '选择主炮改造';
+    return REWARD_GOAL[k] || '拿奖励';
+  },
   /* ---------- HUD 用的目标信息 ---------- */
   goalHud() {
     const D = this.D, G = this.goal; if (!G) return null;
     const out = { step: this.beatIdx + 1, steps: this.plan.length, title: G.title, portrait: G.portrait, prog: null, opt: null, state: D.st };
-    if (D.st === 'reward') { const k = D.reward; out.title = REWARD_GOAL[k] || '拿奖励'; out.portrait = k; out.prog = null; out.reward = true; }
-    else if (D.st === 'adv') { out.title = '优势时间 · 用新能力扫一扫'; out.portrait = G.portrait; out.adv = true; }
+    if (D.st === 'reward') { const k = D.reward; out.title = this.rewardStep(k); out.portrait = k; out.prog = null; out.reward = true; }
+    else if (D.st === 'adv') { const v = D.verify; out.title = v ? `验证新能力 · ${v.name}` : '优势时间 · 用新能力扫一扫'; out.sub = v ? v.label : null; out.portrait = G.portrait; out.adv = true; }
     else if (D.st === 'preview') { const nb = this.plan[this.beatIdx + 1]; out.title = nb ? `下一个：${nb.goal}` : ''; out.portrait = nb ? (nb.kind === 'surprise' ? nb.surprise : PORTRAIT_OF[nb.kind]) : G.portrait; out.next = true; out.step = this.beatIdx + 2; }
     else {
       const houseWait = this.mapObjs.some((o) => o.kind === 'house' && o.state === 'idle' && o.x < this.W);
@@ -387,7 +422,8 @@ Object.assign(World.prototype, {
       else if (G.kind === 'armor1' || G.kind === 'pack') {
         const e = this.enemies.find((q) => q.alive && q.goal && q.type === 'armor');
         out.prog = { type: 'count', n: G.n, total: G.total, crack: e ? (e.broken ? ARMOR.stages : e.crack || 0) : null, broken: e ? !!e.broken : false };
-        if (e && !e.broken) out.sub = ['对准它连续敲甲片', '裂开一段了 · 继续', '最后一段甲'][e.crack || 0]; else if (e) out.sub = '甲碎了 · 打核心';
+        if (G.kind === 'pack' && this.armorBase !== undefined) out.sub = `敲甲用时：第一只 ${this.armorBase.toFixed(1)} 秒${this.m.armorAfter ? ` → 现在平均 ${this.m.armorAfter.toFixed(1)} 秒` : ''}`;
+        else if (e && !e.broken) out.sub = ['对准它连续敲甲片', '裂开一段了 · 继续', '最后一段甲'][e.crack || 0]; else if (e) out.sub = '甲碎了 · 打核心';
       } else if (G.kind === 'cmdr') { const e = this.enemies.find((q) => q.alive && q.type === 'cmdr'); out.prog = { type: 'hp', u: e ? e.hp / e.maxHp : 0 }; out.sub = e && e.rally > 0 ? '举旗了 · 打旗头水晶！' : '等它举旗再集中火力'; }
       else if (G.kind === 'chase') out.prog = { type: 'count', n: Math.min(G.n, G.total), total: G.total };
       else if (G.kind === 'spawner') { const e = this.enemies.find((q) => q.alive && q.type === 'wreck'); out.prog = { type: 'hp', u: e ? e.hp / e.maxHp : 0 }; }
@@ -434,8 +470,12 @@ function drawCoreProp(g, x, y, t) {
   g.restore();
   drawStepPill(g, x, y - 48, '精英核心 · 碰一下', '#ffd76a', 1);
 }
+function drawTraceLabel(g, tr, text, color, t, W) {
+  const a = tr.born === undefined ? 0 : clamp(1 - (t - tr.born - 3.5) / 0.8, 0, 1);
+  if (a > 0) drawStepPill(g, clamp(tr.x, 170, W - 190), tr.y + (tr.side < 0 ? 78 : -74), text, color, a);
+}
 function drawCrackTrace(g, c, t) {
-  g.save(); g.translate(c.x, c.y);
+  g.save(); g.translate(c.x, c.y); g.globalAlpha = 0.55 + 0.45 * clamp(c.flash || 0, 0, 1); // 场景痕迹：平时压暗，敌人钻出来时亮一下
   const s = c.side; // -1 顶部岩壁 / 1 底部岩壁
   g.fillStyle = '#231a4f'; g.beginPath(); g.moveTo(-90, 0); g.lineTo(-60, -s * 30); g.lineTo(-20, -s * 12); g.lineTo(10, -s * 44); g.lineTo(50, -s * 16); g.lineTo(90, 0); g.lineTo(90, s * 80); g.lineTo(-90, s * 80); g.closePath(); g.fill();
   g.fillStyle = 'rgba(10,4,30,0.95)'; g.beginPath(); g.ellipse(0, -s * 4, 36, 18, 0, 0, TAU); g.fill();
@@ -444,9 +484,8 @@ function drawCrackTrace(g, c, t) {
   g.restore();
 }
 function drawDoorTrace(g, d, t) {
-  g.save(); g.translate(d.x, d.y); g.globalAlpha = 0.9;
-  glowAt(g, 0, 0, 70, GLOW.cyan, 0.4 + Math.sin(t * 2) * 0.1);
-  g.fillStyle = 'rgba(30,24,80,0.9)'; g.strokeStyle = '#9fe3f0'; g.lineWidth = 2.5;
+  g.save(); g.translate(d.x, d.y); g.globalAlpha = 0.4 + 0.5 * clamp(d.flash || 0, 0, 1); // 只是场景里的暗门：不发光、不像能进去的入口
+  g.fillStyle = 'rgba(30,24,80,0.9)'; g.strokeStyle = 'rgba(159,227,240,0.55)'; g.lineWidth = 2;
   g.beginPath(); g.moveTo(-26, 34); g.lineTo(-26, -10); g.quadraticCurveTo(0, -44, 26, -10); g.lineTo(26, 34); g.closePath(); g.fill(); g.stroke();
   g.restore();
 }

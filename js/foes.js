@@ -91,7 +91,7 @@ Object.assign(World.prototype, {
       const y = clamp(this.player.y, this.arena.top + 60, this.arena.bottom - 60), h = 96;
       this.later(0.9, () => {
         if (!e.alive || this.state !== 'play') return;
-        this.addWarn({ kind: 'zone', x: 0, y: y - h / 2, w: e.x - 40, h, tWarn: 1.0, onFire: () => { if (!e.alive) return; for (let i = 0; i < 6; i++) this.fire('pink', e.x - 30, y + (i - 2.5) * 14, Math.PI, 330, { silent: i > 0 }); } });
+        this.addWarn({ kind: 'zone', x: 0, y: y - h / 2, w: e.x - 40, h, tWarn: 1.0, onFire: () => { if (!e.alive) return; for (let i = 0; i < 6; i++) this.fire('pink', e.x - 30, y + (i - 2.5) * 14, Math.PI, 330, { silent: i > 0, from: 'lane' }); } });
       });
     }
   },
@@ -110,6 +110,9 @@ Object.assign(World.prototype, {
   /* ---------- 伤害：厚甲 / 护盾 ---------- */
   armorDamage(e, dmg, o) {
     const k = ARMOR_K[o.kind] !== undefined ? ARMOR_K[o.kind] : ARMOR_K.shot;
+    // 敲甲用时只算“正在连续打它”的时间（两下之间隔超过 0.35 秒不算），被大招直接轰开的不计入对比
+    if (e.lastHitT !== undefined && this.t - e.lastHitT < 0.35) e.focusT = (e.focusT || 0) + (this.t - e.lastHitT);
+    e.lastHitT = this.t; if (o.kind === 'burst' || o.kind === 'clock') e.bursted = true;
     const before = e.armorHp; e.armorHp -= dmg * k; e.hitFlash = 0.6;
     const st = Math.min(ARMOR.stages - 1, Math.floor((1 - Math.max(0, e.armorHp) / e.armorMax) * ARMOR.stages));
     // 命中：金属声 + 碎屑沿子弹方向飞 + 轻微后退
@@ -123,6 +126,15 @@ Object.assign(World.prototype, {
       return over;
     }
     return 0;
+  },
+  /* 敲碎厚甲的用时（只算连续打它的时间）：第一只当基准，之后同型的直接和它比 */
+  armorTimed(e) {
+    if (!e.broken || e.bursted || !e.focusT || this.mode !== 'run') return;
+    const dt = e.focusT + 0.12, M = this.m; M.armorTimes = M.armorTimes || []; M.armorTimes.push(dt);
+    if (this.armorBase === undefined) { this.armorBase = dt; M.armorFirst = dt; this.text(`第一只厚甲：敲碎用了 ${dt.toFixed(1)} 秒`, e.x, e.y - 76, '#e6ecff', 18, 5); return; }
+    const later = M.armorTimes.slice(1); M.armorAfter = later.reduce((a, b) => a + b, 0) / later.length;
+    const k = 1 - dt / this.armorBase;
+    if (M.armorTimes.length <= 4) this.text(k > 0.12 ? `${dt.toFixed(1)} 秒 · 比第一只快 ${Math.round(k * 100)}%` : `${dt.toFixed(1)} 秒`, e.x, e.y - 76, k > 0.12 ? '#9ff2c8' : '#e6ecff', 18, 5);
   },
   armorBreak(e, o) {
     e.broken = true; e.crack = ARMOR.stages; e.brokeT = this.t;

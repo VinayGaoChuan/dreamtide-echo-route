@@ -32,7 +32,7 @@ class World {
     this.settings = o.settings; this.cb = o.cb || {};
     this.planeId = o.plane || 'moon'; this.P = PLANES[this.planeId];
     this.stats = o.stats || planeStats(null, this.planeId);
-    this.first = !!o.first; this.tutorial = !!o.tutorial;
+    this.first = !!o.first; this.tutorial = !!o.tutorial; this.targetName = o.target || null; // 这一局追的流派（和大厅“下一局目标”一致）
     this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id; this.ultCap = o.ultCap || 1;
     const cos = o.cos || {};
     const expC = COSMETICS.exp.find((c) => c.id === cos.exp);
@@ -100,7 +100,7 @@ class World {
       this.updateBurst(sdt);
       if (this.mode === 'run') { this.updateDirector(sdt); this.updateSurprise(sdt); }
       else this.updatePreview(sdt);
-      if (this.boss) { this.boss.update(sdt); if (this.bossProxy) { this.bossProxy.x = this.boss.x; this.bossProxy.y = this.boss.y; } }
+      if (this.boss) { this._firer = 'boss'; this.boss.update(sdt); this._firer = null; if (this.bossProxy) { this.bossProxy.x = this.boss.x; this.bossProxy.y = this.boss.y; } }
       if (this.bossIntroT > 0) this.bossIntroT -= sdt;
     } else if (this.state === 'dying') {
       this.stateT -= dt; if (this.stateT <= 0 && !this.done) this.finish(false);
@@ -162,7 +162,7 @@ class World {
       for (const e of this.enemies) {
         if (!e.alive || e.leaving) continue;
         const rr = (e.isBoss ? 110 : e.r) + 8;
-        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { this.hurtPlayer(1); if (!e.elite && !e.isBoss && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
+        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { this.hurtPlayer(1, 'c:' + (e.chaser ? 'chaser' : e.isBoss ? 'boss' : e.type)); if (!e.elite && !e.isBoss && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
       }
     }
   }
@@ -204,9 +204,10 @@ class World {
     const na = a + clamp(d, -s.homTurn * dt, s.homTurn * dt), sp = Math.hypot(s.vx, s.vy);
     s.vx = Math.cos(na) * sp; s.vy = Math.sin(na) * sp;
   }
-  hurtPlayer(n) {
+  hurtPlayer(n, src) {
     const p = this.player;
     if (!p.alive || p.inv > 0 || this.state !== 'play' || this.mode === 'preview') return;
+    if (!(this.ritual && this.ritual.st !== 'resume')) { const c = hurtCat(src); this.m.hurt = this.m.hurt || {}; this.m.hurt[c] = (this.m.hurt[c] || 0) + 1; this.m.lastHurt = c; } // 受伤来源：结算复盘用
     if (this.ritual && this.ritual.st !== 'resume') return; // 升级仪式期间不会受伤
     if (p.cloudShield) { p.cloudShield = false; p.inv = 0.8; Sound.sfx('shieldPop'); this.text('缓冲云挡住了', p.x, p.y - 40, '#dcefff', 16, 4); for (let i = 0; i < 10; i++) this.part('puff', p.x, p.y, rand(-160, 160), rand(-160, 160), 0.6, rand(8, 14), 'rgba(255,255,255,0.9)'); return; }
     p.hp -= n; p.inv = 1.4; p.hurtT = 1; this.m.hitsTaken++;
@@ -344,10 +345,12 @@ class World {
       if (e.pull) { const a = angTo(e.x, e.y, e.pull.x, e.pull.y); e.x += Math.cos(a) * e.pull.v * dt; e.y += Math.sin(a) * e.pull.v * dt; continue; }
       const mdt = dt * (e.frozen > 0 ? 0.3 : 1);
       if (!this.moveFoe(e, mdt, p)) this.moveEnemy(e, mdt, p);
+      this._firer = e.chaser ? 'chaser' : e.type;
       if (e.frozen <= 0 && this.mode === 'run' && this.state === 'play' && !e.fodder && !quiet && !this.foeFire(e, dt, p)) this.enemyFire(e, dt, p); // 仪式期间敌人不发起新攻击
       if (e.life && e.t > e.life && !e.leaving) { e.leaving = true; e.vx = -320; if (e.path !== 'line') e.path = 'line'; }
       if (e.x < -80 || e.x > this.W + 400 || e.y < -120 || e.y > LH + 120) { e.alive = false; if (e.x < -80 && !e.fodder && !e.escort && this.mode === 'run') this.m.leaks++; } // 漏过只影响额外评分
     }
+    this._firer = null;
     this.enemies = this.enemies.filter((e) => e.alive);
   }
   moveEnemy(e, dt, p) {
@@ -431,7 +434,7 @@ class World {
     this.recentKills.push(this.t); while (this.recentKills.length && this.t - this.recentKills[0] > 0.4) this.recentKills.shift();
     // 击杀声：连续击杀音高慢慢升（有上限）；精英 / 厚甲有自己的终结声
     Sound.sfx(e.elite ? 'eliteKill' : armored ? 'armorKill' : 'kill', { pan: this.pan(e.x), gap: 35, k: Math.min(6, this.recentKills.length - 1), prio: e.elite });
-    if (e.elite) { this.hitStop(0.055); this.rumble(0.8, 0.6, 140); } else if (armored) this.rumble(0.3, 0.5, 70);
+    if (e.elite) { this.hitStop(0.055); this.rumble(0.8, 0.6, 140); } else if (armored) { this.armorTimed(e); this.rumble(0.3, 0.5, 70); }
     if (this.bursting) this.burstKills.push({ x: e.x, y: e.y, key: e.elite || armored });
     if (this.recentKills.length >= 4 && this.chainCd <= 0) { this.chainCd = 0.5; this.fx(e.x, e.y, 2, 90); if (this.chainHiCd <= 0) { this.chainHiCd = 8; this.highlight(); } }
     if (e.elite) {
@@ -476,7 +479,7 @@ class World {
     const b = this.bullets.get(); if (!b) return null;
     b.on = true; b.type = type; b.x = x; b.y = y; b.vx = Math.cos(ang) * spd; b.vy = Math.sin(ang) * spd;
     b.r = B_RADIUS[type] || 7; b.t = 0; b.life = o.life || 12; b.rot = ang; b.spin = type === 'blue' ? rand(-3, 3) : 0; b.ghost = o.ghost || 0;
-    b.src = o.noRepeat ? null : { x, y, a: ang, s: spd, type }; b.pull = null;
+    b.src = o.noRepeat ? null : { x, y, a: ang, s: spd, type }; b.pull = null; b.from = o.from || this._firer || 'shot';
     if (!o.silent) Sound.sfx({ pink: 'spawnPink', blue: 'spawnBlue', gold: 'spawnGold', white: 'laser' }[type], { pan: this.pan(x), gap: 110 });
     return b;
   }
@@ -499,7 +502,7 @@ class World {
       if (b.x < -60 || b.x > W + 60 || b.y < -60 || b.y > LH + 60 || b.t > b.life) { this.recordGone(b); b.on = false; return; }
       if (wall && Math.abs(b.x - wall.x) < 22 && Math.abs(b.y - wall.y) < 150) { b.on = false; this.part('puff', b.x, b.y, rand(-40, 40), rand(-40, 40), 0.4, 8, 'rgba(255,255,255,0.8)'); return; }
       if (!p.alive || this.state !== 'play') return;
-      if (dist2(b.x, b.y, p.x, p.y) < (p.r + b.r) * (p.r + b.r) && p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud')) { b.on = false; this.hurtPlayer(1); }
+      if (dist2(b.x, b.y, p.x, p.y) < (p.r + b.r) * (p.r + b.r) && p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud')) { b.on = false; this.hurtPlayer(1, 'b:' + (b.from || 'shot')); }
     });
     if (wall) { wall.t -= dt; if (wall.t <= 0) this.cloudWall = null; }
   }
@@ -516,7 +519,7 @@ class World {
       if (w.fired && w.beamT > 0) {
         w.beamT -= dt;
         const ex = w.x + Math.cos(w.a) * w.len, ey = w.y + Math.sin(w.a) * w.len;
-        if (this.state === 'play' && p.alive && p.inv <= 0 && segDist2(p.x, p.y, w.x, w.y, ex, ey) < (w.w / 2 + p.r) * (w.w / 2 + p.r)) this.hurtPlayer(1);
+        if (this.state === 'play' && p.alive && p.inv <= 0 && segDist2(p.x, p.y, w.x, w.y, ex, ey) < (w.w / 2 + p.r) * (w.w / 2 + p.r)) this.hurtPlayer(1, 'laser');
       }
     }
     this.warns = this.warns.filter((w) => !w.fired || w.beamT > 0 || (w.post && w.t < w.tWarn + w.post));
@@ -702,10 +705,10 @@ class World {
     while (p.burst >= 1 && p.stock < this.ultCap) { p.burst -= 1; this.addStock(1, true); }
     if (p.stock >= this.ultCap) { this.m.dust += p.burst * 30; p.burst = 0; }
   }
-  addStock(n, fromCharge) {
+  addStock(n, fromCharge, quiet) {
     const p = this.player, before = p.stock;
     p.stock = Math.min(this.ultCap, p.stock + n);
-    if (p.stock > before) { this.emit('burstReady', { stock: p.stock, cap: this.ultCap }); Sound.sfx('resFull'); }
+    if (p.stock > before) { if (!quiet) this.emit('burstReady', { stock: p.stock, cap: this.ultCap }); Sound.sfx('resFull'); }
     else if (!fromCharge) this.m.dust += 30 * n;
     if (p.stock >= this.ultCap) p.burst = 0;
   }
@@ -995,7 +998,7 @@ class World {
     return {
       win, plane: this.planeId, runT: this.runT, stats: m,
       stage: this.stageId, build: this.buildSummary(), progress: win ? 1 : clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1),
-      memories: this.pickMemories ? this.pickMemories() : [], clue: pick(STAGE_CLUES[this.stageId] || ['']), goalTimes: (m.goalTimes || []).slice(),
+      memories: this.pickMemories ? this.pickMemories() : [], hurt: Object.assign({}, m.hurt || {}), lastHurt: m.lastHurt || null, clue: pick(STAGE_CLUES[this.stageId] || ['']), goalTimes: (m.goalTimes || []).slice(),
       choiceAvg: m.choiceTimes.length ? m.choiceTimes.reduce((a, b) => a + b, 0) / m.choiceTimes.length : null,
       skills: [...GUN_ORDER.filter((id) => this.gun[id] > 0).map((id) => ({ id, lv: this.gun[id] })), ...(this.support ? [{ id: this.support.id, lv: this.support.ulv }] : [])],
       syns: [...this.links], stream: this.buildName(), streamId: this.topId(),
@@ -1029,7 +1032,7 @@ class World {
     let want = null;
     if (this.hintStep === 0) want = 'move';
     else if (this.ritual && this.ritual.first && this.ritual.st === 'choose') want = 'offer';
-    else if (p.stock >= 1 && !this.bursting && this.m.bursts === 0) want = 'burst';
+    else if (p.stock >= 1 && !this.bursting && this.m.bursts === 0 && !(this.D && this.D.demo) && !this.ritual && !this.warns.length && !this.mapObjs.some((o) => ['idle', 'tow', 'blow'].includes(o.state) && o.x < this.W)) want = 'burst';
     if (this.hintStep >= 9) want = null;
     if (want !== this.hintShown) { this.hintShown = want; this.emit('hint', { id: want }); }
   }
@@ -1200,6 +1203,8 @@ class World {
     if (e.elite) { const w = 80, y = e.y - e.r - 26; g.fillStyle = 'rgba(14,11,40,0.75)'; g.fillRect(e.x - w / 2, y, w, 7); g.fillStyle = '#ff9d8c'; g.fillRect(e.x - w / 2, y, (w * Math.max(0, e.hp)) / e.maxHp, 7); }
     if (e.armorMax) drawArmorPips(g, e);
     if (e.goal && this.mode === 'run') drawGoalMark(g, e, t);
+    // 第一只厚甲怪：一步一步教 —— 对准甲片 → 破甲 → 打核心
+    if (e.type === 'armor' && e.goal && this.goal && this.goal.kind === 'armor1') drawStepPill(g, e.x, e.y - e.r - 62, e.broken ? '甲碎了 · 打核心！' : e.crack ? '甲片在裂 · 继续对准打' : '对准甲片连续打', e.broken ? '#ff9fcf' : '#e6ecff', 0.95);
   }
   /* 入场中的敌人：背景推近 / 裂缝钻出时从小变大、半透明；后方绕行时带虚线轮廓，都还不能碰撞 */
   drawIncoming(g, q) {

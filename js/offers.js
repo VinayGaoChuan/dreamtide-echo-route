@@ -14,6 +14,12 @@ const QUALITY = [{ name: '普通', color: '#e8e2ff' }, { name: '精良', color: 
 const GATE_R = 56;       // 候选确认圈半径
 const GATE_DWELL = 0.3;  // 在圈里停多久确认
 const SLOT_OF = { gun: 'gun', support: 'support', bmod: 'bmod', link: 'link', res: 'res' };
+/* 两种主炮改造之间（没有联动时）的配合说明 */
+const GUN_PAIR = {
+  'multi|pierce': '每一路子弹都会穿透，整列敌人扫得更干净', 'multi|homing': '每一路子弹都会拐弯追敌', 'multi|bomb': '子弹多了，标记和爆炸也更多',
+  'homing|pierce': '穿过第一个敌人后还会拐向下一个', 'homing|bomb': '追上去标记，四散的敌人也会连着炸',
+};
+const ARMOR_FIT = { multi: '对厚甲：每一路都在敲甲片，敲得更快', bomb: '对厚甲：爆炸敲甲比子弹更有效', homing: '对厚甲：它上下晃也打得中', pierce: '对厚甲编队：一发能敲一整列的甲' };
 
 Object.assign(World.prototype, {
   initBuild() {
@@ -114,7 +120,7 @@ Object.assign(World.prototype, {
   },
   optInfo(o) {
     const extra = o.bonus ? ` · 附带大招能量 +${Math.round(o.bonus * 100)}%` : '';
-    if (o.kind === 'gun' || o.kind === 'support') { const S = SKILLS[o.id]; return { name: S.name, lv: o.from ? `Lv${o.from}→${o.to}` : `Lv${o.to}`, desc: S.lv[o.to - 1] + extra, icon: S.canvas, color: S.color, tag: (o.kind === 'gun' ? '主炮' : '支援') + (o.why ? ` · ${o.why}` : ''), replace: o.replace ? `替换 ${SKILLS[o.replace.id].name} Lv${o.replace.lv}` : null }; }
+    if (o.kind === 'gun' || o.kind === 'support') { const S = SKILLS[o.id]; return { name: S.name, lv: o.from ? `Lv${o.from}→${o.to}` : `Lv${o.to}`, desc: S.lv[o.to - 1] + extra, icon: S.canvas, color: S.color, tag: o.kind === 'gun' ? '主炮' : '支援', why: o.why || null, replace: o.replace ? `替换 ${SKILLS[o.replace.id].name} Lv${o.replace.lv}` : null }; }
     if (o.kind === 'bmod') { const B = BURST_MODS[o.id]; return { name: B.name, lv: o.from ? 'Lv1→2' : `Lv${o.to}`, desc: B.lv[o.to - 1] + extra, icon: 'charge', color: B.color, tag: '大招', replace: o.replace ? `替换 ${BURST_MODS[o.replace.id].name}` : null }; }
     if (o.kind === 'link') { const L = SYNERGIES[o.id]; return { name: L.name, lv: '联动', desc: L.desc + extra, icon: 'star', color: '#ffd76a', tag: '联动', replace: null }; }
     return o.id === 'charge' ? { name: '大招能量', lv: '', desc: '大招充能 +50%', icon: 'charge', color: '#ffd76a', tag: '资源' } : { name: '恢复', lv: '', desc: '生命 +1', icon: 'heart', color: '#6fe39a', tag: '资源' };
@@ -202,9 +208,9 @@ Object.assign(World.prototype, {
     if (st === 'roll') Sound.sfx('spin', { ui: true });
     if (st === 'reveal') {
       // 两个安全候选区：在飞机前方（飞机太靠右时放到它左边），上下各一个，离飞机至少 150
-      const top = this.arena.top + 90, bot = this.arena.bottom - 110, mid = (top + bot) / 2, left = p.x > this.W * 0.55;
-      const gx = left ? Math.max(this.W * 0.2, p.x - 300) : Math.min(this.W * 0.74, p.x + 300);
-      R.gates = R.opts.map((opt, i) => ({ opt, info: this.optInfo(opt), x: R.x, y: R.y, tx: gx, ty: clamp(mid + (i ? 135 : -135), top, bot), near: 0, dwell: 0, alpha: 0 }));
+      const top = this.arena.top + 96, bot = this.arena.bottom - 100, mid = (top + bot) / 2, left = p.x > this.W * 0.55, side = left ? -1 : 1;
+      const gx = left ? clamp(p.x - 250, 350, this.W * 0.7) : clamp(p.x + 250, this.W * 0.3, this.W - 350); // 确认圈朝着飞机，卡片在圈的另一边
+      R.gates = R.opts.map((opt, i) => { const info = Object.assign(this.optInfo(opt), this.fitNote(opt)); return { opt, info, side, x: R.x, y: R.y, tx: gx, ty: clamp(mid + (i ? 135 : -135), top, bot), near: 0, dwell: 0, alpha: 0 }; });
       R.spin = 0.4; Sound.sfx('reveal', { r: R.qNow >= 2 ? 'SR' : R.qNow ? 'R' : 'N', ui: true });
     }
     if (st === 'choose') { R.px = p.x; R.py = p.y; }
@@ -321,33 +327,61 @@ Object.assign(World.prototype, {
     if (R.st === 'choose' && p.alive) {
       if (R.first) R.gates.forEach((G, i) => { if (G.near < 0.5) drawPointer(g, p.x, p.y, G.x, G.y, G.info.color, t + i); });
       g.save(); g.globalAlpha = 0.6 + Math.sin(t * 6) * 0.15; g.strokeStyle = '#dff2ff'; g.lineWidth = 2.5; g.setLineDash([5, 6]); g.beginPath(); g.arc(p.x, p.y, 38, 0, TAU); g.stroke(); g.setLineDash([]); g.restore();
-      drawStepPill(g, p.x, p.y + 58, '飞进一个方案 · 战场慢放中', '#dff2ff', 1);
+      if (!R.first) drawStepPill(g, this.W / 2, this.arena.bottom - 18, '飞进一个方案的圆圈 · 战场慢放中，不会受伤', '#dff2ff', 1); // 固定在底部，不跟着飞机压住卡片
     } else if (R.st !== 'resume' && p.alive) { // 稳住期间：清楚的护盾
       g.save(); g.strokeStyle = 'rgba(223,242,255,0.85)'; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, 36, 0, TAU); g.stroke(); glowAt(g, p.x, p.y, 60, 'rgba(200,235,255,0.6)', 0.4); g.restore();
     } else if (R.st === 'resume' && p.alive) { const a = 1 - R.t / T.resume; g.save(); g.globalAlpha = a; g.strokeStyle = '#dff2ff'; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, 36 + (1 - a) * 20, 0, TAU); g.stroke(); g.restore(); }
     if (R.st === 'show') this.drawCentral(g, R);
     if (R.st === 'fly') { const G = R.gates[R.pick]; glowAt(g, R.fx, R.fy, 46, hexA(G.info.color, 0.9), 0.9); drawIcon(g, G.info.icon, R.fx, R.fy, 40, G.info.color); }
   },
+  /* 候选卡：确认圈在卡片外侧（朝飞机那一边），圈里只放图标；卡片按 标签 / 名称 / 效果 / 和当前 Build 的关系 分行 */
   drawGate(g, G, R, i) {
-    const I = G.info, t = this.t, s = 1 + G.near * 0.08, qc = QUALITY[R.qNow].color;
-    g.save(); g.globalAlpha = G.alpha; g.translate(G.x, G.y); g.scale(s, s);
-    const w = 220, h = 136;
-    glowAt(g, 0, 0, 130, hexA(I.color, 0.7), 0.3 + G.near * 0.3);
+    const I = G.info, t = this.t, qc = QUALITY[R.qNow].color, side = G.side || 1, s = 1 + G.near * 0.06;
+    const w = 262, h = I.why ? 186 : 168, cx = G.x + side * (GATE_R + 12 + w / 2), cy = G.y;
+    g.save(); g.globalAlpha = G.alpha;
+    glowAt(g, G.x, G.y, 110, hexA(I.color, 0.7), 0.3 + G.near * 0.3);
+    // 卡片
+    g.save(); g.translate(cx, cy); g.scale(s, s);
     g.fillStyle = 'rgba(24,19,64,0.97)'; g.strokeStyle = R.qNow ? qc : I.color; g.lineWidth = 3 + R.qNow;
-    g.beginPath(); g.roundRect ? g.roundRect(-w / 2, -44, w, h, 18) : g.rect(-w / 2, -44, w, h); g.fill(); g.stroke();
-    g.strokeStyle = I.color; g.lineWidth = 3; g.setLineDash([8, 7]); g.lineDashOffset = -t * 30; g.beginPath(); g.arc(0, -44, GATE_R - 8, 0, TAU); g.stroke(); g.setLineDash([]);
-    g.fillStyle = 'rgba(40,30,100,0.95)'; g.beginPath(); g.arc(0, -44, 36, 0, TAU); g.fill();
-    drawIcon(g, I.icon, 0, -44, 38, I.color);
-    if (G.dwell > 0) { g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.arc(0, -44, GATE_R - 8, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(G.dwell / GATE_DWELL, 0, 1)); g.stroke(); }
-    g.textAlign = 'center';
-    g.font = mapFont(21); g.fillStyle = '#fff6ee'; g.fillText(`${I.name} ${I.lv}`, 0, 14);
+    g.beginPath(); g.roundRect ? g.roundRect(-w / 2, -h / 2, w, h, 16) : g.rect(-w / 2, -h / 2, w, h); g.fill(); g.stroke();
+    const L = -w / 2 + 14; g.textAlign = 'left';
+    g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = I.color; g.fillText(I.tag, L, -h / 2 + 22);
+    const chip = I.target ? `目标流派 · ${I.target}` : R.qNow ? QUALITY[R.qNow].name : '';
+    if (chip) { g.textAlign = 'right'; g.fillStyle = I.target ? '#ffe38a' : qc; g.fillText(chip, w / 2 - 12, -h / 2 + 22); g.textAlign = 'left'; }
+    g.font = mapFont(21); g.fillStyle = '#fff6ee'; g.fillText(`${I.name} ${I.lv}`, L, -h / 2 + 50);
+    let y0 = -h / 2 + 74;
+    if (I.why) { g.font = '700 13px "Noto Sans SC", sans-serif'; g.fillStyle = '#ffe38a'; g.fillText(`用途：${I.why}`, L, y0); y0 += 20; } // 战术用途单独一行，不和标签挤
     g.font = '500 13px "Noto Sans SC", sans-serif'; g.fillStyle = 'rgba(230,222,255,0.92)';
-    wrapText(I.desc, 15).slice(0, 2).forEach((ln, k) => g.fillText(ln, 0, 34 + k * 17));
-    g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = I.color; g.textAlign = 'left'; g.fillText(I.tag, -w / 2 + 12, -28); g.textAlign = 'center';
-    if (R.qNow) { g.fillStyle = qc; g.fillText(QUALITY[R.qNow].name, w / 2 - 28, -28); }
-    if (I.replace) { g.fillStyle = '#ffb2a8'; g.fillText(I.replace, 0, 84); }
-    if (R.st === 'choose') { g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.6)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : G.near > 0.5 ? '飞进圆圈停一下' : '', 0, -98); }
+    const desc = wrapText(I.desc, 17).slice(0, 2); desc.forEach((ln, k) => g.fillText(ln, L, y0 + k * 17));
+    let y = y0 + desc.length * 17 + 6;
+    if (I.fit) { g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = '#9ff2c8'; wrapText(I.fit, 19).slice(0, 2).forEach((ln, k) => g.fillText(ln, L, y + k * 16)); y += 34; }
+    if (I.replace) { g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = '#ffb2a8'; g.fillText(I.replace, L, Math.min(y, h / 2 - 10)); }
     g.restore();
+    // 确认圈（卡片外）
+    g.save(); g.translate(G.x, G.y); g.scale(s, s);
+    g.fillStyle = 'rgba(40,30,100,0.95)'; g.beginPath(); g.arc(0, 0, GATE_R - 14, 0, TAU); g.fill();
+    g.strokeStyle = I.color; g.lineWidth = 3; g.setLineDash([8, 7]); g.lineDashOffset = -t * 30; g.beginPath(); g.arc(0, 0, GATE_R - 4, 0, TAU); g.stroke(); g.setLineDash([]);
+    drawIcon(g, I.icon, 0, 0, 40, I.color);
+    if (G.dwell > 0) { g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.arc(0, 0, GATE_R - 4, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(G.dwell / GATE_DWELL, 0, 1)); g.stroke(); }
+    if (R.st === 'choose') { g.textAlign = 'center'; g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.7)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : '飞进圆圈', 0, GATE_R + 16); }
+    g.restore();
+    g.restore();
+  },
+  /* 这张卡和当前 Build 的关系：会和已有能力怎么配合 / 是不是目标流派的一环；联动没凑齐时写清还缺什么 */
+  fitNote(o) {
+    const b = this.buildSummary(), P = buildPlan(b, this.targetName), own = (id) => buildOwned(b, id);
+    const hasAim = !!this.targetName || P.have.length > 0; // 第一次选择前还没有方向，不硬塞一个“目标流派”
+    const target = hasAim && (o.kind === 'link' ? o.id === P.link : P.comps.includes(o.id) && !own(o.id)) ? P.name : null;
+    let fit = '';
+    if (o.kind === 'link') fit = '两样都已经有了：选它就激活联动';
+    else if (o.kind === 'gun' || o.kind === 'support') {
+      const others = [...GUN_ORDER.filter((id) => id !== o.id && own(id)), ...(this.support && this.support.id !== o.id && !(o.replace && o.replace.id === this.support.id) ? [this.support.id] : [])];
+      for (const x of others) { const k = synKey(o.id, x); if (SYNERGIES[k] && !this.links.has(k)) { fit = `和已有的${SKILLS[x].name}能凑成「${SYNERGIES[k].name}」：拿到后联动会出现在之后的升级里`; break; } }
+      if (!fit) for (const x of others) { const n = GUN_PAIR[o.id + '|' + x] || GUN_PAIR[x + '|' + o.id]; if (n) { fit = `配合已有的${SKILLS[x].name}：${n}`; break; } }
+      if (!fit && this.goal && (this.goal.kind === 'armor1' || this.goal.kind === 'pack')) fit = ARMOR_FIT[o.id] || '';
+      if (!fit && o.from > 0) fit = '已经在用：直接升一级';
+    }
+    return { fit, target };
   },
   /* 中央展示：大图标 + 名字 + 等级变化 + 一小段演示；0.8~1.2 秒 */
   drawCentral(g, R) {

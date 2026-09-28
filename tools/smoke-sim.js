@@ -61,7 +61,7 @@ function run(stage, plane, level, cap, pickIdx, godmode) {
   const ct = m.choiceTimes || [];
   return { stage, plane, lv: level, pick: pickIdx, win: res && res.win, run: f(res ? res.runT : t), boss: f(res && res.bossTime), kill: f(m.firstKill), choice1: f(m.firstSkill), choices: ct.length, choiceAvg: f(ct.length ? ct.reduce((a, b) => a + b, 0) / ct.length : null), miss: m.offerMiss || 0,
     avgKill: f(res && res.avgKill), gap: f(m.gapMax), kills: m.kills, kpm: f(m.kills / ((res ? res.runT : t) / 60)), leaks: m.leaks, backlogs: m.backlogs || 0, hits: m.hitsTaken, bursts: m.bursts, stockIdle: f(m.stockIdle), inter: m.interacts, interMax: f(m.interactMax), maxE, maxB,
-    noGoal: f(m.noGoalMax), breaks: m.breaks, build: pickLog.join(' > '), stream: res && res.stream, goals: goalLog.join(' '), mem: res && res.memories && res.memories.join('/') };
+    noGoal: f(m.noGoalMax), breaks: m.breaks, armor: f(m.armorFirst) + '→' + f(m.armorAfter), hurt: res && res.hurt ? Object.entries(res.hurt).map(([k, v]) => k + v).join(',') : '', last: res && res.lastHurt, build: pickLog.join(' > '), stream: res && res.stream, goals: goalLog.join(' '), mem: res && res.memories && res.memories.join('/') };
 }
 `);
 const show = (o) => console.log(JSON.stringify(o));

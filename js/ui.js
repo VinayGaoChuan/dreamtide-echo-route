@@ -220,11 +220,12 @@ function nextStep() {
   return `挑战 ${next} ${STAGES[next].name}${cost !== null ? ` · 升级还差 ${Math.ceil(cost - m.stardust)} 星尘` : ''}`;
 }
 function lureRows(L) {
-  const path = (L.path || []).map((id, i) => `${i ? '<span class="arrow">›</span>' : ''}<span class="chip" style="color:${(SKILLS[id] || { color: '#ffd76a' }).color}">${SKILLS[id] ? SKILLS[id].name : SYNERGIES[id] ? SYNERGIES[id].name : id}</span>`).join('');
-  return `<div class="lure-row"><span class="label">本局</span><span><b>${esc(L.stream || '还没成型')}</b></span></div>
-    <div class="lure-row"><span class="label">想完成</span><span class="lure-path"><b>${esc(L.buildName || '')}</b>${path}</span></div>
-    <div class="lure-row"><span class="label">下一步</span><span>${esc(nextStep())}</span></div>${L.advice ? `
-    <div class="lure-row"><span class="label">缺什么</span><span class="advice">${L.advice}</span></div>` : ''}${L.npc ? `
+  const P = L.plan || buildPlan(null, L.target || L.buildName || null, 0);
+  const path = P.path.map((id, i) => `${i ? '<span class="arrow">›</span>' : ''}<span class="chip ${P.have.includes(id) || (id === P.link && P.linkOwned) ? 'owned' : ''}" style="color:${(SKILLS[id] || { color: '#ffd76a' }).color}">${compName(id).replace(/[「」]/g, '')}</span>`).join('');
+  return `<div class="lure-row"><span class="label">上一局</span><span><b>${esc(L.stream || '还没成型')}</b></span></div>
+    <div class="lure-row"><span class="label">目标</span><span class="lure-path"><b>${esc(P.name)}</b>${path}</span></div>
+    <div class="lure-row"><span class="label">缺什么</span><span class="advice">${planHtml(P, false, true)}</span></div>
+    <div class="lure-row"><span class="label">出发前</span><span>${esc(nextStep())}</span></div>${L.npc ? `
     <div class="lure-row"><span class="label">想救的</span><span class="lure-npc"><canvas width="64" height="64" data-npc="${L.npc}" data-mood="sleep"></canvas>${esc(NPCS[L.npc].name)}还困在航线上</span></div>` : ''}`;
 }
 
@@ -243,7 +244,7 @@ function startRun(stageId) {
   G.bg = 'world'; G.paused = false; G.mapHint = null; G.hintId = null;
   G.tutorial = { on: !m.tutorialDone };
   G.world = new World({
-    mode: 'run', W: G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first, tutorial: !m.tutorialDone, settings: m.settings, scene: G.sea, cos: m.cosmetics, seenMap: Object.keys(m.codex.map || {}),
+    mode: 'run', W: G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first, target: (m.nextHint && (m.nextHint.target || m.nextHint.buildName)) || null, tutorial: !m.tutorialDone, settings: m.settings, scene: G.sea, cos: m.cosmetics, seenMap: Object.keys(m.codex.map || {}),
     cb: {
       onEnd: onRunEnd,
       onSkill: (sid) => { m.codex.skills[sid] = 1; },
@@ -299,7 +300,7 @@ function onRunEnd(res) {
   Tele.add('kills', st.kills); Tele.add('bursts', st.bursts); Tele.add('synergies', st.syns);
   const runs = m.telemetry.runs || (m.telemetry.runs = []);
   runs.push({ at: Date.now(), stage: res.stage, win: res.win, plane: res.plane, level: m.shared.level, firstKill: st.firstKill, firstSkill: st.firstSkill, firstBurst: st.firstBurst, changes: st.crystals, highlights: st.highlights, avgKill: res.avgKill, gap: st.gapMax, runT: res.runT, noGoal: st.noGoalMax, backlogs: st.backlogs, goalTimes: res.goalTimes,
-    interacts: st.interacts, interactTime: st.interactMax, choiceTime: res.choiceAvg, stockIdle: st.stockIdle, leaks: st.leaks, progress: res.progress });
+    interacts: st.interacts, interactTime: st.interactMax, choiceTime: res.choiceAvg, stockIdle: st.stockIdle, leaks: st.leaks, progress: res.progress, armorFirst: st.armorFirst, armorAfter: st.armorAfter, hurt: res.hurt });
   while (runs.length > 40) runs.shift();
   m.firstRunDone = true;
   const lure = makeLure(res);
@@ -308,33 +309,20 @@ function onRunEnd(res) {
   G.lastRes = { res, rewards: { dust, base, baseLabel, sand, sandStar, before, after: Math.floor(m.stardust), tickets, cos, frags, firstClear, capUp, newRescues, newbie: first && res.stage === '1-1' && firstClear }, lure };
   showEnd(G.lastRes);
 }
-/* “下次想完成的 Build”：给一条和这局不同的成长路线（取自两条示例流派和各联动） */
-const BUILD_PATHS = [
-  { name: '贯穿爆破流', path: ['pierce', 'pierce', 'bomb', 'multi', 'pierce+bomb'], hint: '一道火线清掉成排敌人' },
-  { name: '追踪蜂群流', path: ['homing', 'wing', 'homing', 'wing', 'homing+wing'], hint: '飞机和分身扫掉四处散开的敌人' },
-  { name: '追踪雷暴流', path: ['homing', 'thunder', 'homing+thunder', 'thunder'], hint: '追踪弹命中就放电' },
-  { name: '散射冰晶流', path: ['multi', 'ice', 'multi+ice', 'multi'], hint: '一排冰弹把整队冻住' },
-  { name: '烟火流', path: ['bomb', 'rainbow', 'bomb+rainbow', 'bomb'], hint: '标记爆炸变成彩色烟火' },
-];
+/* 下一局的构筑目标：大厅、暂停、结算、升级卡片都用同一个 buildPlan（data.js），不再各说各的 */
 function makeLure(res) {
   const m = G.meta, stream = res.stream;
-  const opts = BUILD_PATHS.filter((b) => b.name !== stream), B = opts[(m.records.runs || 0) % opts.length];
   const saved = new Set(res.companions || []), npc = NPC_ORDER.find((id) => !m.progress.rescued[id] && !saved.has(id)) || null;
-  return { stream, buildName: B.name, path: B.path, buildHint: B.hint, npc, advice: buildAdvice(res.build) };
+  const plan = buildPlan(res.build, null, m.records.runs || 0);
+  return { stream, target: plan.name, plan, npc };
 }
-/* “缺什么”：找一个只差一样就能成立的联动，写清已有 / 缺少 / 组合效果 */
-function buildAdvice(b, now) {
-  if (!b) return '';
-  const own = (id) => (b.gun && b.gun[id] > 0) || (b.support && b.support.id === id);
-  for (const [k, L] of Object.entries(SYNERGIES)) {
-    if ((b.links || []).includes(k)) continue;
-    const [a, c] = L.need; if (own(a) === own(c)) continue;
-    const have = own(a) ? a : c, miss = own(a) ? c : a, S = SKILLS[miss];
-    const rep = S.slot === 'support' && b.support && b.support.id !== miss ? `（支援只能带一个，会替换${SKILLS[b.support.id].name}）` : '';
-    return `<b>已有</b> ${SKILLS[have].name} · <b>缺少</b> ${S.name}${rep} · <b>凑齐后</b>「${L.name}」：${L.desc}`;
-  }
-  if (!own('pierce') && !own('homing')) return `<b>${now ? '先拿' : '下局先拿'}</b> 穿透或追踪：梦灯屋的第一次二选一就会给。`;
-  return '';
+/* 构筑推荐：围绕一个目标写已有 / 缺少 / 下一步先拿；只差一样的其他联动单独标成备选 */
+const compName = (id) => (SKILLS[id] ? SKILLS[id].name : SYNERGIES[id] ? `「${SYNERGIES[id].name}」` : id);
+function planHtml(P, now, noHead) {
+  if (!P) return '';
+  const list = (a) => (a.length ? a.map(compName).join('、') : '无');
+  const next = P.done ? '<b>已凑齐</b> 这一局已经完成了这套流派' : `<b>${now ? '下一步先拿' : '下局先拿'}</b> ${compName(P.next)}${P.swap ? `（支援只能带一个，会替换${SKILLS[P.swap].name}）` : ''}${P.next === P.link ? '：两样都有了，升级里出现就选它' : ''}`;
+  return `<div class="plan">${noHead ? '' : `<div><b>目标</b> ${esc(P.name)} <span class="dim-text">${esc(P.hint)}</span></div>`}<div><b>已有</b> ${list(P.have)} · <b>缺少</b> ${list(P.miss.concat(P.link && !P.linkOwned && P.miss.length ? [P.link] : []))}</div><div>${next}</div>${P.alt ? `<div class="alt"><b>备选路线</b> 已有 ${compName(P.alt.have)}，再拿 ${compName(P.alt.miss)} 可凑成「${SYNERGIES[P.alt.key].name}」</div>` : ''}</div>`;
 }
 function buildChips(r) {
   const b = r.build || { gun: {}, support: null, bmod: null, links: [] }, out = [];
@@ -361,6 +349,7 @@ function showEnd(E) {
     <div class="center-col">
       <div class="h-display" style="font-size:var(--fs-xl);color:${r.win ? 'var(--lamp2)' : 'var(--paper)'}">${r.win ? `${r.stage} ${S.name} 通关！` : r.abandoned ? '本局结束' : `${P.name}被击落了`}</div>
       <div class="dim-text">${r.win ? `出击 ${fmtTime(r.runT)} · ${S.bossName} ${fmtTime(r.bossTime)}${rw.capUp ? ` · <b class="good">大招容量升到 ${rw.capUp} 次（所有飞机）</b>` : ''}` : `出击 ${fmtTime(r.runT)} · 完成度 ${Math.round(r.progress * 100)}% · 成长资源照常结算`}</div>
+      ${deathHtml(r)}
       ${(r.memories && r.memories.length) || r.clue ? `<div class="memo">${r.memories && r.memories.length ? `<span><b>这一局</b> ${r.memories.map(esc).join(' · ')}</span>` : ''}${r.clue ? `<span class="clue"><b>还没见过</b> ${esc(r.clue)}</span>` : ''}</div>` : ''}
       <div class="statrow">${[['击破', st.kills], ['最高连杀', st.maxStreak], ['升级选择', st.crystals], ['联动', st.syns], ['破甲', st.breaks || 0], ['大招', st.bursts]].map(([k, v]) => `<div class="stat-pill"><span class="num">${v}</span><span>${k}</span></div>`).join('')}</div>
       <div class="rewards">
@@ -373,7 +362,7 @@ function showEnd(E) {
         <div class="panel end-card"><div class="label">① 成长 · 共享等级 Lv${m.shared.level}</div>${grow}<span class="dim-text" style="font-size:var(--fs-xs)">${sharedLine()} · 所有飞机一起变强</span></div>
         <div class="panel end-card"><div class="label">② Build ${r.stream ? `· <span style="color:var(--lamp2)">${esc(r.stream)}</span>` : ''}</div><div class="row wrap">${buildChips(r)}</div>
           ${journey ? `<div class="jrow">${journey}</div>` : ''}
-          ${E.lure.advice ? `<div class="advice">${E.lure.advice}</div>` : `<div class="lure-mini"><span class="label">下次想完成</span> <b>${esc(E.lure.buildName)}</b><span class="dim-text"> · ${esc(E.lure.buildHint)}</span></div>`}</div>
+          <div class="advice">${planHtml(E.lure.plan)}</div></div>
         <div class="panel end-card"><div class="label">③ 继续挑战</div>
           ${r.win && nextId ? `<button class="btn primary" id="end-next" type="button" autofocus>${icon('i-play')} 挑战 ${nextId} ${STAGES[nextId].name}</button>` : ''}
           <button class="btn ${r.win && nextId ? '' : 'primary'}" id="end-again" type="button" ${r.win && nextId ? '' : 'autofocus'}>${icon('i-play')} ${r.win ? '再打一次' : '再来一局'} ${r.stage}</button>
@@ -390,6 +379,14 @@ function showEnd(E) {
   const eg = $('#end-gacha', el); if (eg) eg.onclick = () => { Sound.sfx('ui'); showGacha(showHub); };
   const lv = $('#end-lv', el); if (lv) lv.onclick = () => { if (levelUp()) showStarMap(m.current, () => showEnd(E), true); };
   setupDreamLog(el, E);
+}
+/* 失败复盘：只在被击落时出现（主动结束不显示），按这一局实际记下的受伤来源挑最常见的一类，给一条能照做的建议 */
+function deathHtml(r) {
+  if (r.win || r.abandoned || !r.hurt) return '';
+  const top = Object.entries(r.hurt).sort((a, b) => b[1] - a[1] || (b[0] === r.lastHurt) - (a[0] === r.lastHurt))[0];
+  if (!top || !HURT_TIPS[top[0]]) return '';
+  const T = HURT_TIPS[top[0]], last = r.lastHurt && r.lastHurt !== top[0] && HURT_TIPS[r.lastHurt] ? ` · 最后一下是${HURT_TIPS[r.lastHurt].label}` : '';
+  return `<div class="death"><span><b>这局主要被</b> ${esc(T.label)}击中 ${top[1]} 次${esc(last)}</span><span><b>下局试试</b> ${esc(T.tip)}</span></div>`;
 }
 /* 可选：请 Claude 把这一局写成四行航海日志（sample capability；不可用时按钮不出现） */
 function setupDreamLog(el, E) {
@@ -693,7 +690,7 @@ function showRecords(back) {
   const m = G.meta, R = m.records, runs = m.telemetry.runs || [], c = m.telemetry.counts;
   const last = runs[runs.length - 1];
   const avg = (k) => { const v = runs.map((r) => r[k]).filter((x) => x !== null && x !== undefined); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
-  const val = { firstKill: [last && last.firstKill, avg('firstKill')], firstSkill: [last && last.firstSkill, avg('firstSkill')], choiceTime: [last && last.choiceTime, avg('choiceTime')], firstBurst: [last && last.firstBurst, avg('firstBurst')], changes: [last && last.changes, avg('changes')], highlights: [last && last.highlights, avg('highlights')], avgKill: [last && last.avgKill, avg('avgKill')], gap: [last && last.gap, avg('gap')], restart: [m.telemetry.lastRestart, null], second: [c.first_run_ended ? Math.round(((c.second_run_started || 0) / c.first_run_ended) * 100) : null, null], interacts: [last && last.interacts, avg('interacts')], interactTime: [last && last.interactTime, avg('interactTime')], stockIdle: [last && last.stockIdle, avg('stockIdle')], noGoal: [last && last.noGoal, avg('noGoal')] };
+  const val = { firstKill: [last && last.firstKill, avg('firstKill')], firstSkill: [last && last.firstSkill, avg('firstSkill')], choiceTime: [last && last.choiceTime, avg('choiceTime')], firstBurst: [last && last.firstBurst, avg('firstBurst')], changes: [last && last.changes, avg('changes')], highlights: [last && last.highlights, avg('highlights')], avgKill: [last && last.avgKill, avg('avgKill')], gap: [last && last.gap, avg('gap')], restart: [m.telemetry.lastRestart, null], second: [c.first_run_ended ? Math.round(((c.second_run_started || 0) / c.first_run_ended) * 100) : null, null], interacts: [last && last.interacts, avg('interacts')], interactTime: [last && last.interactTime, avg('interactTime')], stockIdle: [last && last.stockIdle, avg('stockIdle')], noGoal: [last && last.noGoal, avg('noGoal')], armorFirst: [last && last.armorFirst, avg('armorFirst')], armorAfter: [last && last.armorAfter, avg('armorAfter')] };
   const PG = m.progress, stageRows = STAGE_ORDER.map((id) => { const rs = runs.filter((r) => r.stage === id), ch = rs.map((r) => r.choiceTime).filter((x) => x !== null && x !== undefined), ia = rs.map((r) => r.interacts || 0); return `<tr><td>${id} ${STAGES[id].name}</td><td class="num">${PG.attempts[id] || 0}</td><td class="num">${PG.clears[id] || 0}</td><td class="num">${PG.best[id] ? fmtTime(PG.best[id]) : '—'}</td><td class="num">${ch.length ? (ch.reduce((a, b) => a + b, 0) / ch.length).toFixed(1) + ' 秒' : '—'}</td><td class="num">${ia.length ? (ia.reduce((a, b) => a + b, 0) / ia.length).toFixed(1) : '—'}</td></tr>`; }).join('');
   const fmt = (v, u) => (v === null || v === undefined ? '—' : (Math.round(v * 10) / 10) + (u === '%' ? '%' : u === '秒' ? ' 秒' : ' 次'));
   const judge = (v, T) => (v === null || v === undefined ? '' : (T.cmp === 'le' ? v <= T.target : v >= T.target) ? 'ok' : 'bad');
@@ -791,13 +788,13 @@ function showPauseMenu() {
   if (b.bmod) rows.push(`<div class="row"><span class="chip" style="color:${BURST_MODS[b.bmod.id].color}">${icon(BURST_MODS[b.bmod.id].icon)} 大招 · ${BURST_MODS[b.bmod.id].name} Lv${b.bmod.lv}</span><span class="dim-text" style="font-size:var(--fs-xs)">${BURST_MODS[b.bmod.id].lv[b.bmod.lv - 1]}</span></div>`);
   for (const k of b.links) rows.push(`<div class="row"><span class="chip gold">联动 · ${SYNERGIES[k].name}</span><span class="dim-text" style="font-size:var(--fs-xs)">${SYNERGIES[k].desc}</span></div>`);
   for (const c of w.companions) rows.push(`<div class="row"><span class="chip pink">伙伴 · ${NPCS[c.id].name}</span><span class="dim-text" style="font-size:var(--fs-xs)">${NPCS[c.id].effect}</span></div>`);
-  const adv = buildAdvice(b, true);
+  const adv = planHtml(buildPlan(b, w.targetName), true);
   $('#banner').innerHTML = ''; $('#toast').innerHTML = ''; banner._until = 0; // 暂停时收起横幅和轻提示，不压住菜单
   const el = showScreen('pause', `
     <div class="center-col" style="max-width:calc(860px*var(--u))">
       <div class="h-display" style="font-size:var(--fs-xl);color:var(--paper)">暂停 <span class="dim-text" style="font-size:var(--fs-s)">战斗已冻结</span></div>
       <div class="panel build-list" style="width:100%"><div class="label">当前 Build ${w.stream ? `· ${w.stream.name}` : ''}</div>${rows.join('') || '<span class="dim-text">还没选到升级：梦灯屋、风车塔、星砂矿、救援吊舱、精英核心都会给升级。</span>'}
-        ${adv ? `<div class="advice">${adv}</div>` : ''}</div>
+        <div class="advice">${adv}</div></div>
       <div class="row wrap" style="justify-content:center">
         <button class="btn primary" id="p-resume" type="button" autofocus>${icon('i-play')} 继续</button>
         <button class="btn" id="p-help" type="button">${icon('i-book')} 操作说明</button>
@@ -1014,7 +1011,8 @@ function updateTutorial(h, R) {
   const k = steps.map((x) => (x[0] ? 1 : 0)).join('') + (pad ? 'p' : 'k');
   if (G.hudLast.tut !== k) {
     G.hudLast.tut = k; R.tut.hidden = false;
-    R.tut.innerHTML = `<div class="tut-h">开局三步 <button type="button" id="tut-skip">跳过</button></div>${steps.map(([ok, txt], i) => `<div class="tut-s ${ok ? 'ok' : ''}"><i>${ok ? '✓' : i + 1}</i>${txt}</div>`).join('')}`;
+    const cur = steps.findIndex((x) => !x[0]), done = steps.filter((x) => x[0]).length; // 只显示当前这一步，不和目标卡、装置提示抢注意力
+    R.tut.innerHTML = `<div class="tut-h">开局教学 ${done}/3 <button type="button" id="tut-skip">跳过</button></div>${cur >= 0 ? `<div class="tut-s"><i>${cur + 1}</i>${steps[cur][1]}</div>` : '<div class="tut-s ok"><i>✓</i>三步都完成了</div>'}`;
     const sk = $('#tut-skip', R.tut); sk.addEventListener('pointerdown', (e) => e.stopPropagation()); sk.onclick = () => endTutorial(true);
     if (steps.every((x) => x[0])) endTutorial(false);
   }
@@ -1031,20 +1029,21 @@ function drainWorldEvents() {
     const e = w.events.shift();
     switch (e.type) {
       case 'slotLand': slotLand(e); break;
-      case 'goal': if (e.idx > 0) banner(`目标 ${e.idx + 1}/${e.n}`, e.title, 1.2, 'rgba(255,227,138,.75)', 2); break;
+      case 'goal': if (e.idx > 0) toast(`目标 ${e.idx + 1}/${e.n} · ${e.title}`, '#ffe38a', null, 1800); break; // 顶部目标卡会闪一下，不再占中央
       case 'goalDone': toast(`完成：${e.title}`, '#9ff2c8', null, 1800); break;
-      case 'goalNext': banner(e.boss ? '前方是本关 Boss' : '下一个目标', e.title, 1.8, e.boss ? 'rgba(255,90,110,.7)' : 'rgba(255,178,168,.7)', 2); break;
+      case 'goalNext': toast(`${e.boss ? '前方是本关 Boss' : '下一个'} · ${e.title}`, e.boss ? '#ff9d8c' : '#ffb2a8', null, 2000); break;
+      case 'burstDemo': G.hintId = null; showHint(); banner(`放一次大招：按 ${Input.device === 'pad' ? 'A' : Input.keyLabel(Input.binds.burst[0])}`, `「${e.name}」· 敌弹已经清空，前面一排是给你试的`, 9, 'rgba(255,215,106,.85)', 5); break;
+      case 'burstDemoEnd': banner._until = 0; $('#banner').innerHTML = ''; break; // 教学结束：提示收回到大招按钮（按钮继续发光）
       case 'backlog': toast('敌人有点多：先清前面的，下一批会晚一点来', '#ffb2a8', null, 2400); break;
-      case 'stream': banner(`${e.name}成型！`, '这一局的 Build 有名字了', 1.9, 'rgba(255,215,106,.8)', 3); break;
-      case 'streak': if (e.n >= 50) banner(`${e.n} 连杀！`, { 50: '星环清场', 100: '金色强化出现' }[e.n] || '星环清场', 1.3, 'rgba(255,159,207,.8)', 1); else toast(`${e.n} 连杀！${{ 10: '小爆炸', 30: '屏幕开始发光' }[e.n]}`, '#aeeaff'); break;
+      case 'stream': toast(`${e.name}成型！这一局的 Build 有名字了`, '#ffd76a', null, 2200); break;
+      case 'streak': if (e.n >= 50) toast(`${e.n} 连杀！${{ 50: '星环清场', 100: '金色强化出现' }[e.n] || '星环清场'}`, '#ff9fcf', null, 1600); break; // 连杀数字右侧一直显示，不再弹中央横幅
       case 'elite': toast(e.elite === 'cmdr' ? '带队精英出现 · 等它举旗再打旗头水晶' : '精英出现 · 击败它能充不少大招', '#ff9d8c', 'n-crown'); Sound.setBoost('tension', 0.3); setTimeout(() => Sound.setBoost('tension', 0), 12000); break;
       case 'boss': { const S = w.stage; banner(S.bossName, S.boss === 'clock' ? '第一乐章 · 指针卡住' : '先打碎正面三块护甲，核心才吃满伤害', 2.4, 'rgba(255,90,110,.7)', 4); Sound.setMode('boss1'); break; }
       case 'bossResponse': banner(e.title, e.sub, 2.6, 'rgba(255,215,106,.8)', 3); break;
       case 'phase': banner(e.name, e.captain ? '攻击更密，还带着散兵' : e.n === 2 ? '攻击越来越快，安全区在缩小' : '弹幕会逆行，消失的弹幕会重演', 1.8, null, 3); break;
       case 'flag': banner('', e.text, e.dur || 1, null, 1); break;
       case 'burstReady':
-        if (!G.meta.burstTipShown) { G.meta.burstTipShown = true; persist(); banner(`${PLANES[w.planeId].burst.name} 可以放了！`, `按 ${Input.device === 'pad' ? 'A' : Input.keyLabel(Input.binds.burst[0])} 或点右下角头像 · 击败敌人、精英、挖开星砂矿都会充能`, 2.6, 'rgba(255,215,106,.85)', 3); }
-        else toast(`${PLANES[w.planeId].burst.name} 可用 · 库存 ${e.stock || 1}/${e.cap || 1}`, '#ffe38a', 'i-play', 1600);
+        toast(`${PLANES[w.planeId].burst.name} 可用 · 库存 ${e.stock || 1}/${e.cap || 1}`, '#ffe38a', 'i-play', 1600);
         break;
       case 'gold': banner('金色强化！', '大招充满 · 射速提高', 1.6, 'rgba(255,215,106,.9)'); break;
       case 'hint': G.hintId = e.id; showHint(); break;

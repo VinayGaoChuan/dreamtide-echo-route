@@ -85,7 +85,7 @@ class ClockBoss {
       if (w.state === 'play' && p.alive) {
         const ex = this.x + Math.cos(s.a) * s.len, ey = this.y + Math.sin(s.a) * s.len;
         const hit = segDist2(p.x, p.y, this.x, this.y, ex, ey) < (s.w / 2 + p.r) * (s.w / 2 + p.r);
-        if (hit && p.inv <= 0) w.hurtPlayer(1);
+        if (hit && p.inv <= 0) w.hurtPlayer(1, 'c:boss');
       }
       if (s.t >= s.dur) this.sweep = null;
     }

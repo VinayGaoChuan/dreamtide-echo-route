@@ -176,7 +176,7 @@ Object.assign(World.prototype, {
     o.state = 'blow'; o.blowT = 0; o.engageT = this.runT;
     Sound.sfx('wind', { pan: this.pan(o.x) }); this.rumble(0.3, 0.5, 120);
     // 吹开云层：露出藏着的入口（之后杂兵也会从这里出来）
-    this.traces.door = { x: this.W * 0.88, y: this.arena.top + 110, side: -1 };
+    this.traces.door = { x: this.W * 0.88, y: this.arena.top + 110, side: -1, born: this.t };
     // 一排敌人被推到炮口前
     const y = clamp(p.y, top + 20, bot - 20);
     let list = this.enemies.filter((e) => e.alive && !e.isBoss && !e.elite && !e.goal && e.type !== 'armor' && e.type !== 'wreck' && e.x < this.W + 40).slice(0, 8);
@@ -195,7 +195,7 @@ Object.assign(World.prototype, {
     for (let i = 0; i < 18; i++) this.part('shard', W.x, W.y, rand(-420, 420), -W.side * rand(80, 420), 1, rand(8, 14), pick(['#3b3170', '#5b4fa0', '#8f82d6']));
     this.hitStop(0.05); this.shake(0.5); this.rumble(0.9, 0.6, 180);
     Sound.sfx('wallBreak');
-    this.traces.crack = { x: W.x, y: W.y, side: W.side };
+    this.traces.crack = { x: W.x, y: W.y, side: W.side, born: this.t };
     for (let i = 0; i < 24; i++) this.dropPickup('dust', W.x + rand(-40, 40), W.y - W.side * 30, { value: 1, vx: rand(-300, 100), vy: -W.side * rand(60, 300) });
     this.later(0.35, () => { for (const k of this.pickups) if (k.kind === 'dust') k.attract = true; });
     this.addCharge(0.5, true); this.text('大招能量 +50%', this.player.x, this.player.y - 56, '#ffd76a', 18, 5); // 纯资源直接吸收

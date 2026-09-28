@@ -57,9 +57,9 @@ Object.assign(World.prototype, {
         S.atkT = teeth.length ? 3.3 : 2.8; S.atk++;
         if (S.atk % 2) {
           const y = clamp(p.y, this.arena.top + 60, this.arena.bottom - 60), h = 104;
-          this.addWarn({ kind: 'zone', x: 0, y: y - h / 2, w: S.mx - 80, h, tWarn: 1.0, onFire: () => { S.bite = 0.5; for (let i = 0; i < 8; i++) this.fire('pink', S.mx - 100, y + (i - 3.5) * 12, Math.PI, 430, { silent: i > 0 }); Sound.sfx('bite'); } });
+          this.addWarn({ kind: 'zone', x: 0, y: y - h / 2, w: S.mx - 80, h, tWarn: 1.0, onFire: () => { S.bite = 0.5; for (let i = 0; i < 8; i++) this.fire('pink', S.mx - 100, y + (i - 3.5) * 12, Math.PI, 430, { silent: i > 0, from: 'bite' }); Sound.sfx('bite'); } });
           this.text('要咬了 · 离开那条航道', S.mx - 160, y - 64, '#ffb2a8', 16, 3);
-        } else for (const s of [-1, 1]) this.later(s > 0 ? 0.35 : 0, () => { if (!S.core.alive) return; const ax = S.mx - 20, ay = S.my + s * 110, a0 = this.aimAngle(ax, ay); for (let i = 0; i < 5; i++) this.fire('gold', ax, ay, a0 + (i - 2) * 0.16, 200, { silent: i > 0 }); });
+        } else for (const s of [-1, 1]) this.later(s > 0 ? 0.35 : 0, () => { if (!S.core.alive) return; const ax = S.mx - 20, ay = S.my + s * 110, a0 = this.aimAngle(ax, ay); for (let i = 0; i < 5; i++) this.fire('gold', ax, ay, a0 + (i - 2) * 0.16, 200, { silent: i > 0, from: 'moonArm' }); });
       }
       S.bite = Math.max(0, (S.bite || 0) - dt);
       if (!S.core.alive) {
@@ -119,7 +119,7 @@ Object.assign(World.prototype, {
             const y = clamp(p.y, this.arena.top + 60, this.arena.bottom - 60), h = 110;
             this.addWarn({ kind: 'zone', x: this.W * 0.26, y: y - h / 2, w: this.W * 0.5, h, tWarn: 1.0, onFire: () => { if (e.alive) { S.dash = { t: 0, y }; Sound.sfx('bite'); } } });
             S.sub = '它要沿着这条航道咬过来'; e.y = y;
-          } else { const a0 = this.aimAngle(e.x, e.y); for (let i = 0; i < 3; i++) this.fire('gold', e.x - 30, e.y, a0 + (i - 1) * 0.22, 210, { silent: i > 0 }); S.sub = '吐出了星星贴纸'; }
+          } else { const a0 = this.aimAngle(e.x, e.y); for (let i = 0; i < 3; i++) this.fire('gold', e.x - 30, e.y, a0 + (i - 1) * 0.22, 210, { silent: i > 0, from: 'mimic' }); S.sub = '吐出了星星贴纸'; }
         }
       } else {
         S.st = 'reward'; S.t = 0; this.warns = []; S.title = '贴纸拟态被撕掉了'; S.prog = null; S.sub = null;
@@ -156,7 +156,7 @@ Object.assign(World.prototype, {
         if (S.atkT <= 0 && this.state === 'play') {
           S.atkT = 3.0;
           const ny = pick([this.arena.top + 150, mid + 20, this.arena.bottom - 80].filter((y) => Math.abs(y - S.ty) > 60));
-          this.addWarn({ kind: 'zone', x: S.hx - 90, y: ny - 110, w: 180, h: 170, tWarn: 0.9, onFire: () => { if (!e.alive) return; S.ty = ny; this.later(0.4, () => { if (!e.alive) return; const a0 = this.aimAngle(S.hx - 40, ny - 60); for (let i = 0; i < 5; i++) this.fire('pink', S.hx - 40, ny - 60, a0 + (i - 2) * 0.18, 190, { silent: i > 0 }); Sound.sfx('bite'); }); } });
+          this.addWarn({ kind: 'zone', x: S.hx - 90, y: ny - 110, w: 180, h: 170, tWarn: 0.9, onFire: () => { if (!e.alive) return; S.ty = ny; this.later(0.4, () => { if (!e.alive) return; const a0 = this.aimAngle(S.hx - 40, ny - 60); for (let i = 0; i < 5; i++) this.fire('pink', S.hx - 40, ny - 60, a0 + (i - 2) * 0.18, 190, { silent: i > 0, from: 'hmimic' }); Sound.sfx('bite'); }); } });
           S.sub = '跳到哪里会先画出落点';
         }
       } else {

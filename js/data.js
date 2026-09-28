@@ -161,6 +161,73 @@ const STAGES = {
 };
 const STAGE_ORDER = ['1-1', '1-2', '1-3'];
 
+/* 可以追的流派（大厅“下一局目标”、暂停、结算、升级卡片共用） */
+const BUILD_PATHS = [
+  { name: '贯穿爆破流', path: ['pierce', 'bomb', 'multi', 'pierce+bomb'], hint: '一道火线清掉成排敌人' },
+  { name: '追踪蜂群流', path: ['homing', 'wing', 'homing+wing'], hint: '飞机和分身扫掉四处散开的敌人' },
+  { name: '追踪雷暴流', path: ['homing', 'thunder', 'homing+thunder'], hint: '追踪弹命中就放电' },
+  { name: '散射冰晶流', path: ['multi', 'ice', 'multi+ice'], hint: '一排冰弹把整队冻住' },
+  { name: '烟火流', path: ['bomb', 'rainbow', 'bomb+rainbow'], hint: '标记爆炸变成彩色烟火' },
+  { name: '雷爆流', path: ['bomb', 'thunder', 'bomb+thunder'], hint: '雷击标记目标，爆炸再放电' },
+  { name: '星砂散射流', path: ['multi', 'magnet', 'multi+magnet'], hint: '吸到星砂就射出一把星弹' },
+];
+function buildOwned(b, id) { if (!b) return false; if (id.includes('+')) return (b.links || []).includes(id); return !!((b.gun && b.gun[id] > 0) || (b.support && b.support.id === id)); }
+/* 目标流派：和当前 Build 最接近、还没做完的那条；一样接近时按局数轮换 */
+function pickTarget(b, rot) {
+  const N = BUILD_PATHS.length; let best = null, bs = -1e9;
+  BUILD_PATHS.forEach((P, i) => {
+    const comps = P.path.filter((x) => !x.includes('+')), link = P.path.find((x) => x.includes('+'));
+    const own = comps.filter((id) => buildOwned(b, id)).length, done = own === comps.length && (!link || buildOwned(b, link));
+    const s = (done ? -100 : 0) + own * 10 - ((i - (rot || 0) % N + N) % N) * 0.01;
+    if (s > bs) { bs = s; best = P; }
+  });
+  return best;
+}
+function buildPlan(b, targetName, rot) {
+  b = b || { gun: {}, support: null, links: [] };
+  const P = BUILD_PATHS.find((x) => x.name === targetName) || pickTarget(b, rot);
+  const comps = P.path.filter((x) => !x.includes('+')), link = P.path.find((x) => x.includes('+')) || null;
+  const have = comps.filter((id) => buildOwned(b, id)), miss = comps.filter((id) => !buildOwned(b, id)), linkOwned = !!(link && buildOwned(b, link));
+  const next = miss[0] || (link && !linkOwned ? link : null);
+  const swap = next && SKILLS[next] && SKILLS[next].slot === 'support' && b.support && b.support.id !== next ? b.support.id : null;
+  let alt = null;
+  for (const [k, L] of Object.entries(SYNERGIES)) {
+    if (k === link || buildOwned(b, k)) continue;
+    const [x, y] = L.need; if (buildOwned(b, x) === buildOwned(b, y)) continue;
+    alt = { key: k, have: buildOwned(b, x) ? x : y, miss: buildOwned(b, x) ? y : x }; break;
+  }
+  return { name: P.name, hint: P.hint, path: P.path, comps, link, linkOwned, have, miss, next, swap, done: !next, alt };
+}
+
+/* 失败复盘：按实际受伤来源归类，结算只挑最常见的一类给一条能照做的建议 */
+const HURT_TIPS = {
+  armorC: { label: '撞上厚甲怪', tip: '厚甲怪不会自己离开：别贴上去，停在它正前方稍远处连续打甲片' },
+  contact: { label: '撞上小怪', tip: '别贴着敌群飞：和前面的敌人留一点距离，直线子弹才打得到' },
+  rear: { label: '后方追兵', tip: '左边缘出现红影时，先移到虚线弧的另一侧，等追兵绕到前面再打' },
+  lane: { label: '预警航道里的攻击', tip: '条纹航道亮起就先离开那条横线，攻击扫过去再回来' },
+  aimed: { label: '瞄准你的子弹', tip: '敌人朝你当前的位置开火：连续打的时候隔一会儿上下挪一小段' },
+  ring: { label: '闹钟的弹环', tip: '弹环总留着缺口：看准缺口从那里穿过去' },
+  laser: { label: '白线激光', tip: '灯塔眼先画白线再射：看到白线就离开那条线' },
+  drop: { label: '纸船投下的弹', tip: '纸船灯往下投弹：别待在它们正下方' },
+  boss: { label: 'Boss 的弹幕', tip: '先对准正面护甲打；弹幕来时只小幅移动找空隙，别大范围乱飞' },
+  surprise: { label: '惊喜怪的攻击', tip: '它咬过来前会先画出航道：离开那条航道再回头打' },
+  shot: { label: '敌弹', tip: '被击中后有一小段无敌：趁这段时间换到安全的高度' },
+};
+function hurtCat(src) {
+  if (!src) return 'shot';
+  if (src === 'c:armor' || src === 'c:wreck') return 'armorC';
+  if (src === 'c:chaser' || src === 'b:chaser') return 'rear';
+  if (['c:mimic', 'c:hmimic', 'c:mcore', 'c:mtooth', 'b:bite', 'b:mimic', 'b:hmimic', 'b:moonArm'].includes(src)) return 'surprise';
+  if (src === 'c:boss' || src === 'b:boss') return 'boss';
+  if (src.startsWith('c:')) return 'contact';
+  if (src === 'b:lane') return 'lane';
+  if (src === 'laser' || src === 'b:beacon') return 'laser';
+  if (src === 'b:tick' || src === 'b:tickE') return 'ring';
+  if (src === 'b:boat') return 'drop';
+  if (['b:star', 'b:starE', 'b:armor', 'b:jelly', 'b:jellyE', 'b:cmdr', 'b:moth', 'b:mirror'].includes(src)) return 'aimed';
+  return 'shot';
+}
+
 /* v0.8 目标链：每一段先让玩家看见障碍 → 给一个能理解的成长机会 → 用同样的敌人验证变强。
    前一个目标完成才推进（慢的玩家不会被新压力叠上来）；普通杂兵一直都在。
    kind：crowd 清普通怪群 / armor1 第一只厚甲怪 / pack 厚甲编队 / cmdr 带队精英 / chase 多方向来敌 / spawner 地形刷怪点 / surprise 场景惊喜 / boss
@@ -186,8 +253,8 @@ const STAGE_PLANS = {
   ],
   '1-3': [
     { id: 'crowd', goal: '清掉普通怪群', kind: 'crowd', n: 40, map: 'house', mapAt: 15 },
-    { id: 'armor1', goal: '击破后方绕来的厚甲怪', kind: 'armor1', from: 'rear', reward: 'mine' },
-    { id: 'pack', goal: '快速处理厚甲编队', kind: 'pack', from: 'crack', reward: 'wind' },
+    { id: 'armor1', goal: '击破后方绕来的厚甲怪', kind: 'armor1', from: 'rear', reward: 'wind' },
+    { id: 'pack', goal: '处理从远处推近的厚甲编队', kind: 'pack', from: 'push', reward: 'mine' },
     { id: 'rift', goal: '清掉空间裂缝里的来敌', kind: 'chase', event: 'rift', waves: 4, map: 'npc', mapAt: 2 },
     { id: 'cmdr', goal: '击败带队精英', kind: 'cmdr', from: 'front', reward: 'core' },
     { id: 'hmimic', goal: '这间梦灯屋怪怪的', kind: 'surprise', surprise: 'houseMimic' },
@@ -270,6 +337,8 @@ const METRIC_TARGETS = [
   { id: 'avgKill', name: '普通小怪平均击杀时间', target: 0.5, cmp: 'le', unit: '秒' },
   { id: 'gap', name: '战斗段之间的空档', target: 1.2, cmp: 'le', unit: '秒' },
   { id: 'noGoal', name: '最长无主目标时段', target: 10, cmp: 'le', unit: '秒' },
+  { id: 'armorFirst', name: '第一只厚甲怪敲碎用时', target: 5, cmp: 'le', unit: '秒' },
+  { id: 'armorAfter', name: '升级后同型厚甲敲碎用时', target: 3, cmp: 'le', unit: '秒' },
   { id: 'restart', name: '失败后重开时间', target: 3, cmp: 'le', unit: '秒' },
   { id: 'second', name: '第二局点击率', target: 55, cmp: 'ge', unit: '%' },
   { id: 'interacts', name: '单局主动触发互动', target: 3, cmp: 'ge', unit: '次' },
