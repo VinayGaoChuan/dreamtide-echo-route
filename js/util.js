@@ -67,25 +67,30 @@ function addStarNode(rec) {
   rec.map[r].push({ type, v: T.min + Math.round(Math.random() * (T.max - T.min)) });
   return r;
 }
+/* 飞机解锁时按种子生成一次天赋树并保存；重进游戏不重抽 */
 function newPlaneRecord(id) {
-  return { owned: true, stars: 1, frags: 0, map: genStarMap(id), lit: { blast: 0, fire: 0, collect: 0, burst: 0 } };
+  const seed = Math.floor(Math.random() * 1e9);
+  return { owned: true, stars: 1, frags: 0, seed, map: genStarMap(id, seed), lit: { fire: 0, blast: 0, collect: 0, burst: 0 } };
 }
+const treeLit = (rec) => (rec && rec.lit ? ROUTE_ORDER.reduce((a, r) => a + (rec.lit[r] || 0), 0) : 0);
+const treePoints = (meta, rec) => Math.max(0, (meta.shared.level - 1) - treeLit(rec));
 
 function freshMeta() {
   return {
-    v: 2,
-    stardust: 0, tickets: 0, talent: 0, cosTickets: 0,
+    v: 3,
+    stardust: 0, tickets: 0, cosTickets: 0,
+    shared: { level: 1 },              // 共享等级：星尘升级，所有飞机一起变强
+    ultCap: 1,                         // 大招容量：1-1 / 1-3 首通解锁，账号共享
+    progress: { cleared: {}, best: {}, attempts: {}, clears: {}, selected: '1-1', rescued: {} },
     planes: { moon: newPlaneRecord('moon') },
     frags: {},
     current: 'moon',
     gacha: { pulls: 0, sinceHigh: 0, newbieDone: false },
-    lockRoute: null,
     cosmetics: { owned: ['exp:default', 'trail:default'], exp: 'default', trail: 'default' },
     tasks: { active: ['kills', 'bursts', 'runs'], progress: {}, claimed: 0 },
     stats: { kills: 0, bursts: 0, runs: 0, syns: 0, streak100: 0, crystals: 0, bossKills: 0, lv5: 0, chests: 0, interacts: 0, rescues: 0, giants: 0 },
     codex: { planes: { moon: 1 }, skills: {}, syns: {}, enemies: {}, portals: {}, map: {}, npcs: {}, giants: {} },
     records: { runs: 0, clears: 0, bestStreak: 0, bestTime: 0, bestCrystals: 0 },
-    bossFirstClear: false,
     firstRunDone: false, seenTitle: false,
     nextHint: null,
     settings: DEFAULT_SETTINGS(),
@@ -94,25 +99,40 @@ function freshMeta() {
 }
 
 const Store = {
-  key: 'dreamtide.echo-route.v2',
+  key: 'dreamtide.echo-route.v3',
+  oldKey: 'dreamtide.echo-route.v2',
   ok: true,
   load() {
-    let data = null;
-    try { data = JSON.parse(localStorage.getItem(this.key) || 'null'); } catch (e) { this.ok = false; }
+    let data = null, old = null;
+    try { data = JSON.parse(localStorage.getItem(this.key) || 'null'); if (!data) old = JSON.parse(localStorage.getItem(this.oldKey) || 'null'); } catch (e) { this.ok = false; }
     const base = freshMeta();
-    if (!data || data.v !== 2) return base;
-    const m = Object.assign(base, data);
-    const f = freshMeta();
+    if (!data && old && old.v === 2) return this.migrate(old);
+    if (!data || data.v !== 3) return base;
+    const m = Object.assign(base, data), f = freshMeta();
     m.settings = Object.assign(DEFAULT_SETTINGS(), data.settings || {});
-    for (const k of ['gacha', 'cosmetics', 'tasks', 'stats', 'codex', 'records', 'telemetry']) m[k] = Object.assign(f[k], data[k] || {});
+    for (const k of ['gacha', 'cosmetics', 'tasks', 'stats', 'codex', 'records', 'telemetry', 'shared', 'progress']) m[k] = Object.assign(f[k], data[k] || {});
     if (!m.planes || !m.planes[m.current]) { m.planes = Object.assign({ moon: newPlaneRecord('moon') }, m.planes || {}); m.current = 'moon'; }
+    return m;
+  },
+  /* v0.4~v0.6 存档：保留飞机、碎片、招募券、外观、图鉴、记录和设置；天赋树按 v0.7 新规则重新生成一次（之后固定） */
+  migrate(old) {
+    const m = freshMeta(), f = freshMeta();
+    m.settings = Object.assign(DEFAULT_SETTINGS(), old.settings || {});
+    m.planes = {};
+    for (const id of Object.keys(old.planes || {})) if (PLANES[id]) { m.planes[id] = newPlaneRecord(id); m.planes[id].stars = old.planes[id].stars || 1; }
+    if (!m.planes.moon && !Object.keys(m.planes).length) m.planes.moon = newPlaneRecord('moon');
+    m.current = m.planes[old.current] ? old.current : Object.keys(m.planes)[0];
+    m.frags = old.frags || {}; m.tickets = old.tickets || 0; m.cosTickets = old.cosTickets || 0; m.stardust = old.stardust || 0;
+    for (const k of ['gacha', 'cosmetics', 'tasks', 'stats', 'codex', 'records', 'telemetry']) m[k] = Object.assign(f[k], old[k] || {});
+    m.firstRunDone = !!old.firstRunDone; m.seenTitle = !!old.seenTitle;
+    m.migratedFrom = 2;
     return m;
   },
   save(meta) {
     try { localStorage.setItem(this.key, JSON.stringify(meta)); this.ok = true; return true; }
     catch (e) { this.ok = false; return false; }
   },
-  wipe() { try { localStorage.removeItem(this.key); } catch (e) { /* storage blocked */ } },
+  wipe() { try { localStorage.removeItem(this.key); localStorage.removeItem(this.oldKey); } catch (e) { /* storage blocked */ } },
 };
 
 /* ---------- local telemetry: the doc's 埋点 list, counted per viewer ---------- */

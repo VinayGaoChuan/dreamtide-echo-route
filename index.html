@@ -314,6 +314,47 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 #rotate{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;background:radial-gradient(circle at 50% 40%,#2a2170,#100c2c);font-size:16px;line-height:1.6}
 #rotate .phone{width:56px;height:92px;border:4px solid var(--lamp2);border-radius:12px;animation:rot 2s ease-in-out infinite}
 @keyframes rot{0%,20%{transform:rotate(0)}50%,80%{transform:rotate(90deg)}100%{transform:rotate(0)}}
+.lvbox{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:6px;border-top:1px dashed rgba(255,255,255,.15)}
+.lvnum{font-family:var(--f-display);font-size:var(--fs-l);color:var(--lamp2);text-shadow:0 0 12px rgba(255,201,74,.6)}
+.stage-row{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.stage-chip{display:inline-flex;align-items:center;gap:6px;padding:.3em .8em;border-radius:999px;border:1.5px solid rgba(255,255,255,.25);background:rgba(24,19,64,.8);color:var(--text);font-size:var(--fs-xs);cursor:pointer}
+.stage-chip b{font-family:var(--f-num);font-weight:800;color:var(--paper)}
+.stage-chip.sel{border-color:var(--lamp);box-shadow:0 0 12px rgba(255,201,74,.45);background:rgba(60,45,120,.9)}
+.stage-chip.cleared i{font-style:normal;color:#9ff2c8;font-weight:900}
+.stage-chip.locked{opacity:.5}
+.stage-chip.ch2{border-style:dashed;opacity:.8}
+.stage-chip svg.ic{width:1em;height:1em;fill:currentColor}
+.unlock-wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:calc(12px*var(--u))}
+.unlock-card{padding:calc(16px*var(--u));display:flex;flex-direction:column;gap:8px;font-size:var(--fs-s);line-height:1.6}
+.unlock-card p{margin:0}
+.lure-path{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.lure-path .arrow{color:var(--dim)}
+.lure-mini{font-size:var(--fs-xs);margin-top:2px}
+.end-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:calc(10px*var(--u));width:100%}
+.end-card{padding:calc(12px*var(--u));display:flex;flex-direction:column;gap:6px;font-size:var(--fs-s)}
+.end-card p{margin:0}
+.end-card .btn{width:100%;justify-content:center}
+.end-card .row .btn{width:auto}
+.good{color:#9ff2c8}
+.snode.rec{outline:3px solid var(--lamp);outline-offset:4px;box-shadow:0 0 18px rgba(255,201,74,.8)}
+.snode.rec small{color:var(--lamp)!important}
+.snode.pending.lit{border-style:dashed;opacity:.8}
+.snode.wait{color:#fff;border-color:rgba(255,255,255,.55)}
+.cap-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;padding-top:10px;border-top:1px dashed rgba(255,255,255,.18)}
+.capn{display:inline-flex;flex-direction:column;align-items:center;gap:2px;min-width:4.5em}
+.capn b{display:grid;place-items:center;width:2em;height:2em;border-radius:50%;border:2px solid rgba(255,255,255,.3);font-family:var(--f-num);color:var(--dim)}
+.capn.on b{border-color:var(--lamp);color:#2d2358;background:linear-gradient(180deg,#fff0b0,#ffc94a);box-shadow:0 0 10px rgba(255,201,74,.7)}
+.capn small{font-size:var(--fs-xs);color:var(--dim)}
+.slot .sl{position:absolute;top:-1.35em;left:50%;transform:translateX(-50%);font-size:max(9px,calc(11px*var(--u)));font-weight:700;color:var(--dim);white-space:nowrap}
+.slots{margin-top:calc(14px*var(--u))}
+.modrow{display:flex;gap:6px;margin-top:6px;font-size:max(10px,calc(12px*var(--u)));font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.7)}
+.modrow:empty{display:none}
+.burst-btn .stock{position:absolute;right:-4px;bottom:-4px;min-width:2.4em;padding:.1em .45em;border-radius:999px;background:#2d2358;border:2px solid var(--lamp);color:var(--lamp2);font-family:var(--f-num);font-weight:800;font-size:max(11px,calc(14px*var(--tb)))}
+.wave-label{margin-top:4px;font-size:var(--fs-xs);color:var(--lamp2);text-align:center;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+#banner,#toast{transition:opacity .25s}
+#stage.offering #banner,#stage.offering #toast{opacity:.1}
+.cos.pack{border:1.5px dashed rgba(255,215,106,.5)}
+@media (max-width:760px){.end-grid3{grid-template-columns:1fr 1fr}}
 @media (max-height:600px){.stat-pill{padding:.25em .6em;min-width:0}.center-col{gap:8px}.build-list .row .dim-text{display:none}.build-list .row{display:inline-flex;margin-right:4px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s!important;animation-iteration-count:1!important;transition-duration:.001s!important}}
 </style>
@@ -340,6 +381,9 @@ table.metrics td.num{text-align:right;white-space:nowrap}
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M3 9h4l5-4.5v15L7 15H3z"/><path d="M15.5 8.5l1.4-1.4 2.1 2.1 2.1-2.1 1.4 1.4L20.4 10.6l2.1 2.1-1.4 1.4-2.1-2.1-2.1 2.1-1.4-1.4 2.1-2.1z"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 4.5l10-2v12.2a3.3 3.3 0 1 1-2-3V6.9l-6 1.2v8.6a3.3 3.3 0 1 1-2-3z"/></symbol>
+    <symbol id="s-pierce" viewBox="0 0 24 24"><path d="M1 10.5h14V7l8 5-8 5v-3.5H1z"/><circle cx="7" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2" opacity=".55"/></symbol>
+    <symbol id="s-homing" viewBox="0 0 24 24"><path d="M3 20c0-9 6-15 14-15V1l6 6-6 6V9C11 9 7 13 7 20z"/></symbol>
+    <symbol id="s-multi" viewBox="0 0 24 24"><path d="M2 11h11V8l7 4-7 4v-3H2z"/><path d="M3 5.5l9-3.2-.8-2.8 6.5 1.2-4.7 4.6-.8-2.7-8.8 3.1z" opacity=".75"/><path d="M3 18.5l9 3.2-.8 2.8 6.5-1.2-4.7-4.6-.8 2.7-8.8-3.1z" opacity=".75"/></symbol>
     <symbol id="s-thunder" viewBox="0 0 24 24"><path d="M14 1L4 14h6l-2 9 10-13h-6z"/></symbol>
     <symbol id="s-wing" viewBox="0 0 24 24"><path d="M22 12L2 3l4 9-4 9z"/><path d="M6 12h9" stroke="#2d2358" stroke-width="1.4"/></symbol>
     <symbol id="s-bomb" viewBox="0 0 24 24"><circle cx="10" cy="14" r="8"/><path d="M14.5 7.5l2-2 2 2-2 2z"/><circle cx="19.5" cy="3.5" r="2"/><circle cx="7" cy="11" r="2" fill="#fff" opacity=".5"/></symbol>
@@ -384,6 +428,8 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 <script src="js/mapart.js" charset="utf-8"></script>
 <script src="js/world.js" charset="utf-8"></script>
 <script src="js/mapfx.js" charset="utf-8"></script>
+<script src="js/offers.js" charset="utf-8"></script>
 <script src="js/boss.js" charset="utf-8"></script>
+<script src="js/captain.js" charset="utf-8"></script>
 <script src="js/ui.js" charset="utf-8"></script>
 <script src="js/main.js" charset="utf-8"></script>

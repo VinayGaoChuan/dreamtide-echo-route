@@ -1,5 +1,5 @@
 'use strict';
-/* 梦潮：回声航线 v0.6 — 地图物件美术：梦灯屋、断桥灯环、星砂矿、被困伙伴、巨型梦境生物。
+/* 梦潮：回声航线 v0.6/v0.7 — 地图物件美术：梦灯屋（主炮转盘）、断桥灯环、星砂矿、救援站、巨型梦境生物。
    全部 Canvas 程序绘制，沿用 Q 版深蓝紫描边 + 暖灯发光；远处剪影 → 靠近感应环 → 充能圈三层提示。 */
 
 function glowAt(g, x, y, r, color, a) { g.globalCompositeOperation = 'lighter'; drawGlow(g, x, y, r, color, a); g.globalCompositeOperation = 'source-over'; }
@@ -86,8 +86,8 @@ function drawLampHouse(g, x, y, o, t) {
   for (let i = 0; i < n; i++) {
     const u = i / (n - 1), bx = lerp(-60, 60, u), by = -38 - Math.sin(u * Math.PI) * 66;
     const lit2 = i < on;
-    if (lit2) glowAt(g, bx, by, 16, GLOW.gold, 0.8);
-    g.fillStyle = lit2 ? '#fff3b0' : '#5a4d96'; g.strokeStyle = PAL.ink; g.lineWidth = 1.5;
+    if (lit2) glowAt(g, bx, by, 16, o.bulb ? (o.bulb.startsWith('#') ? hexA(o.bulb, 0.9) : o.bulb) : GLOW.gold, 0.8);
+    g.fillStyle = lit2 ? (o.bulb || '#fff3b0') : '#5a4d96'; g.strokeStyle = PAL.ink; g.lineWidth = 1.5;
     g.beginPath(); g.arc(bx, by, 4.6, 0, TAU); g.fill(); g.stroke();
   }
   // windows = eyes
@@ -113,21 +113,32 @@ function drawLampHouse(g, x, y, o, t) {
   if (op > 0) { glowAt(g, 0, -8, 40, GLOW.gold, op); g.fillStyle = '#8f6fd8'; g.beginPath(); g.moveTo(-12, 0); g.lineTo(-12, -14); g.lineTo(-12 + 24 * (1 - op) * 0.9, -12); g.lineTo(-12 + 24 * (1 - op) * 0.9, 0); g.closePath(); g.fill(); g.stroke(); }
   g.restore();
 }
-/* 转盘：五格奖励，指针在上方 */
+/* 转盘：四格主炮改造；停下时本次两个候选的格子亮起 */
 function drawHouseWheel(g, x, y, r, rot, t, alpha, picked) {
   g.save(); g.globalAlpha = alpha; g.translate(x, y);
   glowAt(g, 0, 0, r * 1.7, 'rgba(255,215,106,0.8)', 0.6);
-  const n = HOUSE_WHEEL.length;
+  const n = GUN_ORDER.length;
   for (let i = 0; i < n; i++) {
-    const R = HOUSE_REWARDS[HOUSE_WHEEL[i]], a0 = rot + (i / n) * TAU - Math.PI / 2 - Math.PI / n, a1 = a0 + TAU / n;
-    g.fillStyle = picked === R.id ? '#fff6c8' : i % 2 ? '#3a2f82' : '#4b3d9c';
+    const S = SKILLS[GUN_ORDER[i]], a0 = rot + (i / n) * TAU - Math.PI / 2 - Math.PI / n, a1 = a0 + TAU / n, on = picked && picked.includes(S.id);
+    g.fillStyle = on ? hexA(S.color, 0.55) : i % 2 ? '#3a2f82' : '#4b3d9c';
     g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, r, a0, a1); g.closePath(); g.fill();
     g.strokeStyle = PAL.ink; g.lineWidth = 2; g.stroke();
-    const am = (a0 + a1) / 2; drawIcon(g, R.icon, Math.cos(am) * r * 0.62, Math.sin(am) * r * 0.62, r * 0.42, R.color);
+    const am = (a0 + a1) / 2; drawIcon(g, S.canvas, Math.cos(am) * r * 0.6, Math.sin(am) * r * 0.6, r * 0.42, S.color);
   }
   g.strokeStyle = '#ffd76a'; g.lineWidth = 4; g.beginPath(); g.arc(0, 0, r, 0, TAU); g.stroke();
   g.fillStyle = '#fff6c8'; g.beginPath(); g.arc(0, 0, 7, 0, TAU); g.fill(); g.strokeStyle = PAL.ink; g.lineWidth = 2; g.stroke();
   g.fillStyle = '#ff7eb6'; g.beginPath(); g.moveTo(0, -r + 12); g.lineTo(-10, -r - 10); g.lineTo(10, -r - 10); g.closePath(); g.fill(); g.stroke();
+  g.restore();
+}
+/* 救援站的宽光环：飞过去就能救出伙伴 */
+function drawRescueRing(g, x, y, r, t, near, color) {
+  g.save(); g.translate(x, y);
+  glowAt(g, 0, 0, r * 1.8, hexA(color, 0.8), 0.35 + near * 0.4);
+  g.strokeStyle = PAL.ink; g.lineWidth = 13; g.beginPath(); g.ellipse(0, 0, r * 0.55, r, 0, 0, TAU); g.stroke();
+  g.strokeStyle = color; g.lineWidth = 7; g.beginPath(); g.ellipse(0, 0, r * 0.55, r, 0, 0, TAU); g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 2; g.setLineDash([6, 8]); g.lineDashOffset = -t * 40; g.beginPath(); g.ellipse(0, 0, r * 0.4, r * 0.82, 0, 0, TAU); g.stroke(); g.setLineDash([]);
+  // 穿过方向：从左往右的小箭头
+  for (let i = 0; i < 3; i++) { const k = ((t * 1.2 + i / 3) % 1), ax = -r * 1.2 + k * r * 2.4; g.globalAlpha = Math.sin(k * Math.PI); g.fillStyle = '#fff6ee'; g.beginPath(); g.moveTo(ax + 9, 0); g.lineTo(ax - 5, -8); g.lineTo(ax - 1, 0); g.lineTo(ax - 5, 8); g.closePath(); g.fill(); }
   g.restore();
 }
 
@@ -212,7 +223,7 @@ function drawMine(g, x, y, o, t) {
     const ca = o.crackA || 0, L = r * (0.3 + ch * 0.9);
     g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
     for (const [off, k] of [[0, 1], [0.55, 0.7], [-0.6, 0.65], [2.8, 0.4 * ch]]) {
-      const a = ca + off; g.strokeStyle = `rgba(255,227,138,${0.5 + ch * 0.5})`; g.lineWidth = 3 + ch * 3;
+      const a = ca + off, cc = o.colors ? o.colors[(off > 0 ? 1 : 0) % o.colors.length] : '#ffe38a'; g.strokeStyle = hexA(cc, 0.5 + ch * 0.5); g.lineWidth = 3 + ch * 3;
       g.beginPath(); g.moveTo(0, 0);
       let px = 0, py = 0; for (let s = 1; s <= 4; s++) { const aa = a + (s % 2 ? 0.25 : -0.25); px += Math.cos(aa) * L * k / 4; py += Math.sin(aa) * L * k / 4; g.lineTo(px, py); }
       g.stroke();
@@ -319,16 +330,6 @@ function drawTrap(g, kind, x, y, r, t, prog) {
     gear(g, r * 0.55, r * 0.45, r * 0.45, 8, -t * (0.7 - prog), '#ffd76a');
     gear(g, r * 0.5, -r * 0.6, r * 0.3, 7, t, '#9fe3f0');
   }
-  g.restore();
-}
-function drawOrbitGuide(g, x, y, r, t, prog, color) {
-  g.save(); g.translate(x, y);
-  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 2; g.setLineDash([4, 10]); g.lineDashOffset = -t * 50;
-  g.beginPath(); g.arc(0, 0, r, 0, TAU); g.stroke(); g.setLineDash([]);
-  // travelling arrow shows which way round
-  const a = t * 1.8; g.save(); g.rotate(a); g.translate(r, 0); g.rotate(Math.PI / 2);
-  g.fillStyle = color; g.strokeStyle = PAL.ink; g.lineWidth = 1.6; g.beginPath(); g.moveTo(0, -9); g.lineTo(8, 5); g.lineTo(-8, 5); g.closePath(); g.fill(); g.stroke(); g.restore();
-  if (prog > 0) { g.globalCompositeOperation = 'lighter'; g.strokeStyle = color; g.lineWidth = 7; g.lineCap = 'round'; g.beginPath(); g.arc(0, 0, r, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(prog, 0, 1)); g.stroke(); }
   g.restore();
 }
 

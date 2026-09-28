@@ -801,16 +801,20 @@ function drawIcon(g, name, x, y, s, color, stroke = PAL.ink) {
     case 'blast': BulletArt.star(g, 0, 0, 8, 11, 5); break;
     case 'charge': BulletArt.star(g, 0, 0, 4, 11, 3.2); break;
     case 'repeat': g.arc(0, 0, 8, 0.3, 5.2); break;
+    case 'pierce': g.moveTo(-12, -2.5); g.lineTo(4, -2.5); g.lineTo(4, -7); g.lineTo(12, 0); g.lineTo(4, 7); g.lineTo(4, 2.5); g.lineTo(-12, 2.5); g.closePath(); break;
+    case 'homing': g.moveTo(-9, 10); g.quadraticCurveTo(-9, -6, 5, -6); g.lineTo(5, -11); g.lineTo(12, -3); g.lineTo(5, 5); g.lineTo(5, 0); g.quadraticCurveTo(-4, 0, -4, 10); g.closePath(); break;
+    case 'multi': for (const a of [-0.45, 0, 0.45]) { const c = Math.cos(a), s2 = Math.sin(a), pt = (x, y) => [x * c - y * s2, x * s2 + y * c]; const P = [[-10, -2], [3, -2], [3, -6], [11, 0], [3, 6], [3, 2], [-10, 2]].map(([x, y]) => pt(x, y)); g.moveTo(P[0][0], P[0][1]); for (const q of P.slice(1)) g.lineTo(q[0], q[1]); g.closePath(); } break;
     default: g.arc(0, 0, 8, 0, TAU);
   }
   if (name === 'snow' || name === 'repeat') { g.strokeStyle = color; g.lineWidth = 3.4; g.stroke(); if (name === 'repeat') { g.fillStyle = color; g.beginPath(); g.moveTo(9, -6); g.lineTo(3, -9); g.lineTo(9, 0); g.closePath(); g.fill(); } }
   else { g.fill(); g.stroke(); }
   if (name === 'bomb') { g.strokeStyle = stroke; g.beginPath(); g.moveTo(4, -5); g.quadraticCurveTo(7, -10, 11, -9); g.stroke(); g.fillStyle = '#ffe38a'; g.beginPath(); g.arc(11, -9, 2.4, 0, TAU); g.fill(); }
   if (name === 'chest') { g.fillStyle = stroke; g.fillRect(-2, 0, 4, 4); }
+  if (name === 'pierce') { g.strokeStyle = stroke; g.lineWidth = 1.6; g.beginPath(); g.arc(-4, 0, 5.5, 0, TAU); g.stroke(); }
   if (name === 'rainbow') { g.strokeStyle = '#9fe3f0'; g.lineWidth = 2; g.beginPath(); g.arc(0, 6, 8.5, Math.PI, 0); g.stroke(); }
   g.restore();
 }
-const SKILL_ICON = { thunder: 'bolt', wing: 'wing', bomb: 'bomb', magnet: 'magnet', rainbow: 'rainbow', ice: 'snow' };
+const SKILL_ICON = { thunder: 'bolt', wing: 'wing', bomb: 'bomb', magnet: 'magnet', rainbow: 'rainbow', ice: 'snow', pierce: 'pierce', homing: 'homing', multi: 'multi' };
 
 /* ---------- 六架 Q 版飞机：面朝右，深蓝紫描边，大眼睛 + 腮红 ---------- */
 function planeFace(g, x, y, s, o = {}) {

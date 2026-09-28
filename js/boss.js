@@ -1,7 +1,7 @@
 'use strict';
 /* 梦潮：回声航线 — 区域 Boss「失控闹钟」：三个乐章，每段教一个攻击再叠一层规则；会回应玩家的 Build。
    HP 1000，70% / 35% 切换阶段，每阶段至少两次弱点暴露。 */
-const BOSS_DMG_K = 0.085;
+const BOSS_DMG_K = 0.19; // v0.7：主炮改为单发直射后重新校准，推荐 Build 约 45~75 秒
 
 const CLOCK_PHASES = {
   1: { name: '第一乐章 · 指针卡住', music: 'boss1' },
