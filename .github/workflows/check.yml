@@ -1,0 +1,25 @@
+# 每次推送到 main、每个 PR 都跑一遍：语法检查 → 三关无头通关模拟 → 打包单文件。
+# 任何一步失败，这次提交旁边会出现红叉；GitHub Pages 仍按 main 自动部署，所以推送前最好先在本地跑同样的命令。
+name: 检查
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 语法检查
+        run: for f in js/*.js tools/*.js; do node --check "$f" || exit 1; done
+      - name: 三关无头通关模拟
+        run: node tools/smoke-sim.js js
+      - name: 打包单文件
+        run: python3 build.py dist/dreamtide.html

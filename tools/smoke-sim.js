@@ -1,5 +1,5 @@
 // 无头冒烟测试：用假画布加载游戏脚本，让一个简单的自动驾驶按推荐等级打完第一章三关，输出验收指标。
-// 用法：node tools/smoke-sim.js [js 目录]
+// 用法：node tools/smoke-sim.js [js 目录] [关卡，如 1-2]；有失败项时退出码为 1（GitHub Actions 用它挡住坏提交）
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const dir = process.argv[2] || path.join(__dirname, '..', 'js');
 const noop = () => {};
@@ -66,10 +66,14 @@ function run(stage, plane, level, cap, pickIdx, godmode) {
 `);
 const show = (o) => console.log(JSON.stringify(o));
 const only = process.argv[3];
+// 退出码：脚本报错，或“不会受伤”的两局没打通，就算失败（会被击中的普通机器人输了不算失败，只看数据）
+let failed = 0; const fail = (msg) => { failed++; console.log('FAIL', msg); };
 const cases = [['1-1', 1, 1], ['1-2', 2, 2], ['1-3', 3, 2]].filter((c) => !only || c[0] === only);
 for (const [st, lv, cap] of cases) for (const pk of [0, 1]) {
-  try { show(R(`run('${st}', 'moon', ${lv}, ${cap}, ${pk}, true)`)); }
-  catch (e) { console.log(st, 'ERROR', e && e.stack ? e.stack.split('\n').slice(0, 6).join(' | ') : e); }
+  try { const r = R(`run('${st}', 'moon', ${lv}, ${cap}, ${pk}, true)`); show(r); if (!r.win) fail(`${st} 选法 ${pk} 没有通关`); }
+  catch (e) { fail(`${st} 脚本报错 ${e && e.stack ? e.stack.split('\n').slice(0, 6).join(' | ') : e}`); }
 }
-for (const [st, lv, cap] of cases) { try { console.log('mortal', JSON.stringify(R(`run('${st}', 'candy', ${lv}, ${cap}, 0, false)`))); } catch (e) { console.log('mortal ERROR', e.stack.split('\n').slice(0, 6).join(' | ')); } }
-try { console.log('preview', R(`(function(){ const w = new World({ mode: 'preview', W: 1280, plane: 'whale', settings }); for (let i = 0; i < 1400; i++) w.step(1/120); return 'ok kills=' + w.m.kills; })()`)); } catch (e) { console.log('preview ERROR', e.stack.split('\n').slice(0, 5).join(' | ')); }
+for (const [st, lv, cap] of cases) { try { console.log('mortal', JSON.stringify(R(`run('${st}', 'candy', ${lv}, ${cap}, 0, false)`))); } catch (e) { fail(`mortal ${st} 脚本报错 ${e.stack.split('\n').slice(0, 6).join(' | ')}`); } }
+try { console.log('preview', R(`(function(){ const w = new World({ mode: 'preview', W: 1280, plane: 'whale', settings }); for (let i = 0; i < 1400; i++) w.step(1/120); return 'ok kills=' + w.m.kills; })()`)); } catch (e) { fail(`大招预览脚本报错 ${e.stack.split('\n').slice(0, 5).join(' | ')}`); }
+console.log(failed ? `冒烟测试失败 ${failed} 项` : '冒烟测试通过');
+process.exitCode = failed ? 1 : 0;
