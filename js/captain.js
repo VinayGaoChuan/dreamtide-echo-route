@@ -12,7 +12,7 @@ const CAPTAINS = {
 class CaptainBoss {
   constructor(w, kind, hp) {
     const C = CAPTAINS[kind];
-    this.w = w; this.kind = kind; this.C = C; this.t = 0; this.seed = rand(10);
+    this.w = w; this.kind = kind; this.C = C; this.t = 0; this.seed = srand(10);
     this.homeX = w.W * 0.76; this.homeY = (TOP + BOTTOM) / 2;
     this.x = w.W + 220; this.y = this.homeY;
     this.hp = hp; this.maxHp = hp; this.phase = 1; this.alive = true; this.dying = 0; this.transT = 0; this.nextPhase = 1;
@@ -51,14 +51,14 @@ class CaptainBoss {
     switch (name) {
       case 'spiral': for (let k = 0; k < 12; k++) { for (let i = 0; i < 3; i++) w.fire('pink', this.x, this.y, this.t * 2.4 + (i * TAU) / 3, 150 * spd, { silent: i > 0 }); yield* wait(0.12); } break;
       case 'fan': { const n = this.phase === 1 ? 5 : 7, a0 = w.aimAngle(this.x, this.y); for (let i = 0; i < n; i++) w.fire('pink', this.x - 20, this.y, a0 + (i - (n - 1) / 2) * 0.16, 190 * spd, { silent: i > 0 }); yield* wait(0.5); break; }
-      case 'ring': { const n = 14, gap = randi(0, n - 1), off = rand(TAU); for (let i = 0; i < n; i++) if (i !== gap && i !== (gap + 1) % n) w.fire('pink', this.x, this.y, off + (i / n) * TAU, 140 * spd, { silent: i > 0 }); yield* wait(0.6); break; }
+      case 'ring': { const n = 14, gap = srandi(0, n - 1), off = srand(TAU); for (let i = 0; i < n; i++) if (i !== gap && i !== (gap + 1) % n) w.fire('pink', this.x, this.y, off + (i / n) * TAU, 140 * spd, { silent: i > 0 }); yield* wait(0.6); break; }
       case 'cross': for (let k = 0; k < 4; k++) { for (let q = 0; q < 4; q++) w.fire('blue', this.x, this.y, (q * Math.PI) / 2 + Math.PI / 4 + this.t * 0.8, 170 * spd, { silent: q > 0 }); yield* wait(0.18); } break;
       case 'volley': for (let k = 0; k < 3; k++) { w.fire('gold', this.x - 30, this.y, w.aimAngle(this.x, this.y), 230 * spd); yield* wait(0.4); } break;
       case 'summon': {
         // 散兵：从右边补一队小怪，不计入“必须清零”的目标
-        const top = w.arena.top + 60, bot = w.arena.bottom - 60, y0 = rand(top, bot);
+        const top = w.arena.top + 60, bot = w.arena.bottom - 60, y0 = srand(top, bot);
         if (this.kind === 'captain') for (let i = 0; i < 6; i++) w.addEnemy('jelly', { x: w.W + 10 + i * 50, y: y0, path: 'sine', vx: -120, amp: 30, freq: 2, phase: i * 0.5, escort: true, bossAdd: true });
-        else { for (let i = 0; i < 7; i++) w.addEnemy('moth', { x: w.W + 10 + rand(0, 160), y: rand(top, bot), path: 'line', vx: -rand(130, 170), escort: true, bossAdd: true }); w.addEnemy('star', { x: w.W + 40, y: rand(top, bot), path: 'dive', vx: -200, fire: 'aim', escort: true, bossAdd: true }); }
+        else { for (let i = 0; i < 7; i++) w.addEnemy('moth', { x: w.W + 10 + srand(0, 160), y: srand(top, bot), path: 'line', vx: -srand(130, 170), escort: true, bossAdd: true }); w.addEnemy('star', { x: w.W + 40, y: srand(top, bot), path: 'dive', vx: -200, fire: 'aim', escort: true, bossAdd: true }); }
         this.guard = true;
         w.text('散兵来了 · 护盾撑起来了', this.x, this.y - 110, this.C.color, 18, 3);
         yield* wait(0.4); break;

@@ -40,9 +40,11 @@ Q 版手绘风的横版自动射击 Roguelite（HTML / Canvas Demo，目标平�
 | `js/mapfx.js` | 地图互动：梦灯屋、风车塔、星砂矿、救援吊舱、伙伴 |
 | `js/surprise.js` | 场景惊喜：月亮怪、贴纸拟态、拟态梦灯屋 |
 | `js/boss.js` · `js/captain.js` | 失控闹钟 Boss、关卡队长 |
-| `js/ui.js` | 菜单、大厅、HUD、结算、设置、图鉴 |
-| `js/main.js` | 启动、自适应舞台、固定步长主循环 |
+| `js/net.js` | 联机：帧同步会话 `LockstepSession`、操作编码、转发层（Claude 房间 / 本机多窗口）、联机房间 `Lobby` |
+| `js/ui.js` | 菜单、大厅、联机房间、HUD、结算、设置、图鉴 |
+| `js/main.js` | 启动、自适应舞台、固定步长主循环、联机主循环 |
 | `tools/smoke-sim.js` | 无头冒烟测试（假画布跑三关） |
+| `tools/mp-sim.js` | 联机同步测试：几个独立 JS 环境各跑一份同一局，逐帧比对状态 |
 | `build.py` | 把 js 内联成单个 HTML |
 | `docs/` | 全部策划文档和美术规范；先看 [docs/README.md](docs/README.md)（阅读顺序、冲突时以哪份为准、哪些部分已不做） |
 
@@ -54,11 +56,37 @@ Q 版手绘风的横版自动射击 Roguelite（HTML / Canvas Demo，目标平�
 for f in js/*.js tools/*.js; do node --check "$f"; done   # 语法
 node tools/smoke-sim.js js                                 # 三关无头通关模拟（约 1~2 分钟）
 node tools/smoke-sim.js js 1-2                             # 只跑一关
+node tools/mp-sim.js js all 2 direct                       # 联机：2 人跑三关，逐帧比对是否同步
+node tools/mp-sim.js js 1-2 3 net 0.2 100 5                # 联机：3 人，20% 丢包、100 毫秒延迟、缓冲 5 帧
+node tools/mp-sim.js js 1-1 2 net 0.15 80 4 1@2500         # 联机：第 2 位玩家在第 2500 帧掉线
 python3 build.py dist/dreamtide.html                       # 打包单文件（dist/ 不入库）
 ```
 
 冒烟测试里“不会受伤”的两局必须通关，脚本不能报错；会被击中的普通机器人输了不算失败，只用来看胜率和节奏数据。
 GitHub Actions（`.github/workflows/check.yml`）会在每次推送到 main 和每个 PR 上自动跑同样的检查，结果显示在提交旁边。
+
+## 联机（2–4 人合作）
+
+**玩法**：大厅点「联机」→ 创建房间或加入别人的房间 → 房主选关、点开始。每人开自己的飞机、带自己的天赋和共享等级；升级仪式全队共用一套 Build，谁先飞进候选圈谁替大家选。被击倒后 10 秒内队友飞到身边就能救起（2 颗心、短暂无敌）。有人掉线或退出，所有人在同一帧把那架飞机移除，其余人继续。联机时公开按人数加厚：大型敌人血量 ×(1 + 0.6 × (人数 − 1))，Boss ×(1 + 0.7 × (人数 − 1))。暂停菜单不会冻结联机战斗，只是自己的飞机原地不动。
+
+**同步方式：帧同步，只发操作**。每秒 30 个操作帧，每帧推进 4 个模拟步（1/120 秒）；每人每帧只发 5 个字符（方向、慢速、大招、拖动），各端用同一个种子、同样的操作各自模拟同一局，不发游戏状态。本机操作晚几帧生效（房间里可选“网络缓冲 短 / 标准 / 长”），用来盖住网络延迟；凑不齐某一帧所有人的操作就等（画面提示“等待 XX 的操作…”）。每 30 帧各端交换一次状态哈希，对不上会提示。
+
+**改玩法代码必须守的规则**（否则联机会分叉，`tools/mp-sim.js` 会报出第一帧和差异字段）：
+
+- 影响玩法的随机数一律用 `srand / srandi / spick`（这一局的种子）；`rand / randi / pick`（`Math.random`）只能用在纯画面效果上。
+- 模拟里不读真实时间（`Date.now`、`performance.now`），不读设置项、窗口尺寸；联机时画面宽度固定 1280。
+- `this.me` 只用于画面、HUD、音效和震动；模拟里的“当前玩家”是 `this.player`（`withPlayer(q, fn)` 切换），找目标用 `nearestPlayer / pickTarget`。
+- 新实体的 id 用 `this.eid++`；画面代码（render、HUD）不能改任何玩法状态。
+
+**转发层**（`js/net.js`，接口都是“在场状态”：`peers() / presence(patch) / onChange / connected / close`）：
+
+| 环境 | 转发 | 说明 |
+|---|---|---|
+| 在 Claude 里打开的游戏 Artifact | `RoomNet`：Claude Artifact 的 `room` 能力 | 打开同一个链接、已登录的同组织成员互相可见；每人的在场状态 ≤ 4 KiB、约 30 次 / 秒、只保留最新——所以每份状态都带着“别人还缺的那段操作帧”，丢了下一份补上 |
+| GitHub Pages / 本地 / 未登录 | `LocalNet`：BroadcastChannel | 只连同一浏览器的多个窗口，用来测试：同一个地址开两个窗口就能进同一个房间 |
+| Steam（下一步） | 待做：Steam 大厅 + `ISteamNetworkingMessages`（Electron + steamworks.js） | 实现同一套在场状态接口即可，帧同步和游戏代码不用改 |
+
+标签页切到后台时浏览器会停掉画面刷新，联机由 Worker 计时器（`NetTicker`）继续采操作、跑模拟，队友不用等。
 
 ## 协作流程
 
@@ -76,4 +104,4 @@ GitHub Actions（`.github/workflows/check.yml`）会在每次推送到 main 和�
 - 玩家看到的文字一律中文，一句话说清，不写系统规则长文；代码注释也用中文。
 - 美术全部是 Canvas 程序化绘制，不引入外部图片和第三方库。
 - 改了存档结构，要在 `js/util.js` 的 `Store` 里写迁移，不能让旧存档读坏。
-- 数值按关卡固定，不随玩家变强偷偷给敌人加血。
+- 数值按关卡固定，不随玩家变强偷偷给敌人加血（联机按人数加厚是公开规则，见上文）。

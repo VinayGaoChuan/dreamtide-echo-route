@@ -8,6 +8,17 @@ const rand = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.rando
 const randi = (a, b) => Math.floor(a + Math.random() * (b - a + 1));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const chance = (p) => Math.random() < p;
+/* 确定性随机数：多人帧同步时，所有影响玩法结果的随机都走 srand / srandi / spick（每局一个种子，各端算出来一模一样）。
+   粒子、音效、界面这类表现继续用上面的 rand / randi / pick（Math.random），它们不会影响同步。 */
+class SeededRng {
+  constructor(seed) { this.s = seed >>> 0; this.n = 0; }
+  next() { this.n++; this.s = (this.s + 0x6D2B79F5) | 0; let t = this.s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+}
+const SimRNG = { cur: null }; // World.step() 开头把自己的随机源挂上来
+const srnd = () => (SimRNG.cur ? SimRNG.cur.next() : Math.random());
+const srand = (a = 1, b) => (b === undefined ? srnd() * a : a + srnd() * (b - a));
+const srandi = (a, b) => Math.floor(a + srnd() * (b - a + 1));
+const spick = (arr) => arr[Math.floor(srnd() * arr.length)];
 const dist2 = (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; };
 const angTo = (ax, ay, bx, by) => Math.atan2(by - ay, bx - ax);
 const angDiff = (a, b) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };

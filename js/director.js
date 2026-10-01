@@ -171,11 +171,11 @@ Object.assign(World.prototype, {
     if (D.delay > 0) { D.delay -= dt; return; }
     D.budget = Math.min(D.budget + rate * dt, 14);
     if (active >= 36) return;
-    const kind = D.next || (D.next = pick(this.formationPool(this.seg.tier)));
+    const kind = D.next || (D.next = spick(this.formationPool(this.seg.tier)));
     const size = FORMATION_SIZE[kind] || 5;
     if (D.budget >= size || (!onScreen && D.budget >= size * 0.3)) {
       // 装置留下的入口（岩壁裂口 / 风吹开的门）也会放杂兵出来
-      const tr = this.traces.crack || this.traces.door, r = Math.random();
+      const tr = this.traces.crack || this.traces.door, r = srnd();
       if (tr && r < 0.3 && kind !== 'beacon' && kind !== 'ticks') this.spawnFromTrace(tr, kind === 'vee' || kind === 'swarm' ? 'moth' : 'jelly', 5);
       else if (this.seg.tier >= 2 && r > 0.8 && (kind === 'boats' || kind === 'line' || kind === 'vee')) this.spawnPushed(kind === 'boats' ? 'boat' : kind === 'vee' ? 'moth' : 'jelly', kind === 'boats' ? 3 : 5);
       else this.spawnFormation(kind);
@@ -197,9 +197,9 @@ Object.assign(World.prototype, {
     const id = opt.kind === 'link' ? SYNERGIES[opt.id].need[0] : opt.id;
     let label = '';
     if (id === 'pierce') { for (let i = 0; i < 7; i++) this.addEnemy('jelly', { x: W + 20 + i * 44, y, path: 'line', vx: -140 }); label = '一整列：一发穿过去'; }
-    else if (id === 'homing') { for (let i = 0; i < 8; i++) this.addEnemy('moth', { x: W + 20 + rand(0, 200), y: rand(top, bot), path: 'sine', vx: -120, amp: 30, freq: 1.5, phase: i }); label = '四散的敌人：子弹会拐弯'; }
+    else if (id === 'homing') { for (let i = 0; i < 8; i++) this.addEnemy('moth', { x: W + 20 + srand(0, 200), y: srand(top, bot), path: 'sine', vx: -120, amp: 30, freq: 1.5, phase: i }); label = '四散的敌人：子弹会拐弯'; }
     else if (id === 'multi') { for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: W + 20 + (i % 2) * 30, y: clamp(y + (i - 2.5) * 30, top, bot), path: 'line', vx: -130 }); label = '一面墙：几路子弹一起扫'; }
-    else if (id === 'bomb') { for (let i = 0; i < 10; i++) this.addEnemy('moth', { x: W + 30 + rand(-30, 30), y: clamp(y + rand(-50, 50), top, bot), path: 'line', vx: -120 }); label = '挤成一团：一炸一片'; }
+    else if (id === 'bomb') { for (let i = 0; i < 10; i++) this.addEnemy('moth', { x: W + 30 + srand(-30, 30), y: clamp(y + srand(-50, 50), top, bot), path: 'line', vx: -120 }); label = '挤成一团：一炸一片'; }
     else { this.spawnFormation('swarm'); label = '一群蛾子：试试新支援'; }
     // 刚拿到打厚甲的能力：再来一只单独的厚甲怪，看看现在几秒能敲碎
     if ((src === 'wind' || src === 'armor') && this.goal && this.goal.kind === 'armor1') { this.later(1.2, () => { if (this.phase === 'fight') { this.addArmor({ x: W + 60, ty: clamp(p.y + 60, top, bot), verify: true }); this.text('同样的厚甲怪：看看现在几秒敲碎', W * 0.72, clamp(p.y, top, bot), '#e6ecff', 17, 4); } }); }
@@ -214,7 +214,7 @@ Object.assign(World.prototype, {
     if (delay > 0) { const G = this.goal; if (G && o.goal) G.pendingT = (G.pendingT || 0) + 1; this.later(delay, () => { if (G && o.goal) G.pendingT--; this.entrance(from, type, o, n, 0); }); return; }
     const W = this.W, mid = (this.arena.top + this.arena.bottom) / 2, ty = o.ty !== undefined ? o.ty : mid, tx = o.tx || W * 0.74;
     const make = (mode, P, base) => {
-      const e = type === 'cmdr' ? null : this.addIncoming(type, Object.assign({ path: 'hold', tx, ty, bob: 36, fire: 'slow', fireT: rand(1.6, 2.4) }, base || {}), mode, P);
+      const e = type === 'cmdr' ? null : this.addIncoming(type, Object.assign({ path: 'hold', tx, ty, bob: 36, fire: 'slow', fireT: srand(1.6, 2.4) }, base || {}), mode, P);
       if (e && o.goal) this.addTarget(e);
       return e;
     };
@@ -230,7 +230,7 @@ Object.assign(World.prototype, {
       case 'rift': this.openRift(Math.max(W * 0.6, this.player.x + 340), ty, type === 'armor' && this.goal && this.goal.kind === 'armor1' ? ['moth', 'moth', 'moth', 'moth', 'moth', 'armor'] : [type], { goal: o.goal, tx, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
       case 'rear': this.rearChase(1, null, { type, goal: o.goal, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
       case 'drop': {
-        const side = o.side || (this.D.dropSide = -this.D.dropSide), x = rand(W * 0.62, W * 0.8); // 上下交替，一次只从一边进，不会同时封死
+        const side = o.side || (this.D.dropSide = -this.D.dropSide), x = srand(W * 0.62, W * 0.8); // 上下交替，一次只从一边进，不会同时封死
         this.props.push({ kind: 'drop', side, x, t: 0, warn: 1.0, spawn: () => make('drop', { x0: x + 60, y0: side < 0 ? TOP - 50 : BOTTOM + 50, x1: tx, y1: ty, dur: 0.9 }) });
         if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1;
         break;
@@ -247,10 +247,10 @@ Object.assign(World.prototype, {
   },
   /* 背景推近：剪影从远处慢慢变大，越过景深线之前不会碰撞 */
   spawnPushed(type, n) {
-    const x = rand(this.W * 0.6, this.W * 0.8), top = this.arena.top + 60, bot = this.arena.bottom - 60, y0 = rand(top + 60, bot - 60);
+    const x = srand(this.W * 0.6, this.W * 0.8), top = this.arena.top + 60, bot = this.arena.bottom - 60, y0 = srand(top + 60, bot - 60);
     for (let i = 0; i < n; i++) {
       const y = clamp(y0 + (i - (n - 1) / 2) * 48, top, bot);
-      this.addIncoming(type, type === 'boat' ? { path: 'line', vx: -80, fire: 'drop', fireT: rand(1, 2) } : { path: 'line', vx: -120 }, 'push', { x0: x + 20 + i * 8, y0: y - 30, x1: x + i * 30, y1: y, dur: 1.6 + i * 0.1 });
+      this.addIncoming(type, type === 'boat' ? { path: 'line', vx: -80, fire: 'drop', fireT: srand(1, 2) } : { path: 'line', vx: -120 }, 'push', { x0: x + 20 + i * 8, y0: y - 30, x1: x + i * 30, y1: y, dur: 1.6 + i * 0.1 });
     }
   },
   spawnFromTrace(tr, type, n) {
@@ -285,12 +285,12 @@ Object.assign(World.prototype, {
   },
   riftWave(n, G) {
     const p = this.player, top = this.arena.top + 90, bot = this.arena.bottom - 90;
-    const y = p.y < (top + bot) / 2 ? rand((top + bot) / 2 + 40, bot) : rand(top, (top + bot) / 2 - 40);
-    this.openRift(rand(this.W * 0.62, this.W * 0.8), y, Array(n).fill('moth'), { chase: true });
+    const y = p.y < (top + bot) / 2 ? srand((top + bot) / 2 + 40, bot) : srand(top, (top + bot) / 2 - 40);
+    this.openRift(srand(this.W * 0.62, this.W * 0.8), y, Array(n).fill('moth'), { chase: true });
   },
   /* 地形刷怪点：沉船核心没被打碎前会一直放出蛾子 */
   spawnWreck(G) {
-    const y = rand(this.arena.top + 120, this.arena.bottom - 120);
+    const y = srand(this.arena.top + 120, this.arena.bottom - 120);
     const e = this.addEnemy('wreck', { x: this.W + 120, y, path: 'wreck', tx: this.W * 0.8, ty: y, elite: false, portrait: 'wreck' });
     this.addTarget(e); G.spawnT = 2.5;
     this.text('沉船里有东西在发光', this.W * 0.78, y - 80, '#ff9fcf', 18, 4);
@@ -342,7 +342,7 @@ Object.assign(World.prototype, {
             if (P.spitT <= 0) {
               P.spitT = 0.22; const type = P.types.shift(), o = P.o;
               const base = type === 'armor' ? { path: 'hold', tx: o.tx || P.x - 60, ty: o.ty || P.y, bob: 36, fire: 'slow', fireT: 2.2 } : { path: 'line', vx: -140, chaser: !!P.chase };
-              const e = this.addIncoming(type, base, 'emerge', { x0: P.x, y0: P.y, x1: P.x - 70 - rand(0, 60), y1: clamp(P.y + rand(-80, 80), this.arena.top + 30, this.arena.bottom - 30), dur: 0.55 });
+              const e = this.addIncoming(type, base, 'emerge', { x0: P.x, y0: P.y, x1: P.x - 70 - srand(0, 60), y1: clamp(P.y + srand(-80, 80), this.arena.top + 30, this.arena.bottom - 30), dur: 0.55 });
               if (o.goal && type === 'armor') { this.addTarget(e); this.goal.pendingT--; }
               Sound.sfx('riftSpit', { pan: this.pan(P.x), gap: 90 });
               if (type === 'armor' && P.types.length === 0 && o.goal) P.spitT = 0; else if (P.types[0] === 'armor') P.spitT = 1.4; // 厚甲怪最后才挤出来

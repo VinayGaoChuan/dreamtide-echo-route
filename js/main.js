@@ -17,7 +17,7 @@
 
   function resize() {
     const r = app.getBoundingClientRect(), w = Math.max(1, r.width), h = Math.max(1, r.height);
-    const W = clamp(Math.round((w / h) * LH), 1152, 1560);
+    const W = G.mpLock ? 1280 : clamp(Math.round((w / h) * LH), 1152, 1560); // 联机时宽度固定，各端世界一样大
     const scale = Math.min(w / W, h / LH), cw = W * scale, ch = LH * scale, left = (w - cw) / 2, top = (h - ch) / 2;
     for (const el of [cv, stage]) Object.assign(el.style, { left: left + 'px', top: top + 'px', width: cw + 'px', height: ch + 'px' });
     const dpr = Math.min(window.devicePixelRatio || 1, G.meta.settings.particles === 'low' ? 1 : 2);
@@ -93,6 +93,42 @@
     overlay(W);
   }
 
+  /* ---------- 联机主循环：按真实时间推进；本机每 1/30 秒采一帧操作，凑齐所有人的这一帧才往下模拟 ---------- */
+  // 每个操作帧 = 4 个模拟步；步按真实时间一个个跑（画面平滑），只在帧的第一步换上新操作。暂停菜单不冻结联机战斗，只是本机不操作。
+  // 浏览器会在标签页后台、窗口被遮住、游戏框滚出视野时停掉或降频 requestAnimationFrame（不一定伴随 document.hidden），
+  // 所以联机始终由 NetTicker（Worker 计时，约 40 次 / 秒）推进；画面刷新时再顺带推进一次，画面更平滑。两边都按真实时间算，谁先到谁跑。
+  function mpTick(now) {
+    const w = G.world, L = G.mpLoop, S = Lobby.session;
+    if (!w || !L || !S || w.done) return;
+    const dt = Math.min(0.25, Math.max(0, (now - L.last) / 1000)); L.last = now;
+    const el = (now - L.t0) / 1000, FR = LOCKSTEP.hz, SP = LOCKSTEP.steps;
+    // 1) 本机操作：第 k 帧在 (k - delay) / 30 秒时采样，delay 帧之后才生效
+    const active = Input.gameActive && !G.paused && !document.hidden;
+    while (S.nextLocal <= Math.floor(el * FR) + S.delay) {
+      const qx = clamp(Math.round(L.dx), -31, 31), qy = clamp(Math.round(L.dy), -31, 31); L.dx -= qx; L.dy -= qy;
+      const inp = active ? { mx: Input.out.mx, my: Input.out.my, focus: Input.out.focus, burst: Input.consume('burst'), dx: qx, dy: qy } : NEUTRAL_INPUT;
+      if (!S.sample(inp)) break;
+    }
+    // 2) 收别人的帧、发自己的
+    Lobby.pump(); if (now - Lobby.lastFlush >= 30) Lobby.flush(now);
+    // 3) 模拟：追到真实时间；落后很多时一次多追几帧
+    const target = Math.floor(el * FR * SP), behind = target - L.steps;
+    let budget = (behind > FR * SP * 2 ? LOCKSTEP.catchUp * 3 : LOCKSTEP.catchUp) * SP, stalled = false;
+    while (L.steps < target && budget-- > 0 && !w.done) {
+      if (L.steps % SP === 0) { const ins = S.next(); if (!ins) { stalled = true; break; } for (let j = 0; j < ins.length; j++) w.setInput(j, ins[j]); }
+      w.step(1 / 120); L.steps++;
+      if (L.steps % SP === 0 && S.simFrame % LOCKSTEP.hashEvery === 0) S.simulated(w.stateHash());
+    }
+    L.waitT = stalled ? L.waitT + dt : 0;
+    if (S.desync && !L.desyncShown) { L.desyncShown = true; console.warn('[联机] 状态不一致', S.desync); toast('联机画面和队友对不上了：这局结果可能不同，结束后请重开', '#ffb2a8', null, 5000); }
+  }
+  NetTicker.on((now) => { if (G.mpLoop) { try { mpTick(now); drainWorldEvents(); } catch (e) { console.error('[联机] 计时', e); } } });
+  function mpWaitText() {
+    const L = G.mpLoop, S = Lobby.session; if (!L || !S || L.waitT < 0.35) return '';
+    const who = S.waitingFor().map((j) => (Lobby.roster[j] && Lobby.roster[j].name) || `${j + 1}P`);
+    return who.length ? `等待 ${who.join('、')} 的操作…` : '';
+  }
+
   /* ---------- 主循环：固定 120 Hz 模拟，每帧渲染一次 ---------- */
   const STEP = 1 / 120;
   let last = performance.now(), acc = 0, errored = false;
@@ -102,16 +138,25 @@
     try {
       Input.update(dt);
       const d = Input.consumeDrag(), w = G.world;
-      if (w && !G.paused && !w.done && G.bg === 'world') {
-        if (Input.gameActive) { const s = G.meta.settings.dragSens / G.scale; w.dragDX += d.dx * s; w.dragDY += d.dy * s; }
+      if (w && G.mpLoop && !w.done) {
+        if (Input.gameActive && !G.paused) { const s = G.meta.settings.dragSens / G.scale; G.mpLoop.dx += d.dx * s; G.mpLoop.dy += d.dy * s; }
+        mpTick(now); acc = 0;
+        drainWorldEvents();
+        Input.flushRumble(G.meta.settings.rumble === undefined ? 1 : G.meta.settings.rumble);
+        if (Input.gameActive && Input.consume('pause')) pauseGame();
+        mpWait(mpWaitText());
+      } else if (w && !G.paused && !w.done && G.bg === 'world') {
+        let ddx = 0, ddy = 0;
+        if (Input.gameActive) { const s = G.meta.settings.dragSens / G.scale; ddx = d.dx * s; ddy = d.dy * s; }
         acc += dt; let n = 0;
-        while (acc >= STEP && n < 12) { w.step(STEP); acc -= STEP; n++; }
+        // 单人：每一步把本机操作交给 World（多人走 net.js 的帧同步，不经过这里）
+        while (acc >= STEP && n < 12) { w.setInput(w.meIdx, { mx: Input.out.mx, my: Input.out.my, focus: Input.out.focus, burst: Input.consume('burst'), dx: ddx, dy: ddy }); ddx = ddy = 0; w.step(STEP); acc -= STEP; n++; }
         if (n >= 12) acc = 0;
         drainWorldEvents();
         Input.flushRumble(G.meta.settings.rumble === undefined ? 1 : G.meta.settings.rumble);
         if (Input.gameActive && Input.consume('pause')) pauseGame();
       } else {
-        acc = 0;
+        acc = 0; if (waitShown) mpWait('');
         if (G.bg === 'hub') G.hub.update(dt); else if (G.bg === 'map') G.map.update(dt); else G.sea.update(dt);
       }
       if (!Input.gameActive) navUpdate();
@@ -122,5 +167,7 @@
       if (!errored) { errored = true; console.error('[梦潮] frame error', e); }
     }
   }
+  let waitShown = '';
+  function mpWait(t) { if (t === waitShown) return; waitShown = t; const el = $('#mpwait'); el.textContent = t; el.hidden = !t; }
   requestAnimationFrame(frame);
 })();

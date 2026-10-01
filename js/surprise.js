@@ -56,7 +56,7 @@ Object.assign(World.prototype, {
       if (S.atkT <= 0 && this.state === 'play') {
         S.atkT = teeth.length ? 3.3 : 2.8; S.atk++;
         if (S.atk % 2) {
-          const y = clamp(p.y, this.arena.top + 60, this.arena.bottom - 60), h = 104;
+          const y = clamp(this.pickTarget().y, this.arena.top + 60, this.arena.bottom - 60), h = 104;
           this.addWarn({ kind: 'zone', x: 0, y: y - h / 2, w: S.mx - 80, h, tWarn: 1.0, onFire: () => { S.bite = 0.5; for (let i = 0; i < 8; i++) this.fire('pink', S.mx - 100, y + (i - 3.5) * 12, Math.PI, 430, { silent: i > 0, from: 'bite' }); Sound.sfx('bite'); } });
           this.text('要咬了 · 离开那条航道', S.mx - 160, y - 64, '#ffb2a8', 16, 3);
         } else for (const s of [-1, 1]) this.later(s > 0 ? 0.35 : 0, () => { if (!S.core.alive) return; const ax = S.mx - 20, ay = S.my + s * 110, a0 = this.aimAngle(ax, ay); for (let i = 0; i < 5; i++) this.fire('gold', ax, ay, a0 + (i - 2) * 0.16, 200, { silent: i > 0, from: 'moonArm' }); });
@@ -78,7 +78,7 @@ Object.assign(World.prototype, {
       }
     } else if (S.st === 'rings') {
       let lit = 0;
-      for (const r of S.rings) { r.x -= 26 * dt; if (!r.lit && p.alive && dist2(p.x, p.y, r.x, r.y) < 56 * 56) { r.lit = true; Sound.sfx('ringPass', { k: S.rings.filter((q) => q.lit).length - 1 }); this.fx(r.x, r.y, 2, 70, ['#fff3c8', '#ffd76a', '#dcd0ff']); this.addCharge(0.1, true); } if (r.lit) lit++; }
+      for (const r of S.rings) { r.x -= 26 * dt; if (!r.lit && this.players.some((q) => q.alive && dist2(q.x, q.y, r.x, r.y) < 56 * 56)) { r.lit = true; Sound.sfx('ringPass', { k: S.rings.filter((q) => q.lit).length - 1 }); this.fx(r.x, r.y, 2, 70, ['#fff3c8', '#ffd76a', '#dcd0ff']); this.addCharge(0.1, true); } if (r.lit) lit++; }
       S.prog = { type: 'count', n: lit, total: 3 };
       const next = S.rings.find((r) => !r.lit); S.guide = next ? { x: next.x, y: next.y } : null;
       if ((lit === 3 || S.t > 12) && !S.queued) {
@@ -116,7 +116,7 @@ Object.assign(World.prototype, {
         if (S.atkT <= 0 && !S.dash && this.state === 'play') {
           S.atkT = 3.4; S.n = (S.n || 0) + 1;
           if (S.n % 2) {
-            const y = clamp(p.y, this.arena.top + 60, this.arena.bottom - 60), h = 110;
+            const y = clamp(this.pickTarget().y, this.arena.top + 60, this.arena.bottom - 60), h = 110;
             this.addWarn({ kind: 'zone', x: this.W * 0.26, y: y - h / 2, w: this.W * 0.5, h, tWarn: 1.0, onFire: () => { if (e.alive) { S.dash = { t: 0, y }; Sound.sfx('bite'); } } });
             S.sub = '它要沿着这条航道咬过来'; e.y = y;
           } else { const a0 = this.aimAngle(e.x, e.y); for (let i = 0; i < 3; i++) this.fire('gold', e.x - 30, e.y, a0 + (i - 1) * 0.22, 210, { silent: i > 0, from: 'mimic' }); S.sub = '吐出了星星贴纸'; }
@@ -135,7 +135,7 @@ Object.assign(World.prototype, {
       S.hx = smooth(S.hx, this.W * 0.66, 0.9, dt); S.beat = (S.t % 0.9) < 0.12 ? 1 : 0;
       const bx = S.hx - 122, by = S.hy + 36; S.guide = { x: bx, y: by };
       if (S.t > 3.5 && !S.said) { S.said = true; S.sub = '烟囱在呼吸，门缝里好像有牙'; }
-      if (((p.alive && dist2(p.x, p.y, bx, by) < 60 * 60) || S.t > 12) && !this.ritual) {
+      if ((this.players.some((q) => q.alive && dist2(q.x, q.y, bx, by) < 60 * 60) || S.t > 12) && !this.ritual) {
         this.surpriseTo(S, 'wake'); S.busy = true; S.guide = null; this.clearBullets(true); Sound.sfx('houseWake'); this.shake(0.4); this.rumble(0.6, 0.4, 200);
         S.title = '梦灯屋站起来了！'; S.sub = null;
       }
@@ -155,7 +155,7 @@ Object.assign(World.prototype, {
         if (!this.ritual) S.atkT -= dt;
         if (S.atkT <= 0 && this.state === 'play') {
           S.atkT = 3.0;
-          const ny = pick([this.arena.top + 150, mid + 20, this.arena.bottom - 80].filter((y) => Math.abs(y - S.ty) > 60));
+          const ny = spick([this.arena.top + 150, mid + 20, this.arena.bottom - 80].filter((y) => Math.abs(y - S.ty) > 60));
           this.addWarn({ kind: 'zone', x: S.hx - 90, y: ny - 110, w: 180, h: 170, tWarn: 0.9, onFire: () => { if (!e.alive) return; S.ty = ny; this.later(0.4, () => { if (!e.alive) return; const a0 = this.aimAngle(S.hx - 40, ny - 60); for (let i = 0; i < 5; i++) this.fire('pink', S.hx - 40, ny - 60, a0 + (i - 2) * 0.18, 190, { silent: i > 0, from: 'hmimic' }); Sound.sfx('bite'); }); } });
           S.sub = '跳到哪里会先画出落点';
         }

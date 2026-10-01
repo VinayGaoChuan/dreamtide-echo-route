@@ -40,8 +40,7 @@ function pilot(w) {
   }
   let dodge = 0; if (!busy || w.pilotDodge) w.bullets.each((b) => { const dx = b.x - p.x, dy = b.y - p.y; if (dx > -20 && dx < 160 && Math.abs(dy) < 50) dodge += dy > 0 ? -1 : 1; });
   for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
-  Input.out.mx = Math.sign(tx - p.x) * Math.min(1, Math.abs(tx - p.x) / 60); Input.out.my = dodge ? Math.sign(dodge) : Math.sign(ty - p.y) * Math.min(1, Math.abs(ty - p.y) / 40);
-  if (p.stock >= 1 && !w.ritual) w.tryBurst();
+  w.setInput(p.idx, { mx: Math.sign(tx - p.x) * Math.min(1, Math.abs(tx - p.x) / 60), my: dodge ? Math.sign(dodge) : Math.sign(ty - p.y) * Math.min(1, Math.abs(ty - p.y) / 40), burst: p.stock >= 1 && !w.ritual });
 }
 function run(stage, plane, level, cap, pickIdx, godmode) {
   let res = null; const meta = freshMeta(); meta.shared.level = level; meta.planes[plane] = newPlaneRecord(plane);

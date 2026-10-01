@@ -21,7 +21,7 @@ class ClockBoss {
     this.bigT = 16; this.revT = 5; this.repeatT = 6.5; this.shieldT = 24;
     this.sweep = null; this.dying = 0; this.stuck = false; this.fightT = 0; this.handsT = 0; this.openCd = 0; this.iceT = 10;
     this.conductive = false; this.marked = false; this.iceHands = false;
-    this.orbit = []; for (let i = 0; i < 10; i++) this.orbit.push({ a: rand(TAU), r: rand(150, 200), s: rand(0.3, 0.7), petal: i % 2 === 0 });
+    this.orbit = []; for (let i = 0; i < 10; i++) this.orbit.push({ a: srand(TAU), r: srand(150, 200), s: srand(0.3, 0.7), petal: i % 2 === 0 });
     Sound.sfx('alarm');
   }
   get dens() { return (t, n) => this.w.dens(t, n); }
@@ -74,7 +74,7 @@ class ClockBoss {
       this.bigT -= dt; if (this.bigT <= 0) { this.bigT = 20; this.bigWarning(); }
     }
     if (this.phase === 3) {
-      this.revT -= dt; if (this.revT <= 0) { this.revT = rand(4.5, 5.5); w.reverseT = 0.9; Sound.sfx('rewind'); w.emit('flag', { text: '时间倒流', color: 'gold', dur: 1 }); }
+      this.revT -= dt; if (this.revT <= 0) { this.revT = srand(4.5, 5.5); w.reverseT = 0.9; Sound.sfx('rewind'); w.emit('flag', { text: '时间倒流', color: 'gold', dur: 1 }); }
       this.repeatT -= dt; if (this.repeatT <= 0) { this.repeatT = 6.5; this.repeatGone(); }
       this.shieldT -= dt; if (this.shieldT <= 0) { this.shieldT = 24; if (this.shield <= 0) { this.shield = 60; this.shieldMax = 60; w.emit('flag', { text: '护盾恢复', color: 'white', dur: 1 }); Sound.sfx('weakOpen'); } }
     }
@@ -82,10 +82,11 @@ class ClockBoss {
     if (this.sweep) {
       const s = this.sweep; s.t += dt;
       const u = Ease.inOutSine(clamp(s.t / s.dur, 0, 1)); s.a = lerp(s.a0, s.a1, u); this.minA = s.a;
-      if (w.state === 'play' && p.alive) {
+      if (w.state === 'play') for (const q of w.players) { // 指针扫过：每架飞机都要躲
+        if (!q.alive || q.gone) continue;
         const ex = this.x + Math.cos(s.a) * s.len, ey = this.y + Math.sin(s.a) * s.len;
-        const hit = segDist2(p.x, p.y, this.x, this.y, ex, ey) < (s.w / 2 + p.r) * (s.w / 2 + p.r);
-        if (hit && p.inv <= 0) w.hurtPlayer(1, 'c:boss');
+        const hit = segDist2(q.x, q.y, this.x, this.y, ex, ey) < (s.w / 2 + q.r) * (s.w / 2 + q.r);
+        if (hit && q.inv <= 0) w.hurtPlayer(1, 'c:boss', q);
       }
       if (s.t >= s.dur) this.sweep = null;
     }
@@ -133,7 +134,7 @@ class ClockBoss {
   *atk_diamonds() {
     const w = this.w, top = w.arena.top + 30, bot = w.arena.bottom - 30;
     for (let c = 0; c < 3; c++) {
-      const n = Math.max(5, this.dens('blue', 8)), gap = randi(1, n - 3);
+      const n = Math.max(5, this.dens('blue', 8)), gap = srandi(1, n - 3);
       for (let i = 0; i < n; i++) { if (i === gap || i === gap + 1) continue; this.w.fire('blue', this.x - 90, lerp(top, bot, i / (n - 1)), Math.PI, 175, { silent: i > 0 }); }
       yield 0.85;
     }
@@ -169,7 +170,7 @@ class ClockBoss {
     yield 0.4;
   }
   *atk_rewindSpiral() {
-    let base = rand(TAU);
+    let base = srand(TAU);
     for (let k = 0; k < 14; k++) {
       for (let i = 0; i < 4; i++) this.w.fire(i % 2 ? 'pink' : 'blue', this.x, this.y, base + (i * TAU) / 4, 185, { silent: i > 0 });
       base += 0.26; yield 0.12;
@@ -189,7 +190,7 @@ class ClockBoss {
   openFromExplosion() { if (this.openCd > 0) return; this.openCd = 5; this.weakT = Math.max(this.weakT, 1.4); Sound.sfx('weakOpen'); this.w.emit('flag', { text: '爆炸撬开了核心！', color: 'gold', dur: 1 }); }
 
   bigWarning() {
-    const w = this.w, mid = (w.arena.top + w.arena.bottom) / 2, upper = Math.random() < 0.5;
+    const w = this.w, mid = (w.arena.top + w.arena.bottom) / 2, upper = srnd() < 0.5;
     const y0 = upper ? w.arena.top : mid, h = upper ? mid - w.arena.top : w.arena.bottom - mid;
     w.emit('flag', { text: upper ? '上半区即将被淹没' : '下半区即将被淹没', color: 'white', dur: 1.2 });
     w.addWarn({ kind: 'zone', x: 0, y: y0, w: w.W, h, tWarn: 1.2 + w.diff.warnBonus, post: 1.4, onFire: () => {

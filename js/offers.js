@@ -77,7 +77,7 @@ Object.assign(World.prototype, {
     if ((source === 'wind' || source === 'armor') && this.goal && this.goal.kind === 'armor1') {
       const focus = [this.optGun('multi', rare), this.gun.homing ? this.optGun('homing', rare) : null].filter(Boolean);
       const crowd = [this.gun.pierce ? this.optGun('pierce', rare) : null, this.optGun('bomb', rare)].filter(Boolean);
-      if (focus.length && crowd.length) return [Object.assign({}, focus[0], { why: '集中火力 · 敲甲更快' }), Object.assign({}, pick(crowd), { why: '一次清一大片' })];
+      if (focus.length && crowd.length) return [Object.assign({}, focus[0], { why: '集中火力 · 敲甲更快' }), Object.assign({}, spick(crowd), { why: '一次清一大片' })];
     }
     let pool;
     if (source === 'house') pool = gun;
@@ -89,13 +89,13 @@ Object.assign(World.prototype, {
     if (pool.length < 2) return [{ kind: 'res', id: 'charge' }, { kind: 'res', id: 'heal' }];
     const upgrades = pool.filter((o) => o.from > 0), fresh = pool.filter((o) => !(o.from > 0) && o.kind !== 'link');
     let a = null;
-    if (this.offerN === 1 && upgrades.length && fresh.length) a = pick(upgrades);
-    else if (this.offerN === 2 || rare || source === 'core' || source === 'moon') { const L = pool.filter((o) => this.enablesLink(o)); if (L.length) a = pick(L); }
-    if (!a && this.dryOffers >= 2 && upgrades.length) a = pick(upgrades);
+    if (this.offerN === 1 && upgrades.length && fresh.length) a = spick(upgrades);
+    else if (this.offerN === 2 || rare || source === 'core' || source === 'moon') { const L = pool.filter((o) => this.enablesLink(o)); if (L.length) a = spick(L); }
+    if (!a && this.dryOffers >= 2 && upgrades.length) a = spick(upgrades);
     const rest = pool.filter((o) => !a || o.id !== a.id);
     const second = this.offerN === 1 && a ? fresh.filter((o) => o.id !== a.id) : rest;
     const b = this.weightedPick(second.length ? second : rest);
-    if (!a) a = this.weightedPick(rest.filter((o) => o.id !== b.id)) || pick(everything.filter((o) => o.id !== b.id));
+    if (!a) a = this.weightedPick(rest.filter((o) => o.id !== b.id)) || spick(everything.filter((o) => o.id !== b.id));
     return [a, b];
   },
   stillValid(o) {
@@ -107,7 +107,7 @@ Object.assign(World.prototype, {
   },
   weightedPick(list) {
     if (!list.length) return null;
-    const w = list.map((o) => this.optWeight(o)); let r = Math.random() * w.reduce((x, y) => x + y, 0);
+    const w = list.map((o) => this.optWeight(o)); let r = srnd() * w.reduce((x, y) => x + y, 0);
     for (let i = 0; i < list.length; i++) { r -= w[i]; if (r <= 0) return list[i]; }
     return list[list.length - 1];
   },
@@ -127,12 +127,12 @@ Object.assign(World.prototype, {
   },
 
   /* ---------- 仪式流程 ---------- */
-  queueRitual(src, o = {}) { if (this.mode !== 'run') return; this.ritualQueue.push({ src, full: !!o.full, q: o.q || 0, x: o.x, y: o.y, device: o.device || 'machine', opts: o.opts, rare: !!o.rare, obj: o.obj || null, promise: o.promise || null }); },
+  queueRitual(src, o = {}) { if (this.mode !== 'run') return; this.ritualQueue.push({ src, full: !!o.full, q: o.q || 0, x: o.x, y: o.y, device: o.device || 'machine', opts: o.opts, rare: !!o.rare, by: this.player ? this.player.idx : 0, obj: o.obj || null, promise: o.promise || null }); },
   queueOffer(src, o = {}) { this.queueRitual(src, o); }, // 兼容旧调用
   canRitual() { return this.mode === 'run' && this.state === 'play' && !this.bursting && !(this.surprise && this.surprise.busy) && this.phase === 'fight'; },
   ritualFocus() { const R = this.ritual; return !!(R && R.st !== 'resume'); },
   startRitual(q) {
-    const p = this.player, top = this.arena.top + 70, bot = this.arena.bottom - 70;
+    const by = this.players[q.by], p = by && by.alive && !by.gone ? by : this.anchor(), top = this.arena.top + 70, bot = this.arena.bottom - 70; // 触发的人就是候选卡摆放的参照
     if (this.rareNext) { this.rareNext = false; q.rare = true; }
     let opts = q.opts && q.opts.every((o) => o && this.stillValid(o)) ? q.opts : this.makeOffer(q.src, q.rare);
     opts = opts.map((o) => Object.assign({}, o));
@@ -146,7 +146,8 @@ Object.assign(World.prototype, {
     this.dryOffers = hasUp || this.offerN < 3 ? 0 : this.dryOffers + 1;
     // 危险隔离：敌弹化成星点、预警撤掉、贴脸的敌人推开
     this.clearBullets(true);
-    for (const e of this.enemies) if (e.alive && !e.isBoss && dist2(e.x, e.y, p.x, p.y) < 150 * 150) { e.x = Math.max(e.x, p.x + 170); }
+    for (const q2 of this.alivePlayers()) { q2.rx = q2.x; q2.ry = q2.y; for (const e of this.enemies) if (e.alive && !e.isBoss && dist2(e.x, e.y, q2.x, q2.y) < 150 * 150) { e.x = Math.max(e.x, q2.x + 170); } }
+    this.ritual.who = p.idx;
     Sound.sfx('ritualTrigger', { ui: true }); Sound.focus(true);
     this.rumble(0.2, 0.4, 60);
     this.emit('ritual', { src: q.src, first, full: q.full });
@@ -172,10 +173,16 @@ Object.assign(World.prototype, {
       case 'reveal': for (const G of R.gates) { G.x = lerp(G.x, G.tx, 1 - Math.pow(0.0005, dt / T.reveal)); G.y = lerp(G.y, G.ty, 1 - Math.pow(0.0005, dt / T.reveal)); G.alpha = Math.min(1, G.alpha + dt * 4); } if (R.t >= T.reveal) this.ritStep('choose'); break;
       case 'choose': {
         R.chooseT += dt;
+        // 共享 Build：任何一架飞机飞进圆圈停住都算替队伍选择（按玩家顺序判定，各端一致）
         R.gates.forEach((G, i) => {
-          const d = Math.sqrt(dist2(p.x, p.y, G.x, G.y));
-          G.near = approach(G.near, d < 170 ? 1 : 0, dt * 5);
-          if (p.alive && d < GATE_R + (this.planeId === 'paper' ? 14 : 0)) { G.dwell += dt; if (G.dwell >= GATE_DWELL) this.chooseRitual(i); }
+          if (R.st !== 'choose') return;
+          let dmin = 1e9, inside = null;
+          for (const q2 of this.alivePlayers()) {
+            const d = Math.sqrt(dist2(q2.x, q2.y, G.x, G.y)); dmin = Math.min(dmin, d);
+            if (!inside && d < GATE_R + (q2.planeId === 'paper' ? 14 : 0)) inside = q2;
+          }
+          G.near = approach(G.near, dmin < 170 ? 1 : 0, dt * 5);
+          if (inside) { G.dwell += dt; if (G.dwell >= GATE_DWELL) this.chooseRitual(i, inside); }
           else G.dwell = Math.max(0, G.dwell - dt * 2);
         });
         break;
@@ -199,10 +206,10 @@ Object.assign(World.prototype, {
         break;
     }
     // 焦点期间飞机稳住（选择阶段除外）
-    if (R.st !== 'choose' && R.st !== 'resume' && this.ritual) { p.x = smooth(p.x, R.px, 6, dt); p.y = smooth(p.y, R.py, 6, dt); }
+    if (R.st !== 'choose' && R.st !== 'resume' && this.ritual) for (const q2 of this.alivePlayers()) { if (q2.rx === undefined) { q2.rx = q2.x; q2.ry = q2.y; } q2.x = smooth(q2.x, q2.rx, 6, dt); q2.y = smooth(q2.y, q2.ry, 6, dt); }
   },
   ritStep(st) {
-    const R = this.ritual, p = this.player;
+    const R = this.ritual, p = this.players[R.who] || this.anchor();
     R.st = st; R.t = 0;
     if (st === 'transform') Sound.sfx('transform', { ui: true });
     if (st === 'roll') Sound.sfx('spin', { ui: true });
@@ -213,8 +220,8 @@ Object.assign(World.prototype, {
       R.gates = R.opts.map((opt, i) => { const info = Object.assign(this.optInfo(opt), this.fitNote(opt)); return { opt, info, side, x: R.x, y: R.y, tx: gx, ty: clamp(mid + (i ? 135 : -135), top, bot), near: 0, dwell: 0, alpha: 0 }; });
       R.spin = 0.4; Sound.sfx('reveal', { r: R.qNow >= 2 ? 'SR' : R.qNow ? 'R' : 'N', ui: true });
     }
-    if (st === 'choose') { R.px = p.x; R.py = p.y; }
-    if (st === 'resume') { p.inv = Math.max(p.inv, 0.8); Sound.focus(false); }
+    if (st === 'choose') for (const q2 of this.players) { q2.rx = q2.x; q2.ry = q2.y; }
+    if (st === 'resume') { for (const q2 of this.alivePlayers()) q2.inv = Math.max(q2.inv, 0.8); Sound.focus(false); }
   },
   qualityUp(R) {
     R.qNow++; R.opts = R.opts.map((o) => this.upgradeOpt(o));
@@ -225,13 +232,13 @@ Object.assign(World.prototype, {
     this.text(`品质提升 · ${QUALITY[R.qNow].name}`, R.x, R.y - 110, C, 22, 6);
     this.rumble(0.3, 0.5, 70);
   },
-  chooseRitual(i) {
-    const R = this.ritual, G = R.gates[i];
+  chooseRitual(i, who) {
+    const R = this.ritual, G = R.gates[i]; R.by = who ? who.idx : R.who;
     R.pick = i; R.picked = G.opt;
     this.m.choiceTimes = this.m.choiceTimes || []; this.m.choiceTimes.push(R.chooseT);
     if (this.m.firstSkill === null) this.m.firstSkill = this.runT;
     const pre = this.buildSummary();
-    this.applyOption(G.opt); // 数据在确认时写入
+    this.withPlayer(who || this.player, () => this.applyOption(G.opt)); // 数据在确认时写入（资源类奖励给选的那位）
     R.word = G.opt.kind === 'link' ? '组合完成' : G.opt.from > 0 ? '升级' : '获得';
     R.prevBuild = pre;
     Sound.sfx(G.opt.kind === 'link' ? 'synergy' : 'crystal', { ui: true });
@@ -264,9 +271,10 @@ Object.assign(World.prototype, {
     }
     if (o.bonus) this.addCharge(o.bonus, true);
     this.skills = this.support ? [this.support] : [];
+    for (const q2 of this.players) q2.skills = this.support ? [Object.assign({}, this.support, { t: 0.4, t2: 3 })] : []; // 每架飞机自己的支援冷却
     this.picks.push(o); this.crystals = this.picks.length; this.m.crystals++;
     if (o.kind === 'gun' || o.kind === 'support') { if (this.cb.onSkill) this.cb.onSkill(o.id); }
-    this.syncWingmen();
+    this.eachPlayer(() => this.syncWingmen());
     this.updateStream();
     Sound.setCardMods([this.support ? { thunder: 'echo', wing: 'mirror', magnet: 'gentle', ice: 'tide', rainbow: 'paperboat' }[this.support.id] : null, this.gun.bomb ? 'overheat' : null].filter(Boolean));
     this.emit('pick', { kind: o.kind, id: o.id, name: info.name, lv: info.lv, desc: info.desc, color: info.color, tag: info.tag, first: this.picks.length === 1 });

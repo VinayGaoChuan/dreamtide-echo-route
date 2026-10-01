@@ -23,7 +23,7 @@ Object.assign(World.prototype, {
     return e;
   },
   addArmor(o = {}) {
-    const e = this.addEnemy('armor', Object.assign({ path: 'hold', vx: -150, tx: this.W * 0.74, ty: (this.arena.top + this.arena.bottom) / 2, bob: 40, fire: 'slow', fireT: rand(1.8, 2.6) }, o));
+    const e = this.addEnemy('armor', Object.assign({ path: 'hold', vx: -150, tx: this.W * 0.74, ty: (this.arena.top + this.arena.bottom) / 2, bob: 40, fire: 'slow', fireT: srand(1.8, 2.6) }, o));
     this.armorSetup(e);
     if (this.cb.onSeenEnemy) this.cb.onSeenEnemy('armor');
     return e;
@@ -59,7 +59,7 @@ Object.assign(World.prototype, {
       case 'cmdr': e.x = smooth(e.x, e.tx, 1.4, dt); e.y = smooth(e.y, (this.arena.top + this.arena.bottom) / 2 + Math.sin(e.t * 0.55) * 90, 1.6, dt); return true;
       case 'escort': { // 护卫：跟着队长保持编队；队长倒下后散开
         const L = this.enemies.find((q) => q.id === e.leader && q.alive);
-        if (!L || e.disband) { e.path = 'scatter'; e.vx = -rand(40, 90); e.vy = rand(-30, 30); return true; }
+        if (!L || e.disband) { e.path = 'scatter'; e.vx = -srand(40, 90); e.vy = srand(-30, 30); return true; }
         e.x = smooth(e.x, L.x + e.slot[0], 3, dt); e.y = smooth(e.y, clamp(L.y + e.slot[1], this.arena.top + 30, this.arena.bottom - 30), 3, dt); return true;
       }
       case 'scatter': e.x += e.vx * dt; e.y += Math.sin(e.t * 5 + e.seed) * 30 * dt + e.vy * dt; if (e.t > (e.fleeAt || 1e9)) { e.vx = -260; } return true;
@@ -70,9 +70,9 @@ Object.assign(World.prototype, {
   foeFire(e, dt, p) {
     if (e.disband || e.sup) return true; // 惊喜敌人的攻击由 surprise.js 管
     const onScreen = e.x < this.W - 30 && e.x > 40;
-    if (e.fire === 'slow') { e.fireT -= dt; if (onScreen && e.fireT <= 0) { e.fireT = rand(2.4, 3.2); this.fire('pink', e.x - 20, e.y, this.aimAngle(e.x, e.y), 150); } return true; }
+    if (e.fire === 'slow') { e.fireT -= dt; if (onScreen && e.fireT <= 0) { e.fireT = srand(2.4, 3.2); this.fire('pink', e.x - 20, e.y, this.aimAngle(e.x, e.y), 150); } return true; }
     if (e.type === 'cmdr') { this.cmdrThink(e, dt); return true; }
-    if (e.path === 'escort') { e.fireT -= dt; if (onScreen && e.fireT <= 0) { e.fireT = rand(3.2, 4.6); this.fire('pink', e.x - 10, e.y, this.aimAngle(e.x, e.y), 150, { silent: true }); } return true; }
+    if (e.path === 'escort') { e.fireT -= dt; if (onScreen && e.fireT <= 0) { e.fireT = srand(3.2, 4.6); this.fire('pink', e.x - 10, e.y, this.aimAngle(e.x, e.y), 150, { silent: true }); } return true; }
     if (e.type === 'wreck') return true;
     return false;
   },
@@ -83,12 +83,12 @@ Object.assign(World.prototype, {
     // 半血：叫来上下两队援兵（先从云影 / 海面预警再钻出来）
     if (!e.called && e.hp < e.maxHp * 0.5) {
       e.called = true; this.text('精英叫来了援兵！', e.x, e.y - 90, '#ffb2a8', 20, 5);
-      for (const side of [-1, 1]) { const x = e.x - 40; this.props.push({ kind: 'drop', side, x, t: 0, warn: 1.0, spawn: () => { for (let i = 0; i < 3; i++) this.addIncoming(side < 0 ? 'jelly' : 'moth', { path: 'escort', leader: e.id, slot: [(i - 1) * 56 - 20, side * 150], escort: true, fireT: rand(2, 4) }, 'drop', { x0: x + (i - 1) * 50, y0: side < 0 ? TOP - 40 : BOTTOM + 40, x1: e.x + (i - 1) * 56 - 20, y1: e.y + side * 150, dur: 0.8 }); } }); }
+      for (const side of [-1, 1]) { const x = e.x - 40; this.props.push({ kind: 'drop', side, x, t: 0, warn: 1.0, spawn: () => { for (let i = 0; i < 3; i++) this.addIncoming(side < 0 ? 'jelly' : 'moth', { path: 'escort', leader: e.id, slot: [(i - 1) * 56 - 20, side * 150], escort: true, fireT: srand(2, 4) }, 'drop', { x0: x + (i - 1) * 50, y0: side < 0 ? TOP - 40 : BOTTOM + 40, x1: e.x + (i - 1) * 56 - 20, y1: e.y + side * 150, dur: 0.8 }); } }); }
     }
     if (e.cmdT <= 0) {
       e.cmdT = 4.6; e.rally = 1.9; Sound.sfx('weakOpen', { pan: this.pan(e.x) });
       this.text('举旗！弱点露出来了', e.x, e.y - 70, '#ffe38a', 16, 3);
-      const y = clamp(this.player.y, this.arena.top + 60, this.arena.bottom - 60), h = 96;
+      const y = clamp(this.pickTarget().y, this.arena.top + 60, this.arena.bottom - 60), h = 96; // 多人：轮到谁就指谁的航道
       this.later(0.9, () => {
         if (!e.alive || this.state !== 'play') return;
         this.addWarn({ kind: 'zone', x: 0, y: y - h / 2, w: e.x - 40, h, tWarn: 1.0, onFire: () => { if (!e.alive) return; for (let i = 0; i < 6; i++) this.fire('pink', e.x - 30, y + (i - 2.5) * 14, Math.PI, 330, { silent: i > 0, from: 'lane' }); } });
@@ -100,7 +100,7 @@ Object.assign(World.prototype, {
     const c = this.addEnemy('cmdr', { elite: true, x: x0, y: y0, path: 'cmdr', tx: this.W * 0.75, fireT: 2, goal: true, portrait: 'cmdr' });
     for (const side of [-1, 1]) for (let i = 0; i < 4; i++) {
       const type = side < 0 ? 'jelly' : 'moth';
-      this.addEnemy(type, { x: x0 + (i - 1.5) * 52, y: y0 + side * 170, path: 'escort', leader: c.id, slot: [(i - 1.5) * 52, side * 170], escort: true, fireT: rand(1.5, 4) });
+      this.addEnemy(type, { x: x0 + (i - 1.5) * 52, y: y0 + side * 170, path: 'escort', leader: c.id, slot: [(i - 1.5) * 52, side * 170], escort: true, fireT: srand(1.5, 4) });
     }
     this.emit('elite', { elite: 'cmdr' });
     if (this.cb.onSeenEnemy) this.cb.onSeenEnemy('cmdr');

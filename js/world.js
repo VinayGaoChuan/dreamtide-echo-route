@@ -5,7 +5,9 @@
 
 const LH = 720, TOP = 64, BOTTOM = LH - 22;
 const B_RADIUS = { pink: 7, blue: 6.5, gold: 8, white: 4 };
-let _eid = 1;
+let _eid = 1; // 只给不进同步的场合兜底；每个 World 用自己的 this.eid
+const PLAYER_COLORS = ['#ffe38a', '#9fe3f0', '#ff9fcf', '#9ff2c8'];
+const NEUTRAL_INPUT = Object.freeze({ mx: 0, my: 0, focus: false, burst: false, dx: 0, dy: 0 });
 
 /* 飞机属性 = 飞机基础 × 共享等级 × 这架飞机天赋树已点亮的节点（穿透 / 追踪节点只强化本局已获得的能力） */
 function planeStats(meta, planeId) {
@@ -30,15 +32,17 @@ class World {
     this.mode = o.mode || 'run';
     this.W = o.W || 1280; this.H = LH;
     this.settings = o.settings; this.cb = o.cb || {};
-    this.planeId = o.plane || 'moon'; this.P = PLANES[this.planeId];
-    this.stats = o.stats || planeStats(null, this.planeId);
-    this.first = !!o.first; this.tutorial = !!o.tutorial; this.targetName = o.target || null; // 这一局追的流派（和大厅“下一局目标”一致）
-    this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id; this.ultCap = o.ultCap || 1;
-    const cos = o.cos || {};
-    const expC = COSMETICS.exp.find((c) => c.id === cos.exp);
-    this.expColors = (expC && expC.colors) || this.P.colors.exp;
-    const trC = COSMETICS.trail.find((c) => c.id === cos.trail) || COSMETICS.trail[0];
-    this.trailColors = trC.colors; this.trailId = trC.id;
+    // 确定性：每局一个种子；所有影响玩法的随机都从这里取（多人时各端种子相同）
+    this.seed = o.seed !== undefined ? o.seed >>> 0 : (Math.random() * 4294967296) >>> 0;
+    this.rng = new SeededRng(this.seed); SimRNG.cur = this.rng; this.eid = 1;
+    // 玩家名单：单人就是一架；多人时每架飞机带着自己的机型、局外属性和大招容量
+    const roster = o.players || [{ id: 'solo', name: '', plane: o.plane || 'moon', stats: o.stats, ultCap: o.ultCap || 1, cos: o.cos }];
+    this.np = roster.length; this.mp = this.np > 1 || !!o.mp;
+    this.first = !!o.first && !this.mp; this.tutorial = !!o.tutorial && !this.mp; this.targetName = o.target || null; // 这一局追的流派（和大厅“下一局目标”一致）
+    this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id;
+    this.players = roster.map((r, i) => this.makePlayer(r, i));
+    this.meIdx = o.me || 0; this.me = this.players[this.meIdx]; this.player = this.players[0];
+    this.inputs = this.players.map(() => Object.assign({}, NEUTRAL_INPUT));
     this.scene = o.scene || new SeaScene(); this.scene.speed = 90; this.scene.dir = 1; this.scene.dim = this.mode === 'run' ? 1 : 0; this.scene.moonFx = null;
     this.low = this.settings.particles === 'low';
     this.diff = { warnBonus: 0.1 }; // 大众向：Boss 预警统一多给 0.1 秒
@@ -50,13 +54,10 @@ class World {
     this.shots = new Pool(() => ({ on: false }), 520);
     this.parts = new Pool(() => ({ on: false }), this.low ? 360 : 1100);
     this.enemies = []; this.incoming = []; this.pickups = []; this.portals = []; this.surprise = null; this.lastStop = -9; this.burstKills = []; this.arcs = []; this.beams = []; this.rings = []; this.walls = [];
-    this.warns = []; this.texts = []; this.events = []; this.timers = []; this.wingmen = [];
-    this.dragDX = 0; this.dragDY = 0;
-    const midY = (TOP + BOTTOM) / 2;
-    this.player = { x: this.W * 0.24, y: midY, vx: 0, vy: 0, r: 6, hp: this.stats.hearts, maxHp: this.stats.hearts, inv: 0, hurtT: 0, burst: 0, stock: 0, tilt: 0, blink: 0, blinkT: 2, cloudShield: false, cloudCd: 0, fireT: 0.1, alt: 1, trail: [], trailT: 0, alive: true, candy: 0, moved: 0 };
+    this.warns = []; this.texts = []; this.events = []; this.timers = [];
     this.initBuild(); this.syn = this.links; this.crystals = 0;
     this.streak = { n: 0, t: 0, best: 0, lastN: 0 }; this.recentKills = []; this.chainCd = 0; this.chainHiCd = 0;
-    this.bursting = null; this.bfx = null; this.storm = null; this.cloudWall = null;
+    this.bursting = null; this.bfx = null; this.cloudWall = null;
     this.seg = null; this.segIdx = 0; this.boss = null; this.bossProxy = null; this.bossIntroT = 0; this.bossEarly = false; this.carnival = false;
     this.tutorCharge = false;
     this.m = { kills: 0, dust: 0, crystals: 0, syns: 0, bursts: 0, maxStreak: 0, elites: 0, highlights: 0, firstKill: null, firstSkill: null, firstSyn: null, firstBurst: null,
@@ -66,14 +67,67 @@ class World {
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
     if (this.mode === 'preview') this.setupPreview();
     else this.initDirector();
-    this.syncWingmen();
+    this.eachPlayer(() => this.syncWingmen());
   }
+  /* 一架飞机的全部局内状态（多人时每人一份） */
+  makePlayer(r, i) {
+    const planeId = r.plane || 'moon', P = PLANES[planeId], stats = r.stats || planeStats(null, planeId), cos = r.cos || {}, n = Math.max(1, this.np || 1);
+    const expC = COSMETICS.exp.find((c) => c.id === cos.exp), trC = COSMETICS.trail.find((c) => c.id === cos.trail) || COSMETICS.trail[0];
+    const y = (TOP + BOTTOM) / 2 + (i - (n - 1) / 2) * 90;
+    return { idx: i, id: r.id || 'p' + i, name: r.name || '', planeId, P, stats, ultCap: r.ultCap || 1, expColors: (expC && expC.colors) || P.colors.exp, trailColors: trC.colors, trailId: trC.id,
+      color: PLAYER_COLORS[i % PLAYER_COLORS.length], wingmen: [], storm: null, skills: [], downT: 0, gone: false,
+      x: this.W * 0.24 - (n > 1 ? (i % 2) * 40 : 0), y, vx: 0, vy: 0, r: 6, hp: stats.hearts, maxHp: stats.hearts, inv: 0, hurtT: 0, burst: 0, stock: 0, tilt: 0, blink: 0, blinkT: 2, cloudShield: false, cloudCd: 0, fireT: 0.1, alt: 1, trail: [], trailT: 0, alive: true, candy: 0, moved: 0 };
+  }
+  /* 兼容单人代码：“当前行动的飞机”的这些属性，读的都是 this.player 身上的 */
+  get planeId() { return this.player.planeId; }
+  get P() { return this.player.P; }
+  get stats() { return this.player.stats; }
+  get ultCap() { return this.player.ultCap; }
+  get expColors() { return this.player.expColors; }
+  get trailColors() { return this.player.trailColors; }
+  get trailId() { return this.player.trailId; }
+  get wingmen() { return this.player.wingmen; }
+  set wingmen(v) { this.player.wingmen = v; }
+  get storm() { return this.player.storm; }
+  set storm(v) { this.player.storm = v; }
+  /* 同步校验：把会影响结局的状态压成一个 32 位哈希（浮点按原始位比较，表现层的东西不算进来） */
+  stateHash() {
+    const f = new Float64Array(1), u = new Uint32Array(f.buffer); let h = 0x811c9dc5;
+    const mix = (v) => { f[0] = +v || 0; h = Math.imul(h ^ u[0], 16777619); h = Math.imul(h ^ u[1], 16777619); };
+    mix(this.t); mix(this.runT); mix(this.rng.s); mix(this.rng.n); mix(this.m.kills); mix(this.m.dust); mix(this.beatIdx || 0); mix(this.eid);
+    for (const q of this.players) { mix(q.x); mix(q.y); mix(q.hp); mix(q.stock); mix(q.burst); mix(q.alive ? 1 : 0); }
+    for (const e of this.enemies) { mix(e.id); mix(e.x); mix(e.y); mix(e.hp); }
+    let nb = 0; this.bullets.each((b) => { nb++; mix(b.x); mix(b.y); }); mix(nb);
+    let ns = 0; this.shots.each((s2) => { ns++; mix(s2.x); mix(s2.y); }); mix(ns);
+    for (const k of this.pickups) { mix(k.x); mix(k.y); }
+    if (this.boss) mix(this.boss.hp);
+    return h >>> 0;
+  }
+  /* 分叉排查用：比哈希更细的明细 */
+  stateDump() {
+    return { t: this.t, runT: this.runT, rng: [this.rng.s, this.rng.n], kills: this.m.kills, dust: this.m.dust, beat: this.beatIdx, D: this.D && this.D.st, rit: this.ritual && this.ritual.st, eid: this.eid,
+      players: this.players.map((q) => [q.x, q.y, q.hp, q.stock, q.burst, q.alive]), enemies: this.enemies.map((e) => [e.id, e.type, e.x, e.y, e.hp]),
+      bullets: (() => { const L = []; this.bullets.each((b) => L.push([b.type, b.x, b.y])); return L; })(), shots: (() => { const L = []; this.shots.each((s2) => L.push([s2.kind, s2.x, s2.y, s2.owner])); return L; })(),
+      pickups: this.pickups.map((k) => [k.kind, k.x, k.y]), boss: this.boss ? this.boss.hp : null, timers: this.timers.length, incoming: this.incoming.length, map: this.mapObjs.map((o) => [o.kind, o.state, o.x, o.y]) };
+  }
+  /* 人数系数：主目标 / 精英 / Boss 按人数加厚，普通杂兵不变（一发一个的手感不丢） */
+  teamK(per) { return 1 + per * Math.max(0, this.np - 1); }
+  /* 模拟里默认的“当前飞机”：第一架还活着的（各端一致）；渲染 / HUD 用 this.me */
+  anchor() { return this.players.find((q) => q.alive && !q.gone) || this.players.find((q) => !q.gone) || this.players[0]; }
+  alivePlayers() { return this.players.filter((q) => q.alive && !q.gone); }
+  eachPlayer(fn) { const keep = this.player; for (const q of this.players) { if (q.gone) continue; this.player = q; fn(q); } this.player = keep; }
+  withPlayer(q, fn) { const keep = this.player; this.player = q || keep; try { return fn(); } finally { this.player = keep; } }
+  nearestPlayer(x, y) { let best = null, bd = 1e18; for (const q of this.players) { if (!q.alive || q.gone) continue; const d = dist2(x, y, q.x, q.y); if (d < bd) { bd = d; best = q; } } return best || this.anchor(); }
+  pickTarget() { const L = this.alivePlayers(); return L.length ? spick(L) : this.anchor(); }
+  setInput(i, inp) { const I = this.inputs[i]; if (!I) return; if (inp.gone) { this.dropPlayer(i); return; } I.mx = inp.mx || 0; I.my = inp.my || 0; I.focus = !!inp.focus; I.burst = I.burst || !!inp.burst; I.dx = inp.dx || 0; I.dy = inp.dy || 0; }
   emit(type, data) { this.events.push(Object.assign({}, data || {}, { type })); } // 事件名永远不被数据里的同名字段覆盖
   later(t, fn) { this.timers.push({ t, fn }); }
   highlight() { this.m.highlights++; }
 
   /* ================================================== main step ================================================== */
   step(dt) {
+    SimRNG.cur = this.rng; // 这一步里所有 srand 都来自这一局的随机源
+    this.player = this.anchor();
     const rit = this.ritualFocus();
     if (this.hitstop > 0 && !rit) { this.hitstop -= dt; return; }
     this.focusK = approach(this.focusK, rit ? 0.1 : 1, dt / 0.25); // 奖励焦点：战场慢到 0.1 倍，仪式本身按真实时间走
@@ -93,11 +147,17 @@ class World {
     if (this.timeStop > 0) { this.timeStop -= sdt; if (this.timeStop <= 0) this.endTimeStop(); }
     if (this.reverseT > 0) this.reverseT -= sdt;
 
-    this.updatePlayer(this.ritual ? dt : sdt);
+    for (const q of this.players) { if (q.gone) continue; this.player = q; this.updatePlayer(this.ritual ? dt : sdt); }
+    this.player = this.anchor();
     if (this.state === 'play') {
-      if (!rit) this.updateSkills(sdt); // 仪式期间：支援技能 / 冷却都暂停
-      this.updateWingmen(this.ritual ? dt : sdt, rit);
+      for (const q of this.players) {
+        if (q.gone || !q.alive) continue; this.player = q;
+        if (!rit) this.updateSkills(sdt); // 仪式期间：支援技能 / 冷却都暂停
+        this.updateWingmen(this.ritual ? dt : sdt, rit);
+      }
+      if (this.bursting) this.player = this.players[this.bursting.owner] || this.anchor();
       this.updateBurst(sdt);
+      this.player = this.anchor();
       if (this.mode === 'run') { this.updateDirector(sdt); this.updateSurprise(sdt); }
       else this.updatePreview(sdt);
       if (this.boss) { this._firer = 'boss'; this.boss.update(sdt); this._firer = null; if (this.bossProxy) { this.bossProxy.x = this.boss.x; this.bossProxy.y = this.boss.y; } }
@@ -106,7 +166,7 @@ class World {
       this.stateT -= dt; if (this.stateT <= 0 && !this.done) this.finish(false);
     } else if (this.state === 'victory') {
       this.stateT -= dt;
-      if (Math.random() < 0.6) this.pickups.push({ kind: 'dust', x: rand(this.W * 0.2, this.W), y: -10, vx: rand(-40, 40), vy: rand(120, 260), t: 0, value: 3, big: true, rain: true, seed: 0 });
+      if (srnd() < 0.6) this.pickups.push({ kind: 'dust', x: srand(this.W * 0.2, this.W), y: -10, vx: srand(-40, 40), vy: srand(120, 260), t: 0, value: 3, big: true, rain: true, seed: 0 });
       if (this.stateT <= 0 && !this.done) this.finish(true);
     }
     this.updateIncoming(sdt);
@@ -120,7 +180,8 @@ class World {
     this.updateHints();
     this.updateMap(sdt);
     this.updateRitual(dt);
-    if (this.mode === 'run' && this.state === 'play' && this.player.stock >= this.ultCap && !this.ritual) this.m.stockIdle += sdt;
+    if (this.mode === 'run' && this.state === 'play' && this.me.stock >= this.me.ultCap && !this.ritual) this.m.stockIdle += sdt;
+    this.player = this.anchor();
     if (this.mode === 'run' && this.phase === 'fight' && this.state === 'play') {
       // 屏幕上有敌人，或 0.4 秒内刚击破过（敌人一进屏幕边缘就被打爆也算在战斗）
       const onScreen = this.enemies.some((e) => e.alive && !e.isBoss && e.x - e.r < this.W) || this.incoming.length > 0 || (this.recentKills.length > 0 && this.t - this.recentKills[this.recentKills.length - 1] < 0.4);
@@ -133,19 +194,19 @@ class World {
 
   /* ================================================== player ================================================== */
   updatePlayer(dt) {
-    const p = this.player, I = Input.out;
+    const p = this.player, I = this.inputs[p.idx] || NEUTRAL_INPUT;
     p.inv = Math.max(0, p.inv - dt); p.hurtT = Math.max(0, p.hurtT - dt * 3); p.cloudCd = Math.max(0, p.cloudCd - dt); p.candy = Math.max(0, p.candy - dt);
-    p.blinkT -= dt; if (p.blinkT <= 0) { p.blink = 1; p.blinkT = 2 + Math.random() * 3; } p.blink = Math.max(0, p.blink - dt * 8);
-    if (!p.alive) return;
-    let mx = 0, my = 0;
+    p.blinkT -= dt; if (p.blinkT <= 0) { p.blink = 1; p.blinkT = 2 + Math.random() * 3; } p.blink = Math.max(0, p.blink - dt * 8); // 眨眼只是表现
+    if (!p.alive) { this.downTick(p, dt); I.burst = false; return; }
+    let mx = 0, my = 0, dx = I.dx || 0, dy = I.dy || 0;
     const lock = this.ritual && this.ritual.st !== 'choose' && this.ritual.st !== 'resume'; // 仪式里飞机稳住，只有选择阶段能动
     if (this.mode === 'run' && this.state === 'play' && !lock) { mx = I.mx; my = I.my; }
-    if (lock) { this.dragDX = 0; this.dragDY = 0; }
+    if (lock || this.mode !== 'run') { dx = 0; dy = 0; }
+    I.dx = 0; I.dy = 0; // 拖动位移只用一次
     if (this.mode === 'preview') my = clamp(((TOP + BOTTOM) / 2 + Math.sin(this.t * 1.2) * 60 - p.y) / 60, -1, 1);
     const spd = 400 * this.P.speed * (I.focus && this.mode === 'run' ? 0.5 : 1);
     const ox = p.x, oy = p.y;
-    if (!(this.bfx && this.bfx.id === 'cloud')) { p.x += mx * spd * dt + this.dragDX; p.y += my * spd * dt + this.dragDY; }
-    this.dragDX = 0; this.dragDY = 0;
+    if (!(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx)) { p.x += mx * spd * dt + dx; p.y += my * spd * dt + dy; }
     p.x = clamp(p.x, 34, this.W * 0.82); p.y = clamp(p.y, this.arena.top + 14, this.arena.bottom - 14);
     p.vx = (p.x - ox) / Math.max(dt, 1e-4); p.vy = (p.y - oy) / Math.max(dt, 1e-4);
     p.moved += Math.hypot(p.x - ox, p.y - oy);
@@ -153,12 +214,12 @@ class World {
     p.trailT -= dt; if (p.trailT <= 0) { p.trailT = 0.018; p.trail.push({ x: p.x - 26, y: p.y + 2, t: 0 }); if (p.trail.length > 28) p.trail.shift(); }
     for (const q of p.trail) { q.t += dt; q.x -= 180 * dt; }
     if (this.state !== 'play') return;
-    if (this.mode === 'run' && Input.consume('burst')) this.tryBurst();
+    if (this.mode === 'run' && I.burst) { I.burst = false; this.tryBurst(); }
     p.fireT -= dt;
     const rate = this.P.rate * (p.candy > 0 ? 1.5 : 1) * (this.streak.n >= 30 ? 1.1 : 1);
     if (this.ritual && this.ritual.st !== 'resume') p.fireT = Math.max(p.fireT, 0.05); // 仪式期间自动射击暂停
     else if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
-    if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud') && this.mode === 'run') {
+    if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx) && this.mode === 'run') {
       for (const e of this.enemies) {
         if (!e.alive || e.leaving) continue;
         const rr = (e.isBoss ? 110 : e.r) + 8;
@@ -172,7 +233,7 @@ class World {
     const lanes = [[0], [-9, 9], [-15, 0, 15], [-21, -7, 7, 21]][n - 1];
     for (const off of lanes) this.gunShot(x, y + off, off * 0.004, d, { side: off !== 0 });
     if (this.hasSyn('homing', 'wing')) for (const w of this.wingmen) if (!w.burst) w.fireT = Math.min(w.fireT, 0.02);
-    if (Math.random() < 0.3) Sound.sfx('shoot', { gap: 120 });
+    if (p === this.me && Math.random() < 0.3) Sound.sfx('shoot', { gap: 120 });
   }
   gunShot(x, y, a, dmg, o = {}) {
     const kind = { moon: 'moon', cloud: 'puff', candy: 'candyS', paper: 'dart', whale: 'bubble', clock: 'hand' }[this.planeId] || 'moon';
@@ -204,17 +265,45 @@ class World {
     const na = a + clamp(d, -s.homTurn * dt, s.homTurn * dt), sp = Math.hypot(s.vx, s.vy);
     s.vx = Math.cos(na) * sp; s.vy = Math.sin(na) * sp;
   }
-  hurtPlayer(n, src) {
-    const p = this.player;
+  hurtPlayer(n, src, who) {
+    const p = who || this.player;
     if (!p.alive || p.inv > 0 || this.state !== 'play' || this.mode === 'preview') return;
     if (!(this.ritual && this.ritual.st !== 'resume')) { const c = hurtCat(src); this.m.hurt = this.m.hurt || {}; this.m.hurt[c] = (this.m.hurt[c] || 0) + 1; this.m.lastHurt = c; } // 受伤来源：结算复盘用
     if (this.ritual && this.ritual.st !== 'resume') return; // 升级仪式期间不会受伤
     if (p.cloudShield) { p.cloudShield = false; p.inv = 0.8; Sound.sfx('shieldPop'); this.text('缓冲云挡住了', p.x, p.y - 40, '#dcefff', 16, 4); for (let i = 0; i < 10; i++) this.part('puff', p.x, p.y, rand(-160, 160), rand(-160, 160), 0.6, rand(8, 14), 'rgba(255,255,255,0.9)'); return; }
     p.hp -= n; p.inv = 1.4; p.hurtT = 1; this.m.hitsTaken++;
-    this.hurtFlash = 1; this.hitStop(0.05); this.rumble(0.7, 0.9, 160); Sound.sfx('hurt', { prio: true }); // 受击：红色暗角 + 顿帧 + 手柄震，不晃镜头
+    this.hitStop(0.05); // 受击：红色暗角 + 顿帧 + 手柄震，不晃镜头（暗角和震动只给被打的那位）
+    if (p === this.me) { this.hurtFlash = 1; this.rumble(0.7, 0.9, 160); Sound.sfx('hurt', { prio: true }); }
     for (let i = 0; i < 12; i++) this.part('dot', p.x, p.y, rand(-220, 220), rand(-220, 220), 0.45, 3.5, 'rgba(255,122,107,0.95)');
-    if (this.planeId === 'cloud' && p.cloudCd <= 0 && p.hp > 0) { p.cloudShield = true; p.cloudCd = 12; this.text('缓冲云层', p.x, p.y - 44, '#dcefff', 15, 3); }
-    if (p.hp <= 0) { p.hp = 0; p.alive = false; this.state = 'dying'; this.stateT = 1.6; this.slowT = 1.4; Sound.sfx('lose'); this.clearBullets(false); }
+    if (p.planeId === 'cloud' && p.cloudCd <= 0 && p.hp > 0) { p.cloudShield = true; p.cloudCd = 12; this.text('缓冲云层', p.x, p.y - 44, '#dcefff', 15, 3); }
+    if (p.hp <= 0) {
+      p.hp = 0; p.alive = false;
+      if (this.np > 1 && this.alivePlayers().length) { // 多人：倒下 10 秒后在队友身边复活；全员倒下才算失败
+        p.downT = 10; this.text(`${p.name || '队友'} 倒下了`, p.x, p.y - 40, '#ffb2a8', 18, 5);
+        for (let i = 0; i < 14; i++) this.part('dot', p.x, p.y, rand(-220, 220), rand(-220, 220), 0.6, 4, 'rgba(255,122,107,0.95)');
+        this.emit('down', { idx: p.idx });
+      } else { this.state = 'dying'; this.stateT = 1.6; this.slowT = 1.4; Sound.sfx('lose'); this.clearBullets(false); }
+    }
+  }
+  /* 多人：倒下的飞机倒计时复活 */
+  downTick(p, dt) {
+    if (this.np < 2 || p.gone || this.state !== 'play') return;
+    p.downT -= dt;
+    if (p.downT <= 0) {
+      const mate = this.alivePlayers()[0]; if (!mate) return;
+      p.alive = true; p.hp = Math.min(2, p.maxHp); p.inv = 2.5; p.x = clamp(mate.x - 50, 34, this.W * 0.82); p.y = clamp(mate.y + (p.idx % 2 ? 60 : -60), this.arena.top + 14, this.arena.bottom - 14);
+      this.fx(p.x, p.y, 2, 80, ['#ffffff', '#9ff2c8', '#ffe38a']); this.text('复活！', p.x, p.y - 44, '#9ff2c8', 20, 5); Sound.sfx('heart');
+      this.emit('revive', { idx: p.idx });
+    }
+  }
+  /* 多人：有人断线 —— 从约定好的那一帧起移除这架飞机 */
+  dropPlayer(i) {
+    const p = this.players[i]; if (!p || p.gone) return;
+    p.gone = true; p.alive = false; p.wingmen = [];
+    if (this.bursting && this.bursting.owner === i) { this.bursting = null; this.bfx = null; }
+    this.text(`${p.name || '队友'} 离开了`, p.x, p.y - 40, '#ffb2a8', 18, 5);
+    this.emit('left', { idx: i });
+    if (!this.alivePlayers().length && this.state === 'play') { this.state = 'dying'; this.stateT = 1.6; }
   }
 
   /* ================================================== shots ================================================== */
@@ -224,6 +313,7 @@ class World {
     s.dmg = o.dmg || 8; s.r = o.r || 6; s.life = o.life || 1.6; s.pierce = o.pierce || 0; s.hits = []; s.homing = o.homing || 0;
     s.from = o.from || 'skill'; s.knock = o.knock || 0; s.wave = o.wave || 0; s.freeze = o.freeze || 0; s.gold = !!o.gold;
     s.hitCd = null; s.chain = o.chain || 0; s.y0 = y; s.ty = o.ty || 0;
+    s.owner = o.owner !== undefined ? o.owner : this.player.idx; // 谁打的：击杀充能记给谁
     return s;
   }
   nearestEnemy(x, y, maxD = 1e9, exclude) {
@@ -263,7 +353,7 @@ class World {
         const rr = (e.isBoss ? 112 : e.r) + s.r;
         if (dist2(e.x, e.y, s.x, s.y) > rr * rr) continue;
         s.hits.push(e.id);
-        this.onShotHit(s, e);
+        this.withPlayer(this.players[s.owner], () => this.onShotHit(s, e)); // 命中 / 击杀算在开枪的人头上（充能、掉落）
         if (s.pierce-- <= 0) { s.on = false; return; }
       }
     });
@@ -275,18 +365,18 @@ class World {
     this.damageEnemy(e, s.dmg, { x: hx, y: hy, src: s.from, kind: s.kind });
     if (s.knock && !e.isBoss && !e.elite && e.alive) e.x += s.knock;
     if (!e.alive || e.isBoss) { this.part('dot', hx, hy, rand(-90, 90), rand(-90, 90), 0.2, 2.5, 'rgba(255,243,176,0.95)'); return; }
-    if (s.freeze && Math.random() < s.freeze) this.freezeEnemy(e, 1.2);
+    if (s.freeze && srnd() < s.freeze) this.freezeEnemy(e, 1.2);
     this.part('dot', hx, hy, rand(-90, 90), rand(-90, 90), 0.2, 2.5, 'rgba(255,243,176,0.95)');
   }
 
   /* 主炮命中：先标记（爆破），再结算伤害；穿透不衰减，一颗弹对同一敌人只结算一次 */
   onGunHit(s, e, hx, hy) {
     const last = s.pierce <= 0, b = this.gun.bomb;
-    if (b && !e.isBoss && Math.random() < [0, 0.45, 0.6, 0.75][b]) e.mark = true;
+    if (b && !e.isBoss && srnd() < [0, 0.45, 0.6, 0.75][b]) e.mark = true;
     this.damageEnemy(e, s.dmg, { x: hx, y: hy, src: s.from, kind: s.kind, dir: Math.atan2(s.vy, s.vx) });
     if (s.knock && !e.isBoss && !e.elite && e.alive) e.x += s.knock;
     if (s.side && this.hasSyn('multi', 'ice') && e.alive) this.freezeEnemy(e, 0.8);
-    if (s.homLv && this.hasSyn('homing', 'thunder') && Math.random() < 0.5) { const n2 = this.nearestEnemy(hx, hy, 200, new Set([e.id])); if (n2) this.zap(hx, hy, n2, 0, 8 * this.stats.dmgK); }
+    if (s.homLv && this.hasSyn('homing', 'thunder') && srnd() < 0.5) { const n2 = this.nearestEnemy(hx, hy, 200, new Set([e.id])); if (n2) this.zap(hx, hy, n2, 0, 8 * this.stats.dmgK); }
     if (last) {
       if (s.pierceMax > 0 && this.hasSyn('pierce', 'bomb')) this.explode(hx, hy, 85 * this.stats.blastK, 30 * this.stats.dmgK, { level: 2 });
       else if (b >= 3) this.explode(hx, hy, 42 * this.stats.blastK, 8 * this.stats.dmgK, { level: 1, quiet: true });
@@ -299,10 +389,11 @@ class World {
   makeEnemy(type, o = {}) {
     const elite = type.endsWith('E'), base = elite ? type.slice(0, -1) : type;
     // 关卡基础配置固定：生命只随关卡变（×1 / ×9/8 / ×10/8），不随玩家变强偷偷加血
-    const hpK = this.stage ? this.stage.hpK : 1;
+    const big = elite || type === 'armor' || type === 'cmdr' || type === 'wreck' || type === 'mirror' || o.elite || o.goal;
+    const hpK = (this.stage ? this.stage.hpK : 1) * (big && this.np > 1 ? this.teamK(0.6) : 1); // 多人：硬目标按人数加厚
     const e = Object.assign({
-      id: _eid++, type, base, elite, x: this.W + 40, y: (TOP + BOTTOM) / 2, vx: -150, vy: 0, r: ENEMY_R[type] || 20, hp: (ENEMY_HP[type] || 10) * hpK,
-      t: 0, seed: rand(10), path: 'line', amp: 0, freq: 0, phase: 0, fireT: rand(1.5, 3.5), charge: 0, alive: true, hitFlash: 0, frozen: 0, stun: 0,
+      id: this.eid++, type, base, elite, x: this.W + 40, y: (TOP + BOTTOM) / 2, vx: -150, vy: 0, r: ENEMY_R[type] || 20, hp: (ENEMY_HP[type] || 10) * hpK,
+      t: 0, seed: srand(10), path: 'line', amp: 0, freq: 0, phase: 0, fireT: srand(1.5, 3.5), charge: 0, alive: true, hitFlash: 0, frozen: 0, stun: 0,
       mark: false, clockMark: false, seenT: null, fire: null, fodder: false, leaving: false, shots: 0, pull: null,
     }, o);
     e.maxHp = e.hp; e.y0 = e.y;
@@ -312,30 +403,31 @@ class World {
   addEnemy(type, o = {}) { const e = this.makeEnemy(type, o); this.enemies.push(e); return e; }
   spawnFormation(kind) {
     const W = this.W, tier = this.seg ? this.seg.tier : 0, top = this.arena.top + 50, bot = this.arena.bottom - 50;
-    const y0 = rand(top, bot), sp = 1 + tier * 0.05;
+    const y0 = srand(top, bot), sp = 1 + tier * 0.05;
     switch (kind) {
       case 'line': { const n = 5 + Math.min(3, tier); for (let i = 0; i < n; i++) this.addEnemy('jelly', { x: W + 10 + i * 56, y: y0, path: 'sine', vx: -150 * sp, amp: 18, freq: 2.2, phase: i * 0.5 }); break; }
       case 'vee': for (let i = 0; i < 7; i++) { const k = i - 3; this.addEnemy('moth', { x: W + 10 + Math.abs(k) * 42, y: clamp(y0 + k * 32, top, bot), path: 'line', vx: -200 * sp }); } break;
       case 'snake': for (let i = 0; i < 8; i++) this.addEnemy('moth', { x: W + 10 + i * 44, y: clamp(y0, top + 60, bot - 60), path: 'sine', vx: -170 * sp, amp: 80, freq: 1.7, phase: -i * 0.4 }); break;
-      case 'wall': { const n = 6, gap = randi(1, 4); for (let i = 0; i < n; i++) if (i !== gap) this.addEnemy('jelly', { x: W + 10, y: lerp(top, bot, i / (n - 1)), path: 'line', vx: -125 * sp }); break; }
-      case 'boats': for (let i = 0; i < 2 + (tier >= 3 ? 1 : 0); i++) this.addEnemy('boat', { x: W + 40 + i * 140, y: lerp(top, bot, (i + 0.5) / 3) + rand(-20, 20), path: 'line', vx: -95 * sp, fire: 'drop', fireT: rand(0.6, 1.4) }); break;
+      case 'wall': { const n = 6, gap = srandi(1, 4); for (let i = 0; i < n; i++) if (i !== gap) this.addEnemy('jelly', { x: W + 10, y: lerp(top, bot, i / (n - 1)), path: 'line', vx: -125 * sp }); break; }
+      case 'boats': for (let i = 0; i < 2 + (tier >= 3 ? 1 : 0); i++) this.addEnemy('boat', { x: W + 40 + i * 140, y: lerp(top, bot, (i + 0.5) / 3) + srand(-20, 20), path: 'line', vx: -95 * sp, fire: 'drop', fireT: srand(0.6, 1.4) }); break;
       case 'stars': for (let i = 0; i < 2; i++) this.addEnemy('star', { x: W + 40 + i * 90, y: clamp(y0 + (i ? 70 : -70), top, bot), path: 'dive', vx: -230 * sp, fire: 'aim' }); break;
-      case 'ticks': for (let i = 0; i < 2 + (tier >= 4 ? 1 : 0); i++) this.addEnemy('tick', { x: W + 40, y: rand(top, bot), path: 'hover', tx: rand(W * 0.55, W * 0.86), ty: rand(top, bot), stay: 3.5, fire: 'ring', fireT: 1.2 }); break;
-      case 'swarm': for (let i = 0; i < 12; i++) this.addEnemy('moth', { x: W + 10 + rand(0, 220), y: rand(top, bot), path: 'line', vx: -rand(160, 260) * sp }); break;
-      case 'beacon': { const flip = Math.random() < 0.5; this.addEnemy('beacon', { x: rand(W * 0.55, W * 0.86), y: flip ? this.arena.top - 2 : this.arena.bottom - 30, flip, path: 'fixed', fire: 'laser', fireT: 1.4, life: 12 }); break; }
+      case 'ticks': for (let i = 0; i < 2 + (tier >= 4 ? 1 : 0); i++) this.addEnemy('tick', { x: W + 40, y: srand(top, bot), path: 'hover', tx: srand(W * 0.55, W * 0.86), ty: srand(top, bot), stay: 3.5, fire: 'ring', fireT: 1.2 }); break;
+      case 'swarm': for (let i = 0; i < 12; i++) this.addEnemy('moth', { x: W + 10 + srand(0, 220), y: srand(top, bot), path: 'line', vx: -srand(160, 260) * sp }); break;
+      case 'beacon': { const flip = srnd() < 0.5; this.addEnemy('beacon', { x: srand(W * 0.55, W * 0.86), y: flip ? this.arena.top - 2 : this.arena.bottom - 30, flip, path: 'fixed', fire: 'laser', fireT: 1.4, life: 12 }); break; }
       case 'dustmoths': for (let i = 0; i < 6; i++) this.addEnemy('moth', { x: W - 10 + i * 50, y: clamp(y0 + Math.sin(i) * 40, top, bot), path: 'sine', vx: -210, amp: 40, freq: 2, phase: i * 0.6, fodder: true }); break;
     }
     if (this.cb.onSeenEnemy) this.cb.onSeenEnemy({ line: 'jelly', vee: 'moth', snake: 'moth', wall: 'jelly', boats: 'boat', stars: 'star', ticks: 'tick', swarm: 'moth', beacon: 'beacon', dustmoths: 'moth' }[kind]);
   }
   spawnElite() {
-    const type = pick(this.stage.elites);
+    const type = spick(this.stage.elites);
     this.addEnemy(type, { x: this.W + 60, y: (this.arena.top + this.arena.bottom) / 2, path: 'elite', tx: this.W * 0.74, fireT: 1.6, life: 26 });
     this.emit('elite', { elite: type });
     if (this.cb.onSeenEnemy) this.cb.onSeenEnemy(type);
   }
   updateEnemies(dt) {
-    const p = this.player, frozenWorld = this.timeStop > 0, quiet = this.ritualFocus();
+    const frozenWorld = this.timeStop > 0, quiet = this.ritualFocus();
     for (const e of this.enemies) {
+      const p = this.np > 1 ? this.nearestPlayer(e.x, e.y) : this.player; // 多人：每个敌人盯离自己最近的飞机
       if (!e.alive || e.isBoss) continue;
       e.t += dt; e.hitFlash = Math.max(0, e.hitFlash - dt * 6);
       if (e.seenT === null && e.x < this.W - 10) e.seenT = this.t;
@@ -373,7 +465,7 @@ class World {
     e.fireT -= dt;
     const onScreen = e.x < this.W - 30 && e.x > 40;
     if (e.base === 'jelly' && !e.elite) {
-      if (tier >= 1 && onScreen && e.fireT <= 0) { e.fireT = rand(3, 5.5); if (Math.random() < 0.45) this.fire('pink', e.x - 10, e.y, this.aimAngle(e.x, e.y), 165 * spd); }
+      if (tier >= 1 && onScreen && e.fireT <= 0) { e.fireT = srand(3, 5.5); if (srnd() < 0.45) this.fire('pink', e.x - 10, e.y, this.aimAngle(e.x, e.y), 165 * spd); }
       return;
     }
     if (e.fire === 'drop') { if (onScreen && e.fireT <= 0) { e.fireT = 1.5; const a = angTo(e.x, e.y, p.x, p.y); this.fire('pink', e.x - 14, e.y + 8, Math.PI + clamp(angDiff(Math.PI, a), -0.5, 0.5), 175 * spd); } return; }
@@ -381,7 +473,7 @@ class World {
     if (e.fire === 'ring') {
       if (!e.leaving && Math.abs(e.x - e.tx) < 30) {
         e.charge = e.fireT < 0.6 ? 1 - e.fireT / 0.6 : 0;
-        if (e.fireT <= 0) { e.fireT = 2.6; const n = 8 + Math.min(4, tier), gap = randi(0, n - 1), off = rand(TAU); for (let i = 0; i < n; i++) if (i !== gap && i !== (gap + 1) % n) this.fire('pink', e.x, e.y, off + (i / n) * TAU, 140 * spd, { silent: i > 0 }); }
+        if (e.fireT <= 0) { e.fireT = 2.6; const n = 8 + Math.min(4, tier), gap = srandi(0, n - 1), off = srand(TAU); for (let i = 0; i < n; i++) if (i !== gap && i !== (gap + 1) % n) this.fire('pink', e.x, e.y, off + (i / n) * TAU, 140 * spd, { silent: i > 0 }); }
       }
       return;
     }
@@ -397,7 +489,7 @@ class World {
     if (e.elite && onScreen && e.fireT <= 0) {
       e.fireT = 2.8 / spd;
       if (e.base === 'jelly') { let k = 0; const burst = () => { if (!e.alive || k++ > 10 || this.state !== 'play') return; for (let i = 0; i < 3; i++) this.fire('pink', e.x, e.y, e.t * 2.2 + (i * TAU) / 3, 150 * spd, { silent: i > 0 }); this.later(0.11, burst); }; burst(); }
-      else if (e.base === 'tick') { const n = 14, off = rand(TAU); for (let i = 0; i < n; i++) if (i % 7) this.fire('pink', e.x, e.y, off + (i / n) * TAU, 135 * spd, { silent: i > 0 }); for (let q = 0; q < 4; q++) for (let j = 0; j < 3; j++) this.fire('blue', e.x, e.y, (q * Math.PI) / 2 + Math.PI / 4 + e.t, (140 + j * 40) * spd, { silent: true }); }
+      else if (e.base === 'tick') { const n = 14, off = srand(TAU); for (let i = 0; i < n; i++) if (i % 7) this.fire('pink', e.x, e.y, off + (i / n) * TAU, 135 * spd, { silent: i > 0 }); for (let q = 0; q < 4; q++) for (let j = 0; j < 3; j++) this.fire('blue', e.x, e.y, (q * Math.PI) / 2 + Math.PI / 4 + e.t, (140 + j * 40) * spd, { silent: true }); }
       else { let k = 0; const vol = () => { if (!e.alive || k++ >= 3 || this.state !== 'play') return; this.fire('gold', e.x - 20, e.y, this.aimAngle(e.x, e.y), 225 * spd); this.later(0.45, vol); }; vol(); }
       return;
     }
@@ -407,11 +499,11 @@ class World {
     if (!e.alive) return;
     if (e.isBoss) {
       if (!this.boss) return;
-      let k = this.stats.bossK;
+      let k = this.stats.bossK / this.teamK(0.7); // 多人：Boss 按人数加厚（固定系数，不随成长变）
       if (this.boss.conductive && o.kind === 'zap') k *= 1.3;
       if (this.boss.marked && o.kind === 'explosion') k *= 1.5;
       this.boss.hit({ dmg: dmg * k, x: o.x !== undefined ? o.x : e.x, y: o.y !== undefined ? o.y : e.y, kind: o.kind || 'shot' });
-      if (this.carnival && Math.random() < 0.02) this.dropPickup('candy', e.x - 60, e.y + rand(-80, 80));
+      if (this.carnival && srnd() < 0.02) this.dropPickup('candy', e.x - 60, e.y + srand(-80, 80));
       return;
     }
     const sk = this.shieldK(e, o);
@@ -439,18 +531,18 @@ class World {
     if (this.recentKills.length >= 4 && this.chainCd <= 0) { this.chainCd = 0.5; this.fx(e.x, e.y, 2, 90); if (this.chainHiCd <= 0) { this.chainHiCd = 8; this.highlight(); } }
     if (e.elite) {
       this.m.elites++; this.highlight();
-      for (let i = 0; i < 14; i++) this.dropPickup('dust', e.x + rand(-30, 30), e.y + rand(-30, 30), { value: 2, big: i < 4 });
+      for (let i = 0; i < 14; i++) this.dropPickup('dust', e.x + srand(-30, 30), e.y + srand(-30, 30), { value: 2, big: i < 4 });
       this.addCharge(0.15); this.shake(0.4);
     } else if (armored) {
       for (let i = 0; i < 4; i++) this.dropPickup('dust', e.x, e.y, { value: 1, big: i === 0 });
     } else if (e.type === 'mirror' || e.type === 'wreck') {
       for (let i = 0; i < 6; i++) this.dropPickup('dust', e.x, e.y, { value: 2 });
     } else {
-      const n = e.fodder ? 3 : e.base === 'moth' ? 2 : Math.random() < 0.6 ? 1 : 0;
+      const n = e.fodder ? 3 : e.base === 'moth' ? 2 : srnd() < 0.6 ? 1 : 0;
       for (let i = 0; i < n; i++) this.dropPickup('dust', e.x, e.y, { value: 1 });
-      if (this.planeId === 'candy' && Math.random() < 0.08) this.dropPickup('candy', e.x, e.y);
-      if (o.src === 'beam' && this.lvOf('rainbow') >= 3 && Math.random() < 0.35) this.dropPickup('candy', e.x, e.y);
-      if (Math.random() < 0.012 && p.hp < p.maxHp) this.dropPickup('heart', e.x, e.y);
+      if (this.planeId === 'candy' && srnd() < 0.08) this.dropPickup('candy', e.x, e.y);
+      if (o.src === 'beam' && this.lvOf('rainbow') >= 3 && srnd() < 0.35) this.dropPickup('candy', e.x, e.y);
+      if (srnd() < 0.012 && p.hp < p.maxHp) this.dropPickup('heart', e.x, e.y);
       if (o.candify) this.dropPickup('candy', e.x, e.y);
     }
     const bombLv = this.lvOf('bomb');
@@ -463,7 +555,7 @@ class World {
     if (e.frozen > 0 && iceLv >= 3) {
       const r = 70 * this.stats.blastK, dmg = (12 + 4 * iceLv) * (iceLv >= 4 ? 1.5 : 1);
       this.later(0.04, () => { this.shatter(e.x, e.y, r, dmg); if (this.hasSyn('bomb', 'ice')) this.explode(e.x, e.y, r * 0.9, dmg, { level: 2 }); });
-      if (this.hasSyn('rainbow', 'ice') && Math.random() < 0.4) this.dropPickup('candy', e.x, e.y);
+      if (this.hasSyn('rainbow', 'ice') && srnd() < 0.4) this.dropPickup('candy', e.x, e.y);
       if (this.hasSyn('magnet', 'ice')) for (let i = 0; i < 2; i++) this.dropPickup('dust', e.x, e.y, { value: 1 });
     }
     if (e.clockMark && !o.clock) this.later(0.02, () => this.explode(e.x, e.y, 60 * this.stats.blastK, 40, { level: 2 }));
@@ -478,12 +570,12 @@ class World {
     if (this.mode === 'preview') return null;
     const b = this.bullets.get(); if (!b) return null;
     b.on = true; b.type = type; b.x = x; b.y = y; b.vx = Math.cos(ang) * spd; b.vy = Math.sin(ang) * spd;
-    b.r = B_RADIUS[type] || 7; b.t = 0; b.life = o.life || 12; b.rot = ang; b.spin = type === 'blue' ? rand(-3, 3) : 0; b.ghost = o.ghost || 0;
+    b.r = B_RADIUS[type] || 7; b.t = 0; b.life = o.life || 12; b.rot = ang; b.spin = type === 'blue' ? srand(-3, 3) : 0; b.ghost = o.ghost || 0;
     b.src = o.noRepeat ? null : { x, y, a: ang, s: spd, type }; b.pull = null; b.from = o.from || this._firer || 'shot';
     if (!o.silent) Sound.sfx({ pink: 'spawnPink', blue: 'spawnBlue', gold: 'spawnGold', white: 'laser' }[type], { pan: this.pan(x), gap: 110 });
     return b;
   }
-  aimAngle(x, y) { return angTo(x, y, this.player.x, this.player.y); }
+  aimAngle(x, y) { const q = this.np > 1 ? this.nearestPlayer(x, y) : this.player; return angTo(x, y, q.x, q.y); }
   dens(type, n) { return n; }
   clearBullets(toDust = true) {
     this.bullets.each((b) => { if (toDust && Math.random() < 0.5) this.part('mote', b.x, b.y, rand(-30, 30), rand(-60, -10), 0.6, 2.5, 'rgba(201,168,255,0.9)'); b.on = false; });
@@ -492,7 +584,7 @@ class World {
   clearEnemyBullets(toDust) { this.clearBullets(toDust); }
   recordGone(b) { if (!b.src || !this.boss || this.boss.phase !== 3) return; this.gone.push(b.src); if (this.gone.length > 36) this.gone.shift(); }
   updateBullets(dt) {
-    const p = this.player, W = this.W, stop = this.timeStop > 0, rev = this.reverseT > 0 ? -1 : 1, wall = this.cloudWall;
+    const W = this.W, stop = this.timeStop > 0, rev = this.reverseT > 0 ? -1 : 1, wall = this.cloudWall;
     this.bullets.each((b) => {
       if (b.ghost > 0) { b.ghost -= dt; return; }
       if (b.pull) { const a = angTo(b.x, b.y, b.pull.x, b.pull.y); b.x += Math.cos(a) * 700 * dt; b.y += Math.sin(a) * 700 * dt; if (dist2(b.x, b.y, b.pull.x, b.pull.y) < 40 * 40) b.on = false; return; }
@@ -501,8 +593,12 @@ class World {
       b.rot = b.type === 'white' ? Math.atan2(b.vy, b.vx) : b.rot + b.spin * dt;
       if (b.x < -60 || b.x > W + 60 || b.y < -60 || b.y > LH + 60 || b.t > b.life) { this.recordGone(b); b.on = false; return; }
       if (wall && Math.abs(b.x - wall.x) < 22 && Math.abs(b.y - wall.y) < 150) { b.on = false; this.part('puff', b.x, b.y, rand(-40, 40), rand(-40, 40), 0.4, 8, 'rgba(255,255,255,0.8)'); return; }
-      if (!p.alive || this.state !== 'play') return;
-      if (dist2(b.x, b.y, p.x, p.y) < (p.r + b.r) * (p.r + b.r) && p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud')) { b.on = false; this.hurtPlayer(1, 'b:' + (b.from || 'shot')); }
+      if (this.state !== 'play') return;
+      for (const q of this.players) {
+        if (!q.alive || q.gone || q.inv > 0) continue;
+        if (this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === q.idx) continue;
+        if (dist2(b.x, b.y, q.x, q.y) < (q.r + b.r) * (q.r + b.r)) { b.on = false; this.hurtPlayer(1, 'b:' + (b.from || 'shot'), q); return; }
+      }
     });
     if (wall) { wall.t -= dt; if (wall.t <= 0) this.cloudWall = null; }
   }
@@ -510,7 +606,6 @@ class World {
   /* ================================================== warnings (预警线 / 区域) ================================================== */
   addWarn(w) { w.t = 0; w.fired = false; this.warns.push(w); if (!w.silent) Sound.sfx('warn', { pan: this.pan(w.x || this.W / 2), gap: 120 }); return w; }
   updateWarns(dt) {
-    const p = this.player;
     if (this.timeStop > 0) return;
     for (const w of this.warns) {
       w.t += dt;
@@ -519,7 +614,7 @@ class World {
       if (w.fired && w.beamT > 0) {
         w.beamT -= dt;
         const ex = w.x + Math.cos(w.a) * w.len, ey = w.y + Math.sin(w.a) * w.len;
-        if (this.state === 'play' && p.alive && p.inv <= 0 && segDist2(p.x, p.y, w.x, w.y, ex, ey) < (w.w / 2 + p.r) * (w.w / 2 + p.r)) this.hurtPlayer(1, 'laser');
+        if (this.state === 'play') for (const q of this.players) if (q.alive && !q.gone && q.inv <= 0 && segDist2(q.x, q.y, w.x, w.y, ex, ey) < (w.w / 2 + q.r) * (w.w / 2 + q.r)) this.hurtPlayer(1, 'laser', q);
       }
     }
     this.warns = this.warns.filter((w) => !w.fired || w.beamT > 0 || (w.post && w.t < w.tWarn + w.post));
@@ -528,14 +623,14 @@ class World {
   /* ================================================== 自动支援（雷球 / 彩虹 / 冰晶 / 磁吸；分身见下） ================================================== */
   updateSkills(dt) {
     const p = this.player, rp = this.stats.repeat;
-    const again = (fn) => { fn(); if (rp > 0 && Math.random() < rp) this.later(0.18, fn); };
-    for (const s of this.skills) {
+    const again = (fn) => { fn(); if (rp > 0 && srnd() < rp) this.later(0.18, () => this.withPlayer(p, fn)); };
+    for (const s of p.skills) { // 共享 Build，但每架飞机的支援技能冷却各算各的
       s.t -= dt;
       if (s.id === 'thunder') {
         if (s.t <= 0) {
           s.t = 1.35 - 0.08 * s.lv;
           const chain = [2, 3, 3, 5, 5][s.lv - 1] + (this.hasSyn('thunder', 'ice') ? 2 : 0), lv = s.lv;
-          again(() => { for (let i = 0; i < (lv >= 2 ? 2 : 1); i++) this.addShot('orb', p.x + 10, p.y - 8 + i * 16, rand(-0.6, 0.6), 620, { dmg: (16 + 6 * lv) * (lv >= 4 ? 1.3 : 1), r: 10, homing: 6, life: 2, chain }); });
+          again(() => { for (let i = 0; i < (lv >= 2 ? 2 : 1); i++) this.addShot('orb', p.x + 10, p.y - 8 + i * 16, srand(-0.6, 0.6), 620, { dmg: (16 + 6 * lv) * (lv >= 4 ? 1.3 : 1), r: 10, homing: 6, life: 2, chain }); });
         }
         if (s.lv >= 5) {
           if (!this.storm) this.storm = { a: 0, t: 0 };
@@ -605,7 +700,7 @@ class World {
           const rr = (e.isBoss ? 100 : e.r) + b.w / 2;
           if (segDist2(e.x, e.y, o.x, o.y, ex, ey) < rr * rr) {
             this.damageEnemy(e, b.dmg, { src: 'beam', kind: 'beam', x: e.x, y: e.y });
-            if (this.hasSyn('thunder', 'rainbow') && e.alive && Math.random() < 0.08) this.zap(e.x, e.y, e, 2, 14);
+            if (this.hasSyn('thunder', 'rainbow') && e.alive && srnd() < 0.08) this.zap(e.x, e.y, e, 2, 14);
           }
         }
         if (this.hasSyn('magnet', 'rainbow')) for (const k of this.pickups) if (k.kind !== 'crystal' && segDist2(k.x, k.y, o.x, o.y, ex, ey) < 60 * 60) k.attract = true;
@@ -626,7 +721,7 @@ class World {
   }
   arc(x1, y1, x2, y2, color) {
     const pts = [x1, y1], n = 6;
-    for (let i = 1; i < n; i++) { const u = i / n; pts.push(lerp(x1, x2, u) + rand(-12, 12), lerp(y1, y2, u) + rand(-12, 12)); }
+    for (let i = 1; i < n; i++) { const u = i / n; pts.push(lerp(x1, x2, u) + srand(-12, 12), lerp(y1, y2, u) + srand(-12, 12)); }
     pts.push(x2, y2);
     if (this.arcs.length < 60) this.arcs.push({ pts, t: 0, life: 0.18, color });
   }
@@ -662,7 +757,7 @@ class World {
   wingCount() { return this.stats.wings + [0, 1, 2, 2, 3, 3][this.lvOf('wing')]; }
   syncWingmen() {
     const want = this.wingCount(), perm = this.wingmen.filter((w) => !w.temp);
-    while (perm.length < want) { const w = { x: this.player.x, y: this.player.y, fireT: rand(0.2), temp: 0, orbT: rand(2), beamT: rand(3) }; perm.push(w); this.wingmen.push(w); }
+    while (perm.length < want) { const w = { x: this.player.x, y: this.player.y, fireT: srand(0.2), temp: 0, orbT: srand(2), beamT: srand(3) }; perm.push(w); this.wingmen.push(w); }
     while (perm.length > want) { const w = perm.pop(); this.wingmen.splice(this.wingmen.indexOf(w), 1); }
   }
   addClone(t, burst) {
@@ -670,7 +765,7 @@ class World {
       const temps = this.wingmen.filter((w) => w.temp && !w.burst);
       if (temps.length >= 3) { temps[0].temp = t; return; }
     }
-    this.wingmen.push({ x: this.player.x, y: this.player.y, fireT: rand(0.1), temp: t, burst: !!burst, orbT: 1, beamT: 2 });
+    this.wingmen.push({ x: this.player.x, y: this.player.y, fireT: srand(0.1), temp: t, burst: !!burst, orbT: 1, beamT: 2 });
   }
   updateWingmen(dt, noFire) {
     const p = this.player, wl = this.lvOf('wing');
@@ -708,21 +803,22 @@ class World {
   addStock(n, fromCharge, quiet) {
     const p = this.player, before = p.stock;
     p.stock = Math.min(this.ultCap, p.stock + n);
-    if (p.stock > before) { if (!quiet) this.emit('burstReady', { stock: p.stock, cap: this.ultCap }); Sound.sfx('resFull'); }
+    if (p.stock > before) { if (!quiet) this.emit('burstReady', { stock: p.stock, cap: this.ultCap, idx: p.idx }); if (p === this.me) Sound.sfx('resFull'); }
     else if (!fromCharge) this.m.dust += 30 * n;
     if (p.stock >= this.ultCap) p.burst = 0;
   }
   tryBurst() {
     const p = this.player;
-    if (this.bursting || this.state !== 'play' || this.ritual) return;
-    if (p.stock < 1) { Sound.sfx('denied', { gap: 250 }); return; }
+    if (this.state !== 'play' || this.ritual || !p.alive) return;
+    if (this.bursting) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text('队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招
+    if (p.stock < 1) { if (p === this.me) Sound.sfx('denied', { gap: 250 }); return; }
     p.stock--;
     this.startBurst();
   }
   startBurst() {
-    this.bursting = { stage: 'cut', t: 0 }; this.slowT = 0.5; this.burstKills = [];
+    this.bursting = { stage: 'cut', t: 0, owner: this.player.idx }; this.slowT = 0.5; this.burstKills = [];
     if (this.mode === 'run') { this.m.bursts++; if (this.m.firstBurst === null) this.m.firstBurst = this.runT; this.highlight(); if (this.cb.onBurst) this.cb.onBurst(); }
-    Sound.sfx('burstCut'); this.emit('burst', { plane: this.planeId });
+    Sound.sfx('burstCut'); this.emit('burst', { plane: this.planeId, idx: this.player.idx });
   }
   updateBurst(dt) {
     const B = this.bursting;
@@ -753,7 +849,7 @@ class World {
     // 大招改造（第三个槽位）
     const bm = this.bmod;
     if (bm) {
-      if (bm.id === 'thunderB') this.later(0.6, () => { const hit = new Set(); for (let i = 0; i < (bm.lv >= 2 ? 14 : 8); i++) { const e = this.nearestEnemy(rand(this.W * 0.3, this.W), rand(TOP, BOTTOM), 2000, hit); if (!e) break; hit.add(e.id); this.arc(e.x + rand(-30, 30), -20, e.x, e.y, '#dff4ff'); this.damageEnemy(e, 60 * dK, { kind: 'zap', x: e.x, y: e.y }); } Sound.sfx('zap'); });
+      if (bm.id === 'thunderB') this.later(0.6, () => { const hit = new Set(); for (let i = 0; i < (bm.lv >= 2 ? 14 : 8); i++) { const e = this.nearestEnemy(srand(this.W * 0.3, this.W), srand(TOP, BOTTOM), 2000, hit); if (!e) break; hit.add(e.id); this.arc(e.x + srand(-30, 30), -20, e.x, e.y, '#dff4ff'); this.damageEnemy(e, 60 * dK, { kind: 'zap', x: e.x, y: e.y }); } Sound.sfx('zap'); });
       if (bm.id === 'iceB') { for (const e of this.enemies) if (e.alive && !e.isBoss) this.freezeEnemy(e, bm.lv >= 2 ? 3 : 1.5); if (bm.lv >= 2) this.later(1.2, () => { for (const e of this.enemies) if (e.alive && !e.isBoss && e.frozen > 0 && e.x < this.W) this.shatter(e.x, e.y, 70, 40 * dK); }); }
       if (bm.id === 'bombB') { for (const e of this.enemies) if (e.alive && !e.isBoss) { e.mark = true; e.bigMark = bm.lv >= 2; } }
       if (bm.id === 'dustB') { this.magnetPulse(); this.later(0.8, () => this.addCharge(bm.lv >= 2 ? 0.45 : 0.25)); }
@@ -777,7 +873,7 @@ class World {
       }
       case 'candy': {
         F.spawn -= dt;
-        if (F.spawn <= 0 && F.t < F.dur) { F.spawn = 0.05; this.addShot('candyBomb', rand(this.W * 0.3, this.W - 30), -20, Math.PI / 2, 780, { dmg: 45 * F.dK, r: 12, life: 3, ty: rand(TOP + 40, BOTTOM - 20) }); }
+        if (F.spawn <= 0 && F.t < F.dur) { F.spawn = 0.05; this.addShot('candyBomb', srand(this.W * 0.3, this.W - 30), -20, Math.PI / 2, 780, { dmg: 45 * F.dK, r: 12, life: 3, ty: srand(TOP + 40, BOTTOM - 20) }); }
         return F.t >= F.dur + 0.8;
       }
       case 'paper': return true;
@@ -828,7 +924,7 @@ class World {
   }
   gatherRewards() {
     const p = this.player;
-    for (const k of this.pickups) { k.gather = { x: Math.min(this.W - 60, p.x + 110 + rand(-20, 40)), y: clamp(p.y + rand(-60, 60), TOP + 20, BOTTOM - 20) }; k.gatherT = 0.6; }
+    for (const k of this.pickups) { k.gather = { x: Math.min(this.W - 60, p.x + 110 + srand(-20, 40)), y: clamp(p.y + srand(-60, 60), TOP + 20, BOTTOM - 20) }; k.gatherT = 0.6; }
   }
   updateWheel(s, dt) {
     s.x += s.vx * dt;
@@ -841,7 +937,7 @@ class World {
     if (Math.random() < 0.9) this.part('mote', s.x + rand(-s.r, s.r), s.y + rand(-s.r, s.r), -200, rand(-40, 40), 0.5, 3, 'rgba(255,243,200,0.9)');
     if (s.x > this.W - 60) {
       s.on = false; const n = this.stats.stars >= 3 ? 12 : 6;
-      for (let i = 0; i < n; i++) this.addShot('wheelS', s.x, s.y, Math.PI * 0.5 + (i / n) * Math.PI + rand(-0.2, 0.2), 560, { dmg: 60 * this.stats.dmgK, r: 26, life: 2.4, pierce: 9999 });
+      for (let i = 0; i < n; i++) this.addShot('wheelS', s.x, s.y, Math.PI * 0.5 + (i / n) * Math.PI + srand(-0.2, 0.2), 560, { dmg: 60 * this.stats.dmgK, r: 26, life: 2.4, pierce: 9999 });
       this.fx(s.x, s.y, 3, 160, ['#fff3c8', '#ffd76a', '#ffffff']); Sound.sfx('explode', { v: 1.6 });
     }
   }
@@ -871,15 +967,16 @@ class World {
 
   /* ================================================== pickups ================================================== */
   dropPickup(kind, x, y, o = {}) {
-    const k = Object.assign({ kind, x, y, vx: rand(-110, 110), vy: rand(-140, 60), t: 0, value: 1, seed: rand(10) }, o);
+    const k = Object.assign({ kind, x, y, vx: srand(-110, 110), vy: srand(-140, 60), t: 0, value: 1, seed: srand(10) }, o);
     this.pickups.push(k); return k;
   }
   magnetRadius() { const lv = this.lvOf('magnet'); return (110 + (lv ? 60 + 60 * lv : 0)) * this.stats.magnetK; }
   updatePickups(dt) {
-    const p = this.player, R = this.magnetRadius();
     this.pickCd.bolt -= dt; this.pickCd.mine -= dt; this.pickCd.zap -= dt;
+    const radius = this.players.map((q) => this.withPlayer(q, () => this.magnetRadius()));
     for (const k of this.pickups) {
       k.t += dt;
+      const p = this.np > 1 ? this.nearestPlayer(k.x, k.y) : this.player, R = radius[p.idx]; // 多人：离谁近就飞向谁、给谁
       if (k.gather && k.gatherT > 0) { k.gatherT -= dt; k.x = smooth(k.x, k.gather.x, 6, dt); k.y = smooth(k.y, k.gather.y, 6, dt); if (k.gatherT <= 0) { k.gather = null; if (k.kind !== 'crystal') k.attract = true; } continue; }
       const d = Math.sqrt(dist2(k.x, k.y, p.x, p.y));
       const pull = (k.kind !== 'crystal' || k.bunny) && (k.attract || (d < R && k.t > 0.25) || this.state === 'victory');
@@ -890,7 +987,7 @@ class World {
       if (k.kind === 'crystal') k.y = clamp(k.y, this.arena.top + 24, this.arena.bottom - 24);
       if (k.fade !== undefined) { k.fade -= dt * 2; if (k.fade <= 0) { k.done = true; continue; } }
       const reach = k.kind === 'crystal' ? 36 : k.kind === 'gold' ? 44 : 26;
-      if (p.alive && d < reach && k.fade === undefined && this.state !== 'dying') this.collect(k);
+      if (p.alive && d < reach && k.fade === undefined && this.state !== 'dying') this.withPlayer(p, () => this.collect(k));
       if (k.x < -60 || k.t > (k.kind === 'crystal' ? 16 : 14) || k.y > LH + 40) k.done = true;
     }
     this.pickups = this.pickups.filter((k) => !k.done);
@@ -901,7 +998,7 @@ class World {
       case 'dust': {
         this.m.dust += k.value; this.addCharge(0.0008); Sound.sfx('dust', { gap: 45 });
         const ml = this.lvOf('magnet');
-        if (ml && this.pickCd.bolt <= 0) { this.pickCd.bolt = 0.05; this.addShot('starbolt', p.x, p.y, rand(-0.5, 0.5), 700, { dmg: (8 + 3 * ml) * (ml >= 4 ? 1.5 : 1), r: 6, homing: 7, life: 1.4 }); }
+        if (ml && this.pickCd.bolt <= 0) { this.pickCd.bolt = 0.05; this.addShot('starbolt', p.x, p.y, srand(-0.5, 0.5), 700, { dmg: (8 + 3 * ml) * (ml >= 4 ? 1.5 : 1), r: 6, homing: 7, life: 1.4 }); }
         if (this.hasSyn('bomb', 'magnet') && this.pickCd.mine <= 0) { this.pickCd.mine = 0.1; this.explode(p.x + 30, p.y, 45 * this.stats.blastK, 14, { level: 1 }); }
         if (this.hasSyn('thunder', 'magnet') && this.pickCd.zap <= 0) { this.pickCd.zap = 0.15; const e = this.nearestEnemy(p.x, p.y, 220); if (e) this.zap(p.x, p.y, e, 1, 14); }
         break;
@@ -910,7 +1007,7 @@ class World {
       case 'heart': if (p.hp < p.maxHp) p.hp++; Sound.sfx('heart'); this.text('+1', p.x, p.y - 40, '#9ff2c8', 18, 4); break;
       case 'chest': {
         this.m.dust += 30; this.m.chests++;
-        const pl = pick(PLANE_ORDER); this.m.frags[pl] = (this.m.frags[pl] || 0) + 3;
+        const pl = spick(PLANE_ORDER); this.m.frags[pl] = (this.m.frags[pl] || 0) + 3;
         Sound.sfx('chest'); this.text(`宝箱：星砂 +30 · ${PLANES[pl].name}碎片 +3`, p.x, p.y - 44, '#ffe38a', 16, 4); this.fx(p.x, p.y, 2, 80, ['#ffd76a', '#ffb347', '#fff6c8']);
         break;
       }
@@ -936,7 +1033,7 @@ class World {
   }
   streakMilestone(ms) {
     const p = this.player;
-    this.addCharge(0.05); this.highlight();
+    this.eachPlayer((q) => { if (q.alive) this.addCharge(0.05); }); this.highlight();
     this.emit('streak', { n: ms });
     Sound.sfx('streak', { k: [10, 30, 50, 100].indexOf(ms) });
     if (ms === 10) { this.ring(p.x, p.y, 0, 150, 0.35, 30, 'rgba(255,243,200,0.9)'); Sound.sfx('nova'); }
@@ -953,6 +1050,7 @@ class World {
     this.seg = { type: 'boss', tier: Math.max(3, this.beatIdx + STAGE_ORDER.indexOf(this.stageId)), t: 0, dur: 0 };
     this.remember(this.stage.boss === 'clock' ? '闯进了失控闹钟的钟面' : `闯过了${this.stage.bossName}的防线`, 1);
     this.boss = this.stage.boss === 'clock' ? new ClockBoss(this) : new CaptainBoss(this, this.stage.boss, this.stage.bossHp);
+    this.eachPlayer((q) => { if (q.alive && q.stock === 0) this.addStock(1); }); // Boss 入口：每架库存为 0 的飞机补到 1
     this.bossIntroT = 2.8;
     this.bossProxy = { id: 'boss', isBoss: true, type: 'boss', x: this.boss.x, y: this.boss.y, r: this.boss.radius || 118, alive: true };
     this.enemies.push(this.bossProxy);
@@ -973,7 +1071,7 @@ class World {
     if (sid === 'thunder') { b.conductive = true; title = '外壳开始导电！'; sub = '雷暴流：击中闹钟时跳电次数 +2，雷击伤害提高'; }
     else if (sid === 'wing') { title = '闹钟召唤了镜像！'; sub = '分身流：分身会自动锁定镜像闹钟'; for (let i = 0; i < 3; i++) { const ty = lerp(this.arena.top + 90, this.arena.bottom - 90, i / 2); this.addEnemy('mirror', { x: this.W + 60, y: ty, path: 'mirror', tx: this.W * (0.5 + i * 0.07), ty, fireT: 2 + i * 0.6 }); } }
     else if (sid === 'bomb') { b.marked = true; title = '护甲被标记了！'; sub = '爆破流：爆炸会撬开闹钟的核心，伤害 +50%'; }
-    else if (sid === 'magnet') { title = '星砂海！'; sub = '吸星流：闹钟洒出一整片星砂，全部吸进来'; for (let i = 0; i < 70; i++) this.dropPickup('dust', b.x + rand(-160, 60), b.y + rand(-220, 220), { value: 2, vx: rand(-260, -60), vy: rand(-160, 160) }); }
+    else if (sid === 'magnet') { title = '星砂海！'; sub = '吸星流：闹钟洒出一整片星砂，全部吸进来'; for (let i = 0; i < 70; i++) this.dropPickup('dust', b.x + srand(-160, 60), b.y + srand(-220, 220), { value: 2, vx: srand(-260, -60), vy: srand(-160, 160) }); }
     else if (sid === 'rainbow') { this.carnival = true; title = '彩色狂欢阶段！'; sub = '彩虹流：击中闹钟会掉落更多糖果强化'; }
     else if (sid === 'ice') { b.iceHands = true; title = '指针被冻住了！'; sub = '冰晶流：闹钟指针会周期性冻结，核心更常暴露'; }
     this.emit('bossResponse', { title, sub, id: sid });
@@ -996,7 +1094,7 @@ class World {
   result(win) {
     const m = this.m;
     return {
-      win, plane: this.planeId, runT: this.runT, stats: m,
+      win, plane: this.me.planeId, runT: this.runT, stats: m, mp: this.np > 1, team: this.players.map((q) => ({ name: q.name, plane: q.planeId, gone: q.gone })),
       stage: this.stageId, build: this.buildSummary(), progress: win ? 1 : clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1),
       memories: this.pickMemories ? this.pickMemories() : [], hurt: Object.assign({}, m.hurt || {}), lastHurt: m.lastHurt || null, clue: pick(STAGE_CLUES[this.stageId] || ['']), goalTimes: (m.goalTimes || []).slice(),
       choiceAvg: m.choiceTimes.length ? m.choiceTimes.reduce((a, b) => a + b, 0) / m.choiceTimes.length : null,
@@ -1027,7 +1125,7 @@ class World {
   /* ================================================== first-run hints ================================================== */
   updateHints() {
     if (this.hintStep < 0 || this.mode !== 'run' || this.state !== 'play') { if (this.hintShown) { this.hintShown = null; this.emit('hint', { id: null }); } return; }
-    const p = this.player;
+    const p = this.me;
     if (this.hintStep === 0 && p.moved > 220) this.hintStep = 1;
     let want = null;
     if (this.hintStep === 0) want = 'move';
@@ -1092,11 +1190,12 @@ class World {
 
   /* ================================================== HUD snapshot ================================================== */
   hud() {
-    const p = this.player, B = this.hudBuild || this.buildSummary(); // 槽位按“已经飞进槽里”的状态显示
-    const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: this.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual,
+    const p = this.me, B = this.hudBuild || this.buildSummary(); // 槽位按“已经飞进槽里”的状态显示；生命 / 大招看本机这架
+    const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: p.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual && p.alive, down: !p.alive && !p.gone ? Math.max(0, Math.ceil(p.downT)) : 0,
+      team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, down: Math.max(0, Math.ceil(q.downT)), me: q === p, color: q.color })) : null,
       gun: Object.assign({}, B.gun), support: B.support ? Object.assign({}, B.support) : null, bmod: B.bmod ? Object.assign({}, B.bmod) : null, recent: (B.recent || []).slice(),
       syns: B.links.slice(), stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(this.m.dust), companions: (this.companions || []).map((c) => c.id),
-      moved: this.player.moved, stage: this.stageId, phase: this.phase, candy: p.candy, ritual: this.ritualFocus(),
+      moved: p.moved, stage: this.stageId, phase: this.phase, candy: p.candy, ritual: this.ritualFocus(),
       goal: this.mode === 'run' && this.phase === 'fight' && this.goalHud ? this.goalHud() : null };
     if (this.boss && this.phase === 'boss') h.boss = this.boss.hudInfo();
     return h;
@@ -1104,7 +1203,7 @@ class World {
 
   /* ================================================== render ================================================== */
   render(g, o = {}) {
-    const W = this.W, t = this.t, p = this.player, cb = this.settings.colorblind;
+    const W = this.W, t = this.t, p = this.me, cb = this.settings.colorblind;
     g.save();
     if (this.trauma > 0) { const s = this.trauma * this.trauma * 16; g.translate(rand(-s, s), rand(-s, s)); }
     if (this.mapObjs) this.applyCam(g);
@@ -1127,7 +1226,7 @@ class World {
     this.shots.each((s) => this.drawShot(g, s));
     this.drawArcs(g);
     for (const k of this.pickups) if (k.kind === 'crystal') drawPickup(g, k, t);
-    this.drawPlayer(g);
+    this.drawPlayers(g);
     if (this.mapObjs) this.drawMapFront(g);
     // 装饰性的爆炸在下面，危险轮廓（预警 / 入场提示 / 敌弹）永远压在上面
     this.drawParticles(g);
@@ -1150,18 +1249,28 @@ class World {
       g.globalCompositeOperation = 'saturation'; g.fillStyle = `rgba(128,128,128,${0.88 * f})`; g.fillRect(0, 0, W, LH);
       g.globalCompositeOperation = 'source-over'; g.fillStyle = `rgba(14,10,40,${0.38 * f})`; g.fillRect(0, 0, W, LH);
     }
-    if (this.ritual) { if (f > 0.01) this.drawPlayer(g); this.drawRitual(g); }
+    if (this.ritual) { if (f > 0.01) this.drawPlayers(g); this.withPlayer(this.me, () => this.drawRitual(g)); }
     this.drawOverlays(g, o);
   }
-  drawPlayer(g) {
+  drawPlayers(g) {
+    const keep = this.player;
+    for (const q of this.players) if (!q.gone && q !== this.me) { this.player = q; this.drawPlayer(g, false); }
+    this.player = this.me; this.drawPlayer(g, true); this.player = keep;
+  }
+  drawPlayer(g, isMe = true) {
     const p = this.player, t = this.t, C = this.trailColors;
+    if (this.np > 1) { // 多人：队友半透明 + 名字，倒下的显示复活倒计时
+      if (!p.alive && !p.gone) { g.save(); g.globalAlpha = 0.35; drawPlane(g, p.planeId, p.x, p.y, 0.8, t, { hurt: true }); g.restore(); drawStepPill(g, p.x, p.y - 40, `${p.name || '队友'} · ${Math.ceil(Math.max(0, p.downT))} 秒后复活`, '#ffb2a8', 0.9); return; }
+      g.strokeStyle = hexA(p.color, isMe ? 0.9 : 0.6); g.lineWidth = 2; g.beginPath(); g.ellipse(p.x, p.y + 22, 26, 7, 0, 0, TAU); g.stroke();
+      if (!isMe) { g.font = '700 12px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.fillStyle = p.color; g.fillText(p.name || `${p.idx + 1}P`, p.x, p.y - 32); g.textAlign = 'start'; }
+    }
     g.globalCompositeOperation = 'lighter';
     for (let i = 0; i < p.trail.length; i++) {
       const q = p.trail[i], a = (i / p.trail.length) * 0.5 * (1 - q.t * 2); if (a <= 0) continue;
       const c = C[i % C.length]; drawGlow(g, q.x, q.y, 10 + i * 0.3, c.startsWith('#') ? hexA(c, 0.8) : c, a);
     }
     g.globalCompositeOperation = 'source-over';
-    if (this.lvOf('magnet')) { g.strokeStyle = `rgba(201,168,255,${0.16 + Math.sin(t * 3) * 0.05})`; g.lineWidth = 2; g.setLineDash([6, 10]); g.lineDashOffset = -t * 20; g.beginPath(); g.arc(p.x, p.y, this.magnetRadius(), 0, TAU); g.stroke(); g.setLineDash([]); }
+    if (this.lvOf('magnet') && isMe) { g.strokeStyle = `rgba(201,168,255,${0.16 + Math.sin(t * 3) * 0.05})`; g.lineWidth = 2; g.setLineDash([6, 10]); g.lineDashOffset = -t * 20; g.beginPath(); g.arc(p.x, p.y, this.magnetRadius(), 0, TAU); g.stroke(); g.setLineDash([]); }
     if (this.storm && this.lvOf('thunder') >= 5) { const sx = p.x + Math.cos(this.storm.a) * 70, sy = p.y + Math.sin(this.storm.a) * 70; g.globalCompositeOperation = 'lighter'; drawGlow(g, sx, sy, 34, GLOW.blue, 0.95); g.globalCompositeOperation = 'source-over'; g.fillStyle = '#e8f8ff'; g.beginPath(); g.arc(sx, sy, 9, 0, TAU); g.fill(); }
     for (const w of this.wingmen) {
       const gold = this.lvOf('wing') >= 5 && !w.temp;
@@ -1316,7 +1425,7 @@ class World {
     g.globalAlpha = 1; g.textAlign = 'start';
   }
   drawOverlays(g, o) {
-    const W = this.W, t = this.t, p = this.player, reduce = this.settings.reduceFlash;
+    const W = this.W, t = this.t, p = this.me, reduce = this.settings.reduceFlash, BO = this.bursting ? this.players[this.bursting.owner] || p : p;
     if (this.timeStop > 0) {
       g.fillStyle = 'rgba(255,215,106,0.1)'; g.fillRect(0, 0, W, LH);
       g.strokeStyle = 'rgba(255,215,106,0.55)'; g.lineWidth = 4;
@@ -1332,7 +1441,7 @@ class World {
     const hf = Math.max(this.hurtFlash, low ? 0.4 : 0);
     if (hf > 0) { const gr = g.createRadialGradient(W / 2, LH / 2, LH * 0.45, W / 2, LH / 2, W * 0.7); gr.addColorStop(0, 'rgba(255,122,107,0)'); gr.addColorStop(1, `rgba(255,122,107,${0.42 * hf})`); g.fillStyle = gr; g.fillRect(0, 0, W, LH); }
     if (this.bursting && this.bursting.stage === 'cut') {
-      const u = clamp(this.bursting.t / 0.5, 0, 1), C = this.P.colors;
+      const u = clamp(this.bursting.t / 0.5, 0, 1), C = BO.P.colors;
       g.save();
       g.fillStyle = `rgba(20,14,50,${0.5 * Math.sin(u * Math.PI)})`; g.fillRect(0, 0, W, LH);
       g.translate(W / 2, LH / 2); g.rotate(-0.12);
@@ -1341,9 +1450,9 @@ class World {
       g.globalAlpha = 0.92; g.fillStyle = gr; g.fillRect(-W, -bandH / 2, W * 2, bandH);
       g.globalAlpha = 1; g.strokeStyle = '#ffffff'; g.lineWidth = 4; g.strokeRect(-W, -bandH / 2, W * 2, bandH);
       for (let i = 0; i < 14; i++) { g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(-W + ((i * 173 + t * 1400) % (W * 2)), -bandH / 2 + ((i * 37) % Math.max(1, bandH)), 60, 3); }
-      drawPlane(g, this.planeId, x - 120, 0, 3.4, t, { bright: true });
+      drawPlane(g, BO.planeId, x - 120, 0, 3.4, t, { bright: true });
       g.font = '400 56px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; g.textAlign = 'left';
-      g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText(this.P.burst.name, x + 60, 20); g.fillStyle = '#ffffff'; g.fillText(this.P.burst.name, x + 60, 20);
+      g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText(BO.P.burst.name, x + 60, 20); g.fillStyle = '#ffffff'; g.fillText(BO.P.burst.name, x + 60, 20);
       g.restore();
     }
     if (this.flash > 0) { g.fillStyle = `rgba(${this.flashColor},${Math.min(0.55 * this.flashK(), this.flash * 0.6)})`; g.fillRect(0, 0, W, LH); }

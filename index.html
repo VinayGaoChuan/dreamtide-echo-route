@@ -417,6 +417,32 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 @media (max-width:760px){.end-grid3{grid-template-columns:1fr 1fr}}
 @media (max-height:600px){.stat-pill{padding:.25em .6em;min-width:0}.center-col{gap:8px}.build-list .row .dim-text{display:none}.build-list .row{display:inline-flex;margin-right:4px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s!important;animation-iteration-count:1!important;transition-duration:.001s!important}}
+
+/* 联机 */
+.mp-wrap{display:grid;grid-template-columns:minmax(max(240px,calc(300px*var(--u))),1fr) 2fr;gap:calc(14px*var(--u));align-items:start}
+.mp-me .row canvas{width:max(48px,calc(64px*var(--u)));height:auto}
+.mp-nick{display:flex;flex-direction:column;gap:4px}
+.mp-nick input{font:inherit;font-size:var(--fs-m);color:var(--paper);background:rgba(10,8,30,.55);border:1.5px solid var(--edge);border-radius:12px;padding:.35em .7em;width:100%;box-sizing:border-box}
+.mp-nick input:focus{outline:2px solid var(--lamp);outline-offset:1px}
+.mp-net{font-size:var(--fs-xs);margin:0}
+.mp-list{display:flex;flex-direction:column;gap:8px}
+.mp-room{display:flex;align-items:center;gap:12px;padding:.45em .8em;border-radius:12px;background:rgba(10,8,30,.4);border:1px solid var(--edge)}
+.mp-room span{flex:1;min-width:0}
+.mp-code{font-family:var(--f-display);font-weight:400;letter-spacing:.12em;color:var(--lamp2)}
+.mp-members{display:grid;grid-template-columns:repeat(auto-fill,minmax(max(160px,calc(200px*var(--u))),1fr));gap:8px}
+.mp-mem{display:flex;align-items:center;gap:8px;padding:.35em .6em;border-radius:12px;background:rgba(10,8,30,.4);border:1px solid var(--edge)}
+.mp-mem.me{border-color:rgba(255,201,74,.6)}
+.mp-mem > i{width:10px;height:10px;border-radius:50%;flex:none}
+.mp-mem canvas{width:max(40px,calc(52px*var(--u)));height:auto;flex:none}
+.team{display:flex;flex-direction:column;gap:3px;font-size:var(--fs-xs)}
+.team div{display:flex;align-items:center;gap:6px;padding:1px 8px 1px 4px;border-radius:999px;background:rgba(15,12,42,.55);width:max-content}
+.team div > i{width:9px;height:9px;border-radius:50%;flex:none}
+.team div b{font-weight:600;color:var(--paper)}
+.team div.down{color:#ffb2a8}
+.team div.gone{opacity:.45}
+.team .hp{letter-spacing:-1px;color:#ff8fa8}
+#mpwait{position:absolute;left:50%;bottom:calc(120px*var(--u));transform:translateX(-50%);padding:.4em 1.2em;border-radius:999px;background:rgba(15,12,42,.85);border:1.5px solid rgba(159,227,240,.6);color:var(--paper);font-size:var(--fs-s);pointer-events:none;z-index:6}
+@media (max-width:760px){.mp-wrap{grid-template-columns:1fr}}
 </style>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -439,6 +465,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
     <symbol id="i-lock" viewBox="0 0 24 24"><path d="M7 10V7.5a5 5 0 0 1 10 0V10h1.5v11h-13V10zm2.5 0h5V7.5a2.5 2.5 0 0 0-5 0z"/></symbol>
     <symbol id="i-sound" viewBox="0 0 24 24"><path d="M3 9h4l5-4.5v15L7 15H3z"/><path d="M15 8.2a5 5 0 0 1 0 7.6l-1.3-1.5a3 3 0 0 0 0-4.6zM17.6 5.2a9 9 0 0 1 0 13.6l-1.3-1.5a7 7 0 0 0 0-10.6z"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M3 9h4l5-4.5v15L7 15H3z"/><path d="M15.5 8.5l1.4-1.4 2.1 2.1 2.1-2.1 1.4 1.4L20.4 10.6l2.1 2.1-1.4 1.4-2.1-2.1-2.1 2.1-1.4-1.4 2.1-2.1z"/></symbol>
+    <symbol id="i-team" viewBox="0 0 24 24"><circle cx="8" cy="7.5" r="3.3"/><circle cx="16.5" cy="8.5" r="2.8"/><path d="M1.5 19.5c0-3.8 2.9-6.5 6.5-6.5s6.5 2.7 6.5 6.5z"/><path d="M15.6 19.5c0-2.4-.8-4.4-2.2-5.7.9-.5 1.9-.8 3.1-.8 3.1 0 5.5 2.4 5.5 6.5z"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 4.5l10-2v12.2a3.3 3.3 0 1 1-2-3V6.9l-6 1.2v8.6a3.3 3.3 0 1 1-2-3z"/></symbol>
     <symbol id="s-pierce" viewBox="0 0 24 24"><path d="M1 10.5h14V7l8 5-8 5v-3.5H1z"/><circle cx="7" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2" opacity=".55"/></symbol>
@@ -472,6 +499,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
     <div id="screens"></div>
     <div id="banner" aria-live="polite"></div>
     <div id="toast" role="status" aria-live="polite"></div>
+    <div id="mpwait" role="status" hidden></div>
   </div>
   <div id="narrow" hidden><b>梦潮是横版游戏</b><span>把窗口拉宽一些（建议 16:9），游戏会自动暂停等你</span></div>
 </div>
@@ -490,5 +518,6 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 <script src="js/surprise.js" charset="utf-8"></script>
 <script src="js/boss.js" charset="utf-8"></script>
 <script src="js/captain.js" charset="utf-8"></script>
+<script src="js/net.js" charset="utf-8"></script>
 <script src="js/ui.js" charset="utf-8"></script>
 <script src="js/main.js" charset="utf-8"></script>

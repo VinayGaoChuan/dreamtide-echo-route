@@ -8,7 +8,7 @@
 
 const MAP_DRIFT = 95;
 const COMP_SLOTS = [[-62, -48], [-62, 48], [-104, 0], [-110, -70], [-110, 70]];
-function mapShuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function mapShuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(srnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
 Object.assign(World.prototype, {
   initMap(o) {
@@ -20,19 +20,19 @@ Object.assign(World.prototype, {
   },
   spawnMapObject(kind, f = {}) {
     const W = this.W, top = this.arena.top, bot = this.arena.bottom, mid = (top + bot) / 2, p = this.player;
-    const o = { kind, id: _eid++, t: 0, state: 'idle', phase: 'in', x: W + 220, y: mid, near: 0, alpha: 0, engageT: null, station: W * 0.64, seed: rand(10), optional: !!f.optional, reward: !!f.reward, wait: f.reward ? 1e9 : 20 };
+    const o = { kind, id: this.eid++, t: 0, state: 'idle', phase: 'in', x: W + 220, y: mid, near: 0, alpha: 0, engageT: null, station: W * 0.64, seed: srand(10), optional: !!f.optional, reward: !!f.reward, wait: f.reward ? 1e9 : 20 };
     switch (kind) {
-      case 'house': o.y = clamp(rand(mid - 40, mid + 80), top + 150, bot - 60); o.sensor = { dx: -122, dy: 36, r: 58 }; o.first = this.offerN === 0; if (o.first) o.wait = 1e9; break;
-      case 'wind': o.y = rand(mid - 90, mid + 90); o.station = W * 0.7; o.ringDx = -150; o.ringR = 92; o.spin = 0.6; break;
+      case 'house': o.y = clamp(srand(mid - 40, mid + 80), top + 150, bot - 60); o.sensor = { dx: -122, dy: 36, r: 58 }; o.first = this.offerN === 0; if (o.first) o.wait = 1e9; break;
+      case 'wind': o.y = srand(mid - 90, mid + 90); o.station = W * 0.7; o.ringDx = -150; o.ringR = 92; o.spin = 0.6; break;
       case 'mine': {
-        o.y = rand(mid - 100, mid + 100); o.station = W * 0.6; o.core = { x: o.x - 34, y: o.y - 12, towed: false };
+        o.y = srand(mid - 100, mid + 100); o.station = W * 0.6; o.core = { x: o.x - 34, y: o.y - 12, towed: false };
         const side = o.y < mid ? 1 : -1; o.wall = { x: W * 0.82, y: side < 0 ? top + 20 : bot - 20, side, shown: 0 };
         break;
       }
       case 'npc': {
-        o.sub = this.pickNpc(); o.y = rand(mid - 80, mid + 80); o.station = W * 0.42; o.wait = f.reward ? 1e9 : 26;
+        o.sub = this.pickNpc(); o.y = srand(mid - 80, mid + 80); o.station = W * 0.42; o.wait = f.reward ? 1e9 : 26;
         o.pod = { x: o.x, y: o.y, hp: 3, inv: 0, towed: false };
-        const ry = clamp(p.y < mid ? rand(mid + 20, bot - 110) : rand(top + 110, mid - 20), top + 110, bot - 110);
+        const ry = clamp(p.y < mid ? srand(mid + 20, bot - 110) : srand(top + 110, mid - 20), top + 110, bot - 110);
         o.dock = { x: W + 170, y: ry, w: 160 }; o.lane = { y: ry, h: 150 }; // 修理点等挂上拖绳后才从右边慢慢漂过来：护送要走一段
         break;
       }
@@ -49,7 +49,14 @@ Object.assign(World.prototype, {
     if (this.picks.length >= 3) pref.push('merchant');
     pref.push('miner', 'bunny');
     for (const id of pref) if (pool.includes(id)) return id;
-    return pool.length ? pick(pool) : pick(NPC_ORDER);
+    return pool.length ? spick(pool) : spick(NPC_ORDER);
+  },
+  /* 多人：拖着矿核 / 吊舱的那位优先；否则离装置最近的那架飞机来判定碰触 */
+  mapActor(o) {
+    const by = o.by !== undefined ? this.players[o.by] : null;
+    if (by && by.alive && !by.gone) return by;
+    const t = this.mapGoalPos(o) || { x: o.x, y: o.y };
+    return this.nearestPlayer(t.x, t.y);
   },
   /* 这个装置下一步该去哪里（指引箭头 / 自动测试的飞行员都用它） */
   mapGoalPos(o) {
@@ -73,7 +80,7 @@ Object.assign(World.prototype, {
   updateMap(dt) {
     if (this.mode !== 'run') return;
     this.mapCalm = false; this.mapDwell = false;
-    for (const o of this.mapObjs) if (this.state === 'play') this.updateMapObj(o, dt);
+    for (const o of this.mapObjs) if (this.state === 'play') this.withPlayer(this.mapActor(o), () => this.updateMapObj(o, dt)); // 谁在操作这个装置，“当前飞机”就是谁
     this.mapObjs = this.mapObjs.filter((o) => !o.gone);
     this.updateOrbs(dt);
     this.updateCompanions(dt);
@@ -118,7 +125,7 @@ Object.assign(World.prototype, {
         break;
       case 'mine':
         if (o.state === 'idle' && p.alive && dist2(p.x, p.y, o.core.x, o.core.y) < (62 + reach) ** 2) {
-          o.state = 'tow'; o.core.towed = true; o.engageT = this.runT; Sound.sfx('hook', { pan: this.pan(o.core.x) });
+          o.state = 'tow'; o.core.towed = true; o.engageT = this.runT; o.by = p.idx; Sound.sfx('hook', { pan: this.pan(o.core.x) });
           this.text('矿核跟上来了 · 拖到发光的岩壁', o.core.x, o.core.y - 60, '#c9a8ff', 18, 4);
         }
         if (o.state === 'tow') {
@@ -135,7 +142,7 @@ Object.assign(World.prototype, {
       case 'npc': {
         const pod = o.pod; pod.inv = Math.max(0, pod.inv - dt);
         if (o.state === 'idle' && p.alive && dist2(p.x, p.y, pod.x, pod.y) < (60 + reach) ** 2) {
-          o.state = 'tow'; pod.towed = true; o.engageT = this.runT; Sound.sfx('hook', { pan: this.pan(pod.x) });
+          o.state = 'tow'; pod.towed = true; o.engageT = this.runT; o.by = p.idx; Sound.sfx('hook', { pan: this.pan(pod.x) });
           this.text(`${NPCS[o.sub].name}挂上拖绳了 · 沿光带送到修理点`, pod.x, pod.y - 64, '#ff9fcf', 17, 4);
         }
         if (o.state === 'tow') {
@@ -180,7 +187,7 @@ Object.assign(World.prototype, {
     // 一排敌人被推到炮口前
     const y = clamp(p.y, top + 20, bot - 20);
     let list = this.enemies.filter((e) => e.alive && !e.isBoss && !e.elite && !e.goal && e.type !== 'armor' && e.type !== 'wreck' && e.x < this.W + 40).slice(0, 8);
-    for (let i = list.length; i < 6; i++) list.push(this.addEnemy('jelly', { x: this.W + 30 + i * 30, y: rand(top, bot), path: 'line', vx: -120 }));
+    for (let i = list.length; i < 6; i++) list.push(this.addEnemy('jelly', { x: this.W + 30 + i * 30, y: srand(top, bot), path: 'line', vx: -120 }));
     list.forEach((e, i) => { e.rowX = Math.min(this.W - 40, p.x + 250 + i * 50); e.rowY = y; e.path = 'line'; e.vx = -40; });
     o.pushed = list;
     this.text('风！一排敌人被推到炮口前', clamp(p.x + 300, 200, this.W - 200), y - 70, '#9fe3f0', 20, 5);
@@ -196,7 +203,7 @@ Object.assign(World.prototype, {
     this.hitStop(0.05); this.shake(0.5); this.rumble(0.9, 0.6, 180);
     Sound.sfx('wallBreak');
     this.traces.crack = { x: W.x, y: W.y, side: W.side, born: this.t };
-    for (let i = 0; i < 24; i++) this.dropPickup('dust', W.x + rand(-40, 40), W.y - W.side * 30, { value: 1, vx: rand(-300, 100), vy: -W.side * rand(60, 300) });
+    for (let i = 0; i < 24; i++) this.dropPickup('dust', W.x + srand(-40, 40), W.y - W.side * 30, { value: 1, vx: srand(-300, 100), vy: -W.side * srand(60, 300) });
     this.later(0.35, () => { for (const k of this.pickups) if (k.kind === 'dust') k.attract = true; });
     this.addCharge(0.5, true); this.text('大招能量 +50%', this.player.x, this.player.y - 56, '#ffd76a', 18, 5); // 纯资源直接吸收
     this.queueRitual('mine', { x: W.x - 40, y: W.y - W.side * 150, device: 'machine', obj: o });
@@ -213,7 +220,7 @@ Object.assign(World.prototype, {
     const d = o.dock, id = o.sub; o.state = 'done'; o.phase = 'out';
     Sound.sfx('rescue'); this.fx(d.x, d.y, 3, 140, ['#ff9fcf', '#ffffff', '#ffe38a']);
     if (!bailed) {
-      this.companions.push({ id, x: o.pod.x, y: o.pod.y, t: 0, fireT: 0.6, mood: 'happy', moodT: 2, idx: this.companions.length });
+      this.companions.push({ id, x: o.pod.x, y: o.pod.y, t: 0, fireT: 0.6, mood: 'happy', moodT: 2, idx: this.companions.length, owner: this.player.idx });
       this.m.rescues++; this.emit('companion', { id });
       if (id === 'grandpa') this.player.cloudShield = true;
       if (id === 'clockling') this.addCharge(0.3, true);
@@ -243,7 +250,7 @@ Object.assign(World.prototype, {
     Sound.sfx('mapDone');
     // 飞机专属地图反应
     const p = this.player;
-    if (this.planeId === 'candy') { for (let i = 0; i < 8; i++) this.addShot('candyBomb', o.x + rand(-260, 260), TOP - 10 - i * 20, Math.PI / 2, rand(420, 560), { dmg: 40 * this.stats.dmgK, r: 10, life: 3, ty: rand(this.arena.top + 60, this.arena.bottom - 60) }); p.candy = Math.max(p.candy, 5); }
+    if (this.planeId === 'candy') { for (let i = 0; i < 8; i++) this.addShot('candyBomb', o.x + srand(-260, 260), TOP - 10 - i * 20, Math.PI / 2, srand(420, 560), { dmg: 40 * this.stats.dmgK, r: 10, life: 3, ty: srand(this.arena.top + 60, this.arena.bottom - 60) }); p.candy = Math.max(p.candy, 5); }
     if (this.planeId === 'clock' && !this.bursting) this.timeStop = Math.max(this.timeStop, 1.2);
     const entry = { kind: o.kind, sub: o.sub || null, verb, name, reward, desc };
     this.journey.push(entry);
@@ -269,16 +276,18 @@ Object.assign(World.prototype, {
   /* ---------- 伙伴 ---------- */
   updateCompanions(dt) {
     this.updateTurret(dt);
-    const p = this.player; if (!this.companions.length) return;
+    if (!this.companions.length) return;
+    const ownerOf = (c) => { const q = this.players[c.owner]; return q && q.alive && !q.gone ? q : this.anchor(); }, p = this.anchor();
     const bossIntro = this.phase === 'boss' && this.bossIntroT > 0;
     this.companions.forEach((c, i) => {
       c.t += dt; c.moodT -= dt;
       const slot = COMP_SLOTS[i % COMP_SLOTS.length];
-      let tx = p.x + slot[0], ty = p.y + slot[1];
-      if (bossIntro) { tx = p.x - 30 - i * 10; ty = p.y + (i % 2 ? 16 : -16); c.mood = 'scared'; c.moodT = 0.3; }
+      const o = ownerOf(c); // 伙伴跟着救它的那架飞机
+      let tx = o.x + slot[0], ty = o.y + slot[1];
+      if (bossIntro) { tx = o.x - 30 - i * 10; ty = o.y + (i % 2 ? 16 : -16); c.mood = 'scared'; c.moodT = 0.3; }
       if (c.id === 'bunny' && !bossIntro) { const k = this.pickups.find((q) => (q.kind === 'chest' || q.kind === 'heart' || q.kind === 'candy' || q.kind === 'gold') && q.x < this.W - 30); if (k) { tx = lerp(tx, k.x, 0.6); ty = lerp(ty, k.y, 0.6); } }
       c.x = smooth(c.x, clamp(tx, 20, this.W - 20), 5, dt); c.y = smooth(c.y, clamp(ty, TOP, BOTTOM), 5, dt);
-      if (c.moodT <= 0) { const r = Math.random(); c.mood = r < 0.25 ? 'wave' : r < 0.4 && this.phase !== 'boss' ? 'sleep' : 'idle'; c.moodT = c.mood === 'sleep' ? 2.2 : c.mood === 'wave' ? 1.2 : rand(3, 6); }
+      if (c.moodT <= 0) { const r = srnd(); c.mood = r < 0.25 ? 'wave' : r < 0.4 && this.phase !== 'boss' ? 'sleep' : 'idle'; c.moodT = c.mood === 'sleep' ? 2.2 : c.mood === 'wave' ? 1.2 : srand(3, 6); }
       if (this.state === 'play' && p.alive && !this.ritualFocus()) {
         c.fireT -= dt;
         if (c.fireT <= 0) { c.fireT = 0.75; const e = this.nearestEnemy(c.x, c.y, 760); if (e && e.x > c.x - 40) { this.addShot('starbolt', c.x + 10, c.y, angTo(c.x, c.y, e.x, e.y), 720, { dmg: 7 * this.stats.dmgK * (1 + this.stats.npcBoost), r: 6, homing: 5, life: 1.3, from: 'npc' }); if (c.mood === 'sleep') c.moodT = 0; } }
@@ -307,7 +316,7 @@ Object.assign(World.prototype, {
     if (this.mapHintKind) { this.mapHintKind = null; this.emit('maphint', { kind: null }); }
     for (const b of this.orbs) if (!b.done) { b.done = true; b.apply(); }
     this.orbs = [];
-    if (p.stock === 0) { this.addStock(1); this.text('Boss 入口 · 大招补到 1 次', p.x, p.y - 60, '#ffd76a', 20, 5); }
+    this.text('Boss 入口 · 库存为 0 的大招补到 1 次', p.x, p.y - 60, '#ffd76a', 20, 5); // 补库存在 startBoss 里按每架飞机做
     if (this.companions.length) this.later(1.2, () => { for (const c of this.companions) this.fx(c.x, c.y, 2, 50, [NPCS[c.id].color, '#ffffff']); this.text('伙伴助力！', p.x, p.y + 60, '#ff9fcf', 18, 4); this.m.dust += 10 * this.companions.length; });
   },
   onCompanionBossPhase() {
@@ -319,7 +328,7 @@ Object.assign(World.prototype, {
   /* ---------- 画 ---------- */
   applyCam(g) { if (this.cam && this.cam.z > 1.001) { g.translate(this.cam.x, this.cam.y); g.scale(this.cam.z, this.cam.z); g.translate(-this.cam.x, -this.cam.y); } },
   drawMap(g) {
-    const t = this.t, p = this.player;
+    const t = this.t, p = this.me;
     for (const o of this.mapObjs) {
       const M = MAP_OBJECTS[o.kind], idle = o.state === 'idle';
       const inRitual = this.ritual && this.ritual.q.obj === o && this.ritual.st !== 'resume' && this.ritual.st !== 'fly';
@@ -334,13 +343,14 @@ Object.assign(World.prototype, {
         case 'mine':
           if (!o.blown) drawMine(g, o.x, o.y, { r: 60, charge: o.state === 'idle' ? 0.2 : 0, crackA: Math.PI, seed: o.seed, shake: false }, t);
           if (o.state === 'tow' || o.state === 'boom') drawWallMark(g, o.wall, t);
-          if (!o.blown) { if (o.state === 'tow') { g.strokeStyle = 'rgba(201,168,255,0.7)'; g.lineWidth = 2; g.setLineDash([4, 6]); g.beginPath(); g.moveTo(p.x - 20, p.y); g.lineTo(o.core.x, o.core.y); g.stroke(); g.setLineDash([]); } drawMineCore(g, o.core.x, o.core.y, t, o.state !== 'idle'); }
+          const ow = this.players[o.by] || p;
+          if (!o.blown) { if (o.state === 'tow') { const p = ow; g.strokeStyle = 'rgba(201,168,255,0.7)'; g.lineWidth = 2; g.setLineDash([4, 6]); g.beginPath(); g.moveTo(p.x - 20, p.y); g.lineTo(o.core.x, o.core.y); g.stroke(); g.setLineDash([]); } drawMineCore(g, o.core.x, o.core.y, t, o.state !== 'idle'); }
           break;
         case 'npc':
           if (o.state === 'tow' || o.state === 'bail') drawSafeLane(g, this.W * 0.1, o.dock.x + 40, o.lane.y, o.lane.h, t);
           if (o.state !== 'idle' && (o.state !== 'done' || o.phase !== 'out')) drawDock(g, o.dock.x, o.dock.y, t, o.state === 'done');
           if (o.state !== 'done') {
-            if (o.state === 'tow') { g.strokeStyle = 'rgba(255,200,230,0.8)'; g.lineWidth = 2; g.beginPath(); g.moveTo(p.x - 20, p.y + 6); g.quadraticCurveTo((p.x + o.pod.x) / 2, Math.max(p.y, o.pod.y) + 30, o.pod.x, o.pod.y - 20); g.stroke(); }
+            if (o.state === 'tow') { const p = this.players[o.by] || this.me; g.strokeStyle = 'rgba(255,200,230,0.8)'; g.lineWidth = 2; g.beginPath(); g.moveTo(p.x - 20, p.y + 6); g.quadraticCurveTo((p.x + o.pod.x) / 2, Math.max(p.y, o.pod.y) + 30, o.pod.x, o.pod.y - 20); g.stroke(); }
             drawPod(g, o.pod.x, o.pod.y, o.sub, o.pod.hp, o.pod.inv, t, o.state === 'bail');
           }
           break;

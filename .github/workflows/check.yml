@@ -1,4 +1,4 @@
-# 每次推送到 main、每个 PR 都跑一遍：语法检查 → 三关无头通关模拟 → 打包单文件。
+# 每次推送到 main、每个 PR 都跑一遍：语法检查 → 三关无头通关模拟 → 联机同步测试 → 打包单文件。
 # 任何一步失败，这次提交旁边会出现红叉；GitHub Pages 仍按 main 自动部署，所以推送前最好先在本地跑同样的命令。
 name: 检查
 
@@ -21,5 +21,9 @@ jobs:
         run: for f in js/*.js tools/*.js; do node --check "$f" || exit 1; done
       - name: 三关无头通关模拟
         run: node tools/smoke-sim.js js
+      - name: 联机同步（2 人三关逐帧比对）
+        run: node tools/mp-sim.js js all 2 direct
+      - name: 联机网络（3 人、20% 丢包、中途掉线）
+        run: node tools/mp-sim.js js 1-2 3 net 0.2 100 5 2@3000
       - name: 打包单文件
         run: python3 build.py dist/dreamtide.html
