@@ -44,6 +44,7 @@ Q 版手绘风的横版自动射击 Roguelite（HTML / Canvas Demo，目标平�
 | `js/main.js` | 启动、自适应舞台、固定步长主循环 |
 | `tools/smoke-sim.js` | 无头冒烟测试（假画布跑三关） |
 | `build.py` | 把 js 内联成单个 HTML |
+| `docs/` | 全部策划文档和美术规范；先看 [docs/README.md](docs/README.md)（阅读顺序、冲突时以哪份为准、哪些部分已不做） |
 
 所有代码都是浏览器原生 JS，多个文件共享全局作用域；`World` 的方法分散在几个文件里，用 `Object.assign(World.prototype, {...})` 挂上去。
 
