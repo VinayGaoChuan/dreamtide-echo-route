@@ -88,7 +88,7 @@ function onMessage(conn, text) {
   if (++conn.msgN > LIMIT.msgPerSec) return; // 太快的直接丢（客户端约 30 次 / 秒）
   let m; try { m = JSON.parse(text); } catch (e) { return; }
   if (!m || typeof m !== 'object') return;
-  if (m.t === 'ping') { send(conn, { t: 'pong', c: m.c }); return; }
+  if (m.t === 'ping') { send(conn, { t: 'pong', c: m.c, s: Date.now() }); return; } // 带上服务器时间：客户端据此对时，大家同一刻开局
   if (m.t === 'hello' && !conn.peer) return hello(conn, m);
   if (m.t === 'p' && conn.peer && m.d && typeof m.d === 'object') {
     const P = conn.peer, next = Object.assign({}, P.presence);

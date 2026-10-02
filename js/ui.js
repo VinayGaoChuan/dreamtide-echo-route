@@ -284,11 +284,11 @@ function showMultiplayer(back) {
     }
     const ms = room ? room.members : [], host = Lobby.isHost, n = ms.length;
     const chips = STAGE_ORDER.map((id) => { const ok = stageUnlocked(id); return `<button class="stage-chip ${id === stage ? 'sel' : ''} ${ok ? '' : 'locked'}" data-mst="${id}" type="button" ${ok ? '' : 'aria-disabled="true"'}><b>${id}</b><span>${STAGES[id].name}</span>${ok ? '' : icon('i-lock')}</button>`; }).join('');
-    const dOpts = net.kind === 'room' ? [[4, '短'], [5, '标准'], [8, '长']] : net.kind === 'ws' ? [[3, '短'], [4, '标准'], [6, '长']] : [[3, '短'], [5, '标准'], [8, '长']], dNow = delay || (net.kind === 'room' ? 5 : net.kind === 'ws' ? 4 : 3);
+    const dOpts = [[0, '自动'], [3, '短'], [6, '中'], [10, '长']], dNow = delay; // 0 = 按大家的延迟自动定
     body.innerHTML = `<h3>房间 <b class="mp-code">${esc(Lobby.code)}</b> <small class="dim-text">${n}/${MP_MAX} 人</small></h3>
       <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : ''}<br><small class="dim-text">${PLANES[x.plane].name}</small></span></div>`).join('')}</div>
       ${host ? `<div class="label">关卡</div><div class="stage-row">${chips}</div>
-        <div class="row wrap"><span class="label">网络缓冲</span><div class="seg" role="group">${dOpts.map(([v, t]) => `<button type="button" data-md="${v}" class="${v === dNow ? 'on' : ''}">${t}</button>`).join('')}</div><span class="dim-text">卡顿多就调长，操作会晚一点点生效</span></div>
+        <div class="row wrap"><span class="label">网络缓冲</span><div class="seg" role="group">${dOpts.map(([v, t]) => `<button type="button" data-md="${v}" class="${v === dNow ? 'on' : ''}">${t}</button>`).join('')}</div><span class="dim-text">卡顿就调长，操作会晚一点生效</span></div>
         <div class="row wrap"><button class="btn primary big" id="mp-start" type="button" ${n >= 2 ? '' : 'disabled'}>${icon('i-hangar')} 开始 · ${stage} ${STAGES[stage].name}</button>${n < 2 ? '<span class="dim-text">至少 2 人才能开始</span>' : ''}</div>`
         : `<p class="dim-text">${room && room.started ? '这一局已经开始了，等下一局。' : '等房主选关开始…'}</p>`}
       <div class="row"><button class="btn coral small" id="mp-leave" type="button">离开房间</button></div>`;
@@ -304,7 +304,8 @@ function showMultiplayer(back) {
 function startMpRun(st) {
   const idx = Lobby.beginSession(st); if (idx < 0) return false;
   Lobby.onUpdate = null;
-  startRun(st.stage, { st, idx });
+  const net = Lobby.net, sync = st.at && net.serverNow && net.serverNow() !== null; // 按共同时钟换算成本机时间：大家同一刻开局
+  startRun(st.stage, { st, idx, t0: sync ? net.localPerfOf(st.at) : performance.now() });
   return true;
 }
 
@@ -347,7 +348,7 @@ function startRun(stageId, mp) {
     const sr = $('#stage').getBoundingClientRect(), r = el.getBoundingClientRect(); if (!r.width && k !== 'link') return null;
     return { x: (r.left + (r.width || 60) / 2 - sr.left) / G.scale, y: (r.top + (r.height || 20) / 2 - sr.top) / G.scale };
   };
-  if (mp) { G.mpLoop = { t0: performance.now(), steps: 0, dx: 0, dy: 0, waitT: 0, desyncShown: false, last: performance.now() }; banner(`${stageId} ${STAGES[stageId].name} · ${mp.st.roster.length} 人联机`, '升级和掉落各拿各的：别人的掉落你看不见', 2.4); }
+  if (mp) { G.mpLoop = { t0: mp.t0 || performance.now(), steps: 0, dx: 0, dy: 0, waitT: 0, desyncShown: false, last: performance.now() }; banner(`${stageId} ${STAGES[stageId].name} · ${mp.st.roster.length} 人联机`, '升级和掉落各拿各的：别人的掉落你看不见', 2.4); }
   else banner(`${stageId} ${STAGES[stageId].name}`, `${PLANES[id].name} · 目标一个一个来：先清掉普通怪群`, 2);
   persist();
 }

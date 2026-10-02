@@ -145,6 +145,7 @@ class WsNet {
   constructor(url, ch) {
     this.kind = 'ws'; this.url = url; this.ch = ch; this.subs = []; this.others = new Map(); this.me = {}; this.pending = null;
     this.selfId = 'W' + Math.random().toString(36).slice(2, 12); this.open = false; this.closed = false; this.retry = 0; this.rtt = null; this.sentAt = 0; this.pingAt = 0;
+    this.clock = []; this.clockOff = null; // 对时：最近几次 ping 里延迟最小的那次最准
     this.off = NetTicker.on((now) => this.tick(now));
     this.dial();
   }
@@ -152,7 +153,7 @@ class WsNet {
     if (this.closed) return;
     let ws; try { ws = new WebSocket(this.url); } catch (e) { this.redial(); return; }
     this.ws = ws;
-    ws.onopen = () => { this.open = true; this.retry = 0; ws.send(JSON.stringify({ t: 'hello', id: this.selfId, ch: this.ch })); if (Object.keys(this.me).length) this.pending = Object.assign({}, this.me); this.emit(); };
+    ws.onopen = () => { this.open = true; this.retry = 0; ws.send(JSON.stringify({ t: 'hello', id: this.selfId, ch: this.ch })); this.pingAt = 0; if (Object.keys(this.me).length) this.pending = Object.assign({}, this.me); this.emit(); };
     ws.onmessage = (ev) => this.onMsg(ev.data);
     ws.onclose = () => { const was = this.open; this.open = false; this.ws = null; if (was) { this.others.clear(); this.emit(); } this.redial(); };
     ws.onerror = () => {};
@@ -164,12 +165,17 @@ class WsNet {
     if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.others.clear(); (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'u') { (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'bye') { this.others.delete(m.peer); this.emit(); }
-    else if (m.t === 'pong') this.rtt = Math.round(performance.now() - m.c);
+    else if (m.t === 'pong') {
+      const now = performance.now(), rtt = now - m.c; this.rtt = Math.round(rtt);
+      if (m.s) { this.clock.push({ rtt, off: m.s + rtt / 2 - now }); if (this.clock.length > 8) this.clock.shift(); this.clockOff = this.clock.reduce((a, b) => (b.rtt < a.rtt ? b : a)).off; }
+    }
   }
+  serverNow() { return this.clockOff === null ? null : performance.now() + this.clockOff; } // 服务器时钟（毫秒）
+  localPerfOf(ms) { return ms - this.clockOff; }
   tick(now) {
     if (!this.open || !this.ws) return;
     if (this.pending && now - this.sentAt >= 30) { this.ws.send(JSON.stringify({ t: 'p', d: this.pending })); this.pending = null; this.sentAt = now; }
-    if (now - this.pingAt > 2000) { this.pingAt = now; this.ws.send(JSON.stringify({ t: 'ping', c: now })); }
+    if (now - this.pingAt > (this.clock.length < 4 ? 400 : 2000)) { this.pingAt = now; this.ws.send(JSON.stringify({ t: 'ping', c: now })); } // 刚连上时多测几次
   }
   emit() { for (const fn of this.subs) fn(); }
   peers() { return [{ peer: this.selfId, isMe: true, presence: this.me, updatedAt: Date.now() }, ...[...this.others].map(([peer, p]) => ({ peer, isMe: false, presence: p.presence, updatedAt: p.updatedAt }))]; }
@@ -208,6 +214,8 @@ class LocalNet {
   presence(patch) { const m = Object.assign({}, this.me); for (const k in patch) { if (patch[k] === null) delete m[k]; else m[k] = patch[k]; } this.me = m; this.dirty = true; return Promise.resolve(); }
   onChange(fn) { this.subs.push(fn); }
   connected() { return !!this.bc; }
+  serverNow() { return Date.now(); } // 同一台电脑：墙上时钟就是共同时钟
+  localPerfOf(ms) { return performance.now() + (ms - Date.now()); }
   close() { if (this.off) this.off(); if (this.bc) { this.bc.postMessage({ from: this.selfId, bye: true }); this.bc.close(); } this.subs = []; }
 }
 
@@ -241,7 +249,7 @@ const Lobby = {
     for (const p of this.net.peers()) {
       const m = p.presence && p.presence.mp; if (!m || typeof m.code !== 'string') continue;
       const r = rooms.get(m.code) || { code: m.code, members: [], host: null, started: false, stage: null };
-      r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(m.ls && m.ls.g) });
+      r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(m.ls && m.ls.g), rtt: typeof m.rtt === 'number' ? m.rtt : null });
       if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; }
       rooms.set(m.code, r);
     }
@@ -260,8 +268,16 @@ const Lobby = {
     const ms = this.members().slice(0, MP_MAX); if (ms.length < 2) return false;
     const roster = ms.map((m) => ({ peer: m.peer, name: m.name, plane: m.plane, stats: (m.prof && m.prof.s) || null, ultCap: (m.prof && m.prof.u) || 1, cos: (m.prof && m.prof.c) || {} }));
     const id = Math.random().toString(36).slice(2, 8), seed = (Math.random() * 4294967296) >>> 0;
-    this.me({ stage, start: { id, stage, seed, roster, delay: delay || (this.net.kind === 'room' ? 5 : this.net.kind === 'ws' ? 4 : 3) } });
+    const now = this.net.serverNow ? this.net.serverNow() : null, at = now === null ? null : Math.round(now + 900); // 约 0.9 秒后大家在同一刻开局
+    this.me({ stage, start: { id, stage, seed, roster, at, delay: delay || this.autoDelay(ms) } });
+    this.changed(); // 房主自己马上开局（不用等服务器把自己的状态转回来）
     return true;
+  },
+  /* 自动缓冲：操作从一人经服务器到另一人 ≈ 两人往返延迟的一半之和 + 服务器 / 客户端合并发送的时间；取最慢的两个人 */
+  autoDelay(ms) {
+    if (this.net.kind === 'room') return 5;
+    const r = (ms || this.members()).map((m) => (m.isMe ? this.net.rtt : m.rtt) || 0).sort((a, b) => b - a);
+    return clamp(Math.ceil((((r[0] || 0) + (r[1] || 0)) / 2 + 70) / (1000 / LOCKSTEP.hz)) + 1, 3, 12);
   },
   hostStart() { const r = this.room(); if (!r) return null; const host = this.net.peers().find((p) => p.peer === r.host); return (host && host.presence.mp && host.presence.mp.start) || null; },
   changed() {
@@ -301,6 +317,9 @@ const Lobby = {
   /* 发布本机的操作帧；一局结束后再继续补发几秒，慢一步的队友还要用我最后那几帧 */
   flush(now) { const S = this.session || this.linger; if (!S) return; this.lastFlush = now; S.flush(); },
   tick(now) {
+    if (this.code && !this.session && this.net && typeof this.net.rtt === 'number' && now - (this.rttAt || 0) > 2000) { // 在房间里：把自己的延迟告诉房主，用来定缓冲
+      this.rttAt = now; const cur = this.myMp().rtt; if (typeof cur !== 'number' || Math.abs(cur - this.net.rtt) > 8) this.me({ rtt: this.net.rtt });
+    }
     if (this.linger) {
       if (Date.now() > this.lingerUntil) { this.linger = null; return; }
       if (now - this.lastFlush > 100) { this.pump(); this.flush(now); }
