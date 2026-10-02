@@ -42,7 +42,9 @@
   }
 
   applySettings();
-  if (G.meta.seenTitle && G.meta.firstRunDone) showHub(); else showTitle();
+  const invite = inviteCode();
+  if (invite) { G.meta.seenTitle = true; showMultiplayer(showHub, invite); } // 朋友点邀请链接：直接进那个房间
+  else if (G.meta.seenTitle && G.meta.firstRunDone) showHub(); else showTitle();
 
   /* ---------- 菜单背景 ---------- */
   let grain = null, vig = null, vigW = 0;

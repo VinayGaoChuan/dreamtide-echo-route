@@ -127,7 +127,7 @@ function showTitle() {
   Sound.setMode('title'); G.bg = 'title';
   const first = !G.meta.seenTitle;
   const el = showScreen('title', `
-    <div class="corner-tr"><button class="icon-btn" id="t-sound" type="button" aria-label="声音开关">${icon(G.meta.settings.muted ? 'i-mute' : 'i-sound')}<span>${G.meta.settings.muted ? '静音' : '声音'}</span></button></div>
+    <div class="corner-tr"><button class="icon-btn" id="t-mp" type="button">${icon('i-team')}<span>联机</span></button><button class="icon-btn" id="t-sound" type="button" aria-label="声音开关">${icon(G.meta.settings.muted ? 'i-mute' : 'i-sound')}<span>${G.meta.settings.muted ? '静音' : '声音'}</span></button></div>
     <div class="title-block">
       <h1 class="title-main">梦<em>潮</em></h1>
       <p class="title-sub">回声航线</p>
@@ -135,7 +135,8 @@ function showTitle() {
       <p class="title-start">点击任意处开始</p>
     </div>
     <p class="title-foot">键鼠 · 手柄 &nbsp;|&nbsp; 进度自动保存在本机</p>`, { bg: 'title', label: '标题' });
-  el.addEventListener('click', (e) => { if (e.target.closest('#t-sound')) return; startFromTitle(); });
+  el.addEventListener('click', (e) => { if (e.target.closest('#t-sound') || e.target.closest('#t-mp')) return; startFromTitle(); });
+  $('#t-mp', el).addEventListener('click', () => { Sound.init(); Sound.sfx('select'); G.meta.seenTitle = true; persist(); showMultiplayer(showHub); }); // 朋友第一次打开也能直接进联机，不用先打完单人教学
   $('#t-sound', el).addEventListener('click', () => {
     Sound.init(); G.meta.settings.muted = !G.meta.settings.muted; applySettings(); persist();
     $('#t-sound', el).innerHTML = `${icon(G.meta.settings.muted ? 'i-mute' : 'i-sound')}<span>${G.meta.settings.muted ? '静音' : '声音'}</span>`;
@@ -246,7 +247,10 @@ function mpProfile() {
   const m = G.meta, id = m.current;
   return { name: (m.nick || '').trim() || '玩家', plane: id, prof: { s: compactStats(planeStats(m, id)), u: ultCapNow(), c: { exp: m.cosmetics.exp, trail: m.cosmetics.trail } } };
 }
-function showMultiplayer(back) {
+/* 邀请链接：?join=房间号，打开后直接进那个房间 */
+function inviteCode() { try { const c = new URLSearchParams(location.search).get('join'); return c && /^[A-Z0-9]{3,8}$/i.test(c) ? c.toUpperCase() : null; } catch (e) { return null; } }
+function inviteLink(code) { return `${location.origin}${location.pathname}?join=${code}`; }
+function showMultiplayer(back, joinCode) {
   const m = G.meta; if (!m.nick) m.nick = '玩家' + Math.floor(100 + Math.random() * 900);
   hideHud(); G.world = null; Input.gameActive = false; stopPreview();
   const leaveAndBack = () => { Lobby.leave(); Lobby.onUpdate = null; back(); };
@@ -291,15 +295,32 @@ function showMultiplayer(back) {
         <div class="row wrap"><span class="label">网络缓冲</span><div class="seg" role="group">${dOpts.map(([v, t]) => `<button type="button" data-md="${v}" class="${v === dNow ? 'on' : ''}">${t}</button>`).join('')}</div><span class="dim-text">卡顿就调长，操作会晚一点生效</span></div>
         <div class="row wrap"><button class="btn primary big" id="mp-start" type="button" ${n >= 2 ? '' : 'disabled'}>${icon('i-hangar')} 开始 · ${stage} ${STAGES[stage].name}</button>${n < 2 ? '<span class="dim-text">至少 2 人才能开始</span>' : ''}</div>`
         : `<p class="dim-text">${room && room.started ? '这一局已经开始了，等下一局。' : '等房主选关开始…'}</p>`}
+      ${host && /^https?:$/.test(location.protocol) ? `<div class="row wrap"><span class="label">邀请链接</span><input class="mp-link" id="mp-link" readonly value="${esc(inviteLink(Lobby.code))}"><button class="btn small cyan" id="mp-copy" type="button">复制</button></div>` : ''}
       <div class="row"><button class="btn coral small" id="mp-leave" type="button">离开房间</button></div>`;
     paintPlaneCanvases(body);
     $('#mp-leave', body).onclick = () => { Sound.sfx('uiBack'); Lobby.leave(); sig = ''; paint(); };
+    const cp = $('#mp-copy', body), li = $('#mp-link', body);
+    if (li) li.addEventListener('keydown', (e) => e.stopPropagation());
+    if (cp) cp.onclick = () => { const done = () => { Sound.sfx('ui'); toast('邀请链接已复制，发给朋友就行', '#9ff2c8'); }; try { navigator.clipboard.writeText(li.value).then(done, () => { li.select(); toast('按 Ctrl+C 复制', '#ffe38a'); }); } catch (e) { li.select(); toast('按 Ctrl+C 复制', '#ffe38a'); } };
     $$('[data-mst]', body).forEach((b) => b.onclick = () => { if (!stageUnlocked(b.dataset.mst)) { Sound.sfx('denied'); toast('你还没解锁这一关', '#ffb2a8'); return; } Sound.sfx('ui'); stage = G.mpStage = b.dataset.mst; Lobby.me({ stage }); paint(); });
     $$('[data-md]', body).forEach((b) => b.onclick = () => { Sound.sfx('ui'); delay = +b.dataset.md; paint(); });
     const sb = $('#mp-start', body); if (sb) sb.onclick = () => { if (!Lobby.start(stage, dNow)) { Sound.sfx('denied'); return; } Sound.sfx('select'); };
   };
   Lobby.onStart = (st) => { if (G.mpRun) return false; startMpRun(st); return true; };
-  Lobby.connect().then(() => { if (Lobby.code) Lobby.me(mpProfile()); Lobby.onUpdate = paint; paint(); }).catch(() => { $('#mp-body', el).innerHTML = '<p class="dim-text">连接失败，请刷新页面重试。</p>'; });
+  Lobby.connect().then(() => {
+    if (Lobby.code) Lobby.me(mpProfile()); Lobby.onUpdate = paint; paint();
+    if (joinCode && !Lobby.code) { // 从邀请链接进来：房间出现就自动加入，最多等 8 秒
+      const t0 = performance.now(); $('#mp-net', el).textContent = `正在进入房间 ${joinCode}…`;
+      const tryJoin = () => {
+        if (Lobby.code || G.screen !== 'mp') return;
+        const r = Lobby.openRooms().find((x) => x.code === joinCode);
+        if (r && !r.started && r.members.length < MP_MAX) { Lobby.join(joinCode, mpProfile()); sig = ''; paint(); return; }
+        if (performance.now() - t0 > 8000) { toast(r ? (r.started ? '这个房间已经开局了' : '这个房间满了') : `房间 ${joinCode} 不在了`, '#ffb2a8'); return; }
+        setTimeout(tryJoin, 300);
+      };
+      tryJoin();
+    }
+  }).catch(() => { $('#mp-body', el).innerHTML = '<p class="dim-text">连接失败，请刷新页面重试。</p>'; });
 }
 function startMpRun(st) {
   const idx = Lobby.beginSession(st); if (idx < 0) return false;
