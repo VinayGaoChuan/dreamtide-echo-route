@@ -418,6 +418,23 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 @media (max-height:600px){.stat-pill{padding:.25em .6em;min-width:0}.center-col{gap:8px}.build-list .row .dim-text{display:none}.build-list .row{display:inline-flex;margin-right:4px}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001s!important;animation-iteration-count:1!important;transition-duration:.001s!important}}
 
+
+/* 机制 / 技能：图标 + 名字（+ 等级、箭头），下一行一句话；箭头绿 ▲ 加强、红 ▼ 削弱 */
+.fxs{display:inline-flex;flex-wrap:wrap;gap:4px 10px;vertical-align:middle}
+.fx{display:inline-flex;align-items:center;gap:2px;font-size:.92em;font-weight:700;color:var(--text);white-space:nowrap}
+.fx i{font-style:normal;font-size:.8em;letter-spacing:-1px}
+.fx.up i{color:#6fe39a}
+.fx.down i{color:#ff7a6b}
+.abil{display:flex;gap:10px;align-items:flex-start;padding:4px 0}
+.abil .aic{display:inline-flex;gap:2px;flex:none}
+.abil .aic .ic{width:max(22px,calc(28px*var(--u)));height:max(22px,calc(28px*var(--u)))}
+.abil .abody{display:flex;flex-direction:column;gap:2px;min-width:0}
+.abil .an{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.abil .an b{font-family:var(--f-display);font-weight:400;font-size:var(--fs-m)}
+.abil .an small{color:#ffe38a;font-weight:700}
+.abil .atag{font-size:var(--fs-xs);color:var(--dim);border:1px solid var(--edge);border-radius:999px;padding:0 .6em}
+.abil .al{font-size:var(--fs-s);color:var(--text);opacity:.85}
+.lure-path .chip .ic{width:1.1em;height:1.1em;margin-right:2px}
 /* 联机 */
 .mp-wrap{display:grid;grid-template-columns:minmax(max(240px,calc(300px*var(--u))),1fr) 2fr;gap:calc(14px*var(--u));align-items:start}
 .mp-me .row canvas{width:max(48px,calc(64px*var(--u)));height:auto}

@@ -116,12 +116,13 @@ Object.assign(World.prototype, {
     if (c.kind === 'bmod' && c.to < 2) { c.to = 2; return c; }
     c.bonus = (c.bonus || 0) + 0.35; return c;
   },
+  /* 卡片信息：名字 + 等级、一句话（不写数值）、一排箭头；附带的大招能量也只是一个箭头 */
   optInfo(o) {
-    const extra = o.bonus ? ` · 附带大招能量 +${Math.round(o.bonus * 100)}%` : '';
-    if (o.kind === 'gun' || o.kind === 'support') { const S = SKILLS[o.id]; return { name: S.name, lv: o.from ? `Lv${o.from}→${o.to}` : `Lv${o.to}`, desc: S.lv[o.to - 1] + extra, icon: S.canvas, color: S.color, tag: o.kind === 'gun' ? '主炮' : '支援', why: o.why || null, replace: o.replace ? `替换 ${SKILLS[o.replace.id].name} Lv${o.replace.lv}` : null }; }
-    if (o.kind === 'bmod') { const B = BURST_MODS[o.id]; return { name: B.name, lv: o.from ? 'Lv1→2' : `Lv${o.to}`, desc: B.lv[o.to - 1] + extra, icon: 'charge', color: B.color, tag: '大招', replace: o.replace ? `替换 ${BURST_MODS[o.replace.id].name}` : null }; }
-    if (o.kind === 'link') { const L = SYNERGIES[o.id]; return { name: L.name, lv: '联动', desc: L.desc + extra, icon: 'star', color: '#ffd76a', tag: '联动', replace: null }; }
-    return o.id === 'charge' ? { name: '大招能量', lv: '', desc: '大招充能 +50%', icon: 'charge', color: '#ffd76a', tag: '资源' } : { name: '恢复', lv: '', desc: '生命 +1', icon: 'heart', color: '#6fe39a', tag: '资源' };
+    const bonus = o.bonus ? [['充能', o.bonus >= 0.6 ? 2 : 1]] : [];
+    if (o.kind === 'gun' || o.kind === 'support') { const S = SKILLS[o.id]; return { name: S.name, lv: o.from ? `Lv${o.from}→${o.to}` : `Lv${o.to}`, desc: S.lv[o.to - 1], fx: [...fxOf(o.kind, o.id, o.to), ...bonus], icon: S.canvas, color: S.color, tag: o.kind === 'gun' ? '主炮' : '支援', why: o.why || null, replace: o.replace ? `换掉 ${SKILLS[o.replace.id].name}` : null }; }
+    if (o.kind === 'bmod') { const B = BURST_MODS[o.id]; return { name: B.name, lv: o.from ? 'Lv1→2' : `Lv${o.to}`, desc: B.lv[o.to - 1], fx: [...fxOf('bmod', o.id, o.to), ...bonus], icon: 'charge', color: B.color, tag: '大招', replace: o.replace ? `换掉 ${BURST_MODS[o.replace.id].name}` : null }; }
+    if (o.kind === 'link') { const L = SYNERGIES[o.id]; return { name: L.name, lv: '联动', desc: L.desc, fx: [...fxOf('link', o.id), ...bonus], icon: 'star', color: '#ffd76a', tag: '联动', replace: null }; }
+    return o.id === 'charge' ? { name: '大招能量', lv: '', desc: '大招马上充一截', fx: [['充能', 2]], icon: 'charge', color: '#ffd76a', tag: '资源' } : { name: '恢复', lv: '', desc: '回一颗心', fx: [['生命', 1]], icon: 'heart', color: '#6fe39a', tag: '资源' };
   },
 
   /* ---------- 仪式流程 ---------- */
@@ -339,7 +340,7 @@ Object.assign(World.prototype, {
     if (R.st === 'choose' && p.alive) {
       if (R.first) R.gates.forEach((G, i) => { if (G.near < 0.5) drawPointer(g, p.x, p.y, G.x, G.y, G.info.color, t + i); });
       g.save(); g.globalAlpha = 0.6 + Math.sin(t * 6) * 0.15; g.strokeStyle = '#dff2ff'; g.lineWidth = 2.5; g.setLineDash([5, 6]); g.beginPath(); g.arc(p.x, p.y, 38, 0, TAU); g.stroke(); g.setLineDash([]); g.restore();
-      if (!R.first) drawStepPill(g, this.W / 2, this.arena.bottom - 18, '飞进一个方案的圆圈 · 战场慢放中，不会受伤', '#dff2ff', 1); // 固定在底部，不跟着飞机压住卡片
+      if (!R.first) drawStepPill(g, this.W / 2, this.arena.bottom - 18, this.mp ? '飞进一个方案的圆圈 · 选的时候不会受伤' : '飞进一个方案的圆圈 · 战场慢放中，不会受伤', '#dff2ff', 1); // 固定在底部，不跟着飞机压住卡片
     } else if (R.st !== 'resume' && p.alive) { // 稳住期间：清楚的护盾
       g.save(); g.strokeStyle = 'rgba(223,242,255,0.85)'; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, 36, 0, TAU); g.stroke(); glowAt(g, p.x, p.y, 60, 'rgba(200,235,255,0.6)', 0.4); g.restore();
     } else if (R.st === 'resume' && p.alive) { const a = 1 - R.t / T.resume; g.save(); g.globalAlpha = a; g.strokeStyle = '#dff2ff'; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, 36 + (1 - a) * 20, 0, TAU); g.stroke(); g.restore(); }
@@ -349,25 +350,25 @@ Object.assign(World.prototype, {
   /* 候选卡：确认圈在卡片外侧（朝飞机那一边），圈里只放图标；卡片按 标签 / 名称 / 效果 / 和当前 Build 的关系 分行 */
   drawGate(g, G, R, i) {
     const I = G.info, t = this.t, qc = QUALITY[R.qNow].color, side = G.side || 1, s = 1 + G.near * 0.06;
-    const w = 262, h = I.why ? 186 : 168, cx = G.x + side * (GATE_R + 12 + w / 2), cy = G.y;
+    const note = I.replace || I.link || '', w = 250, h = 128 + (note ? 22 : 0), cx = G.x + side * (GATE_R + 12 + w / 2), cy = G.y;
     g.save(); g.globalAlpha = G.alpha;
     glowAt(g, G.x, G.y, 110, hexA(I.color, 0.7), 0.3 + G.near * 0.3);
     // 卡片
     g.save(); g.translate(cx, cy); g.scale(s, s);
     g.fillStyle = 'rgba(24,19,64,0.97)'; g.strokeStyle = R.qNow ? qc : I.color; g.lineWidth = 3 + R.qNow;
     g.beginPath(); g.roundRect ? g.roundRect(-w / 2, -h / 2, w, h, 16) : g.rect(-w / 2, -h / 2, w, h); g.fill(); g.stroke();
+    // 第一行：标签 + 品质 / 目标流派；第二行：图标 + 名字 + 等级；第三行：一句话；第四行：箭头；最后（有的话）：替换 / 能凑联动
     const L = -w / 2 + 14; g.textAlign = 'left';
     g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = I.color; g.fillText(I.tag, L, -h / 2 + 22);
-    const chip = I.target ? `目标流派 · ${I.target}` : R.qNow ? QUALITY[R.qNow].name : '';
+    const chip = I.target ? '★ 目标流派' : R.qNow ? QUALITY[R.qNow].name : '';
     if (chip) { g.textAlign = 'right'; g.fillStyle = I.target ? '#ffe38a' : qc; g.fillText(chip, w / 2 - 12, -h / 2 + 22); g.textAlign = 'left'; }
-    g.font = mapFont(21); g.fillStyle = '#fff6ee'; g.fillText(`${I.name} ${I.lv}`, L, -h / 2 + 50);
-    let y0 = -h / 2 + 74;
-    if (I.why) { g.font = '700 13px "Noto Sans SC", sans-serif'; g.fillStyle = '#ffe38a'; g.fillText(`用途：${I.why}`, L, y0); y0 += 20; } // 战术用途单独一行，不和标签挤
-    g.font = '500 13px "Noto Sans SC", sans-serif'; g.fillStyle = 'rgba(230,222,255,0.92)';
-    const desc = wrapText(I.desc, 17).slice(0, 2); desc.forEach((ln, k) => g.fillText(ln, L, y0 + k * 17));
-    let y = y0 + desc.length * 17 + 6;
-    if (I.fit) { g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = '#9ff2c8'; wrapText(I.fit, 19).slice(0, 2).forEach((ln, k) => g.fillText(ln, L, y + k * 16)); y += 34; }
-    if (I.replace) { g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = '#ffb2a8'; g.fillText(I.replace, L, Math.min(y, h / 2 - 10)); }
+    drawIcon(g, I.icon, L + 12, -h / 2 + 44, 24, I.color);
+    g.font = mapFont(21); g.fillStyle = '#fff6ee'; g.fillText(I.name, L + 30, -h / 2 + 52);
+    const nw = g.measureText(I.name).width; g.font = '700 14px "Noto Sans SC", sans-serif'; g.fillStyle = '#ffe38a'; g.fillText(I.lv, L + 38 + nw, -h / 2 + 51);
+    g.font = '500 14px "Noto Sans SC", sans-serif'; if (g.measureText(I.desc).width > w - 28) g.font = '500 12px "Noto Sans SC", sans-serif';
+    g.fillStyle = 'rgba(236,230,255,0.95)'; g.fillText(I.desc, L, -h / 2 + 80);
+    drawFx(g, I.fx, L, -h / 2 + 106, 14);
+    if (note) { g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = I.replace ? '#ffb2a8' : '#ffd76a'; g.fillText(note, L, -h / 2 + 132); }
     g.restore();
     // 确认圈（卡片外）
     g.save(); g.translate(G.x, G.y); g.scale(s, s);
@@ -379,21 +380,19 @@ Object.assign(World.prototype, {
     g.restore();
     g.restore();
   },
-  /* 这张卡和当前 Build 的关系：会和已有能力怎么配合 / 是不是目标流派的一环；联动没凑齐时写清还缺什么 */
+  /* 这张卡和当前 Build 的关系，只用一个标记表达：★ 目标流派 / 能和已有的谁凑联动 / 对付厚甲的箭头 */
   fitNote(o) {
     const b = this.buildSummary(), P = buildPlan(b, this.targetName), own = (id) => buildOwned(b, id);
     const hasAim = !!this.targetName || P.have.length > 0; // 第一次选择前还没有方向，不硬塞一个“目标流派”
     const target = hasAim && (o.kind === 'link' ? o.id === P.link : P.comps.includes(o.id) && !own(o.id)) ? P.name : null;
-    let fit = '';
-    if (o.kind === 'link') fit = '两样都已经有了：选它就激活联动';
-    else if (o.kind === 'gun' || o.kind === 'support') {
+    let link = '';
+    if (o.kind === 'gun' || o.kind === 'support') {
       const others = [...GUN_ORDER.filter((id) => id !== o.id && own(id)), ...(this.support && this.support.id !== o.id && !(o.replace && o.replace.id === this.support.id) ? [this.support.id] : [])];
-      for (const x of others) { const k = synKey(o.id, x); if (SYNERGIES[k] && !this.links.has(k)) { fit = `和已有的${SKILLS[x].name}能凑成「${SYNERGIES[k].name}」：拿到后联动会出现在之后的升级里`; break; } }
-      if (!fit) for (const x of others) { const n = GUN_PAIR[o.id + '|' + x] || GUN_PAIR[x + '|' + o.id]; if (n) { fit = `配合已有的${SKILLS[x].name}：${n}`; break; } }
-      if (!fit && this.goal && (this.goal.kind === 'armor1' || this.goal.kind === 'pack')) fit = ARMOR_FIT[o.id] || '';
-      if (!fit && o.from > 0) fit = '已经在用：直接升一级';
+      for (const x of others) { const k = synKey(o.id, x); if (SYNERGIES[k] && !this.links.has(k)) { link = `★ 能和${SKILLS[x].name}凑联动`; break; } }
     }
-    return { fit, target };
+    const armor = (o.kind === 'gun') && this.goal && (this.goal.kind === 'armor1' || this.goal.kind === 'pack') && ARMOR_FIT[o.id] ? [['敲甲', o.id === 'bomb' || o.id === 'multi' ? 2 : 1]] : [];
+    const I = this.optInfo(o);
+    return { target, link, fx: [...(I.fx || []), ...armor].slice(0, 3) };
   },
   /* 中央展示：大图标 + 名字 + 等级变化 + 一小段演示；0.8~1.2 秒 */
   drawCentral(g, R) {
@@ -410,12 +409,25 @@ Object.assign(World.prototype, {
     g.font = '700 16px "Noto Sans SC", sans-serif'; g.fillStyle = I.color; g.fillText(`${R.word} · ${I.tag}`, -w / 2 + 150, -h / 2 + 40);
     g.font = mapFont(34); g.fillStyle = '#fff6ee'; g.fillText(I.name, -w / 2 + 150, -h / 2 + 80);
     g.font = mapFont(22); g.fillStyle = '#ffe38a'; g.fillText(I.lv, -w / 2 + 150, -h / 2 + 112);
-    g.font = '500 14px "Noto Sans SC", sans-serif'; g.fillStyle = 'rgba(230,222,255,0.95)';
-    wrapText(I.desc, 18).slice(0, 2).forEach((ln, k) => g.fillText(ln, -w / 2 + 150, -h / 2 + 138 + k * 18));
+    g.font = '500 15px "Noto Sans SC", sans-serif'; g.fillStyle = 'rgba(236,230,255,0.96)'; g.fillText(I.desc, -w / 2 + 150, -h / 2 + 142);
+    drawFx(g, I.fx, -w / 2 + 150, -h / 2 + 170, 15);
     drawDemo(g, o, R.t, w / 2 - 120, -h / 2 + 22, 100, 64, I.color);
     g.restore();
   },
 });
+/* 箭头行（画布版）：词 + 绿色 ▲ / 红色 ▼，箭头画成小三角，越多变化越大 */
+function drawFx(g, fx, x, y, size = 14) {
+  if (!fx || !fx.length) return x;
+  g.save(); g.textAlign = 'left'; g.font = `700 ${size}px "Noto Sans SC", sans-serif`;
+  const a = size * 0.36;
+  for (const [w, n] of fx) {
+    g.fillStyle = 'rgba(236,230,255,0.92)'; g.fillText(w, x, y); x += g.measureText(w).width + 4;
+    const up = n > 0, k = clamp(Math.abs(Math.round(n)), 1, 3); g.fillStyle = up ? FX_UP : FX_DOWN;
+    for (let i = 0; i < k; i++) { const cx = x + a, cy = y - size * 0.36; g.beginPath(); if (up) { g.moveTo(cx, cy - a); g.lineTo(cx + a, cy + a * 0.8); g.lineTo(cx - a, cy + a * 0.8); } else { g.moveTo(cx, cy + a); g.lineTo(cx + a, cy - a * 0.8); g.lineTo(cx - a, cy - a * 0.8); } g.closePath(); g.fill(); x += a * 2 + 2; }
+    x += 12;
+  }
+  g.restore(); return x;
+}
 /* 中文按字数折行 */
 function wrapText(str, n) { const out = []; for (let i = 0; i < str.length; i += n) out.push(str.slice(i, i + n)); return out; }
 

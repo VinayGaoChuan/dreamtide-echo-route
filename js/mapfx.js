@@ -205,7 +205,7 @@ Object.assign(World.prototype, {
     this.traces.crack = { x: W.x, y: W.y, side: W.side, born: this.t };
     for (let i = 0; i < 24; i++) this.dropPickup('dust', W.x + srand(-40, 40), W.y - W.side * 30, { value: 1, vx: srand(-300, 100), vy: -W.side * srand(60, 300) });
     this.later(0.35, () => { for (const k of this.pickups) if (k.kind === 'dust') k.attract = true; });
-    this.addCharge(0.5, true); this.text('大招能量 +50%', this.player.x, this.player.y - 56, '#ffd76a', 18, 5); // 纯资源直接吸收
+    this.addCharge(0.5, true); this.text('大招充能 ▲▲', this.player.x, this.player.y - 56, '#ffd76a', 18, 5); // 纯资源直接吸收
     this.queueRitual('mine', { x: W.x - 40, y: W.y - W.side * 150, device: 'machine', obj: o });
     this.remember('炸开了星砂岩壁', 1);
     this.mapDone(o, '炸开', MAP_OBJECTS.mine.name, '强化二选一', '岩壁炸出新航道和动力装置；之后敌人会从裂口钻出来');
@@ -316,7 +316,7 @@ Object.assign(World.prototype, {
     if (this.mapHintKind) { this.mapHintKind = null; this.emit('maphint', { kind: null }); }
     for (const b of this.orbs) if (!b.done) { b.done = true; b.apply(); }
     this.orbs = [];
-    this.text('Boss 入口 · 库存为 0 的大招补到 1 次', p.x, p.y - 60, '#ffd76a', 20, 5); // 补库存在 startBoss 里按每架飞机做
+    this.text('Boss 来了 · 没有大招的补上一次', p.x, p.y - 60, '#ffd76a', 20, 5); // 补库存在 startBoss 里按每架飞机做
     if (this.companions.length) this.later(1.2, () => { for (const c of this.companions) this.fx(c.x, c.y, 2, 50, [NPCS[c.id].color, '#ffffff']); this.text('伙伴助力！', p.x, p.y + 60, '#ff9fcf', 18, 4); for (const q of this.players) q.res.dust += 10 * this.companions.length; });
   },
   onCompanionBossPhase() {

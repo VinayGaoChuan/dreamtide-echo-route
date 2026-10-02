@@ -14,45 +14,45 @@ const RARITY = {
 const PLANES = {
   moon: {
     id: 'moon', name: '月兔号', rarity: 'N', look: '白色月灯兔', hearts: 5, speed: 1, rate: 8, dmg: 10, shot: '月牙弹',
-    burst: { name: '月轮清屏', desc: '放出巨型月轮，穿过敌人后分裂成六枚小月轮四处弹射。' },
-    passive: { name: '月光回收', desc: '月轮命中敌人后回收星砂。' },
-    star3: '月轮分裂数量翻倍',
+    burst: { name: '月轮清屏', desc: '巨型月轮穿过敌人，再分裂成小月轮四处弹' },
+    passive: { name: '月光回收', desc: '月轮打中敌人会带回星砂' },
+    star3: '月轮分裂更多',
     colors: { body: '#fff6ee', accent: '#ffd76a', exp: ['#fff3c8', '#c9a8ff', '#ffffff'] },
   },
   cloud: {
     id: 'cloud', name: '云朵号', rarity: 'N', look: '白云和小翅膀', hearts: 6, speed: 0.95, rate: 8, dmg: 10, shot: '软云团（轻微击退）',
-    burst: { name: '云海冲撞', desc: '裹进一整片云海横冲过屏幕，沿途敌人和子弹全部碾碎。' },
-    passive: { name: '缓冲云层', desc: '被攻击后生成一层缓冲云，挡下下一次伤害（12 秒冷却）。' },
+    burst: { name: '云海冲撞', desc: '裹着云海横冲屏幕，碾碎沿途敌人和子弹' },
+    passive: { name: '缓冲云层', desc: '挨打后长出一层云，挡下下一下' },
     star3: '冲撞结束后留下一面云墙挡子弹',
     colors: { body: '#ffffff', accent: '#aee9ff', exp: ['#ffffff', '#aee9ff', '#dcd0ff'] },
   },
   candy: {
     id: 'candy', name: '糖果号', rarity: 'R', look: '粉蓝糖果飞机', hearts: 5, speed: 1, rate: 8, dmg: 10, shot: '糖果弹',
-    burst: { name: '彩虹糖雨', desc: '彩虹糖雨落满屏幕，被砸中的小怪直接变成糖果。' },
-    passive: { name: '糖果掉落', desc: '击杀有概率掉落糖果强化：射速 +50%，持续 5 秒。' },
-    star3: '糖雨持续时间延长一半',
+    burst: { name: '彩虹糖雨', desc: '糖雨落满屏幕，砸中的小怪变成糖果' },
+    passive: { name: '糖果掉落', desc: '击杀有机会掉糖果，吃到射速变快' },
+    star3: '糖雨下得更久',
     colors: { body: '#ff9fcf', accent: '#9fe3f0', exp: ['#ff9fcf', '#9fe3f0', '#fff3c8'] },
   },
   paper: {
     id: 'paper', name: '纸飞机号', rarity: 'R', look: '奶油纸张质感', hearts: 4, speed: 1.1, rate: 8, dmg: 10, shot: '纸镖',
-    burst: { name: '五重分身', desc: '生成五架纸飞机分身，自动锁敌齐射 6 秒。' },
-    passive: { name: '折纸编队', desc: '每拾取一次强化，多一架临时分身（最多 3 架，10 秒）。' },
-    star3: '分身增加到七架',
+    burst: { name: '五重分身', desc: '变出一队纸飞机分身，自动锁敌齐射' },
+    passive: { name: '折纸编队', desc: '每次升级多一架临时分身' },
+    star3: '分身更多',
     colors: { body: '#fff4dc', accent: '#ffcf8a', exp: ['#fff4dc', '#ffcf8a', '#c9a8ff'] },
   },
   whale: {
     id: 'whale', name: '星鲸号', rarity: 'SR', look: '深蓝小鲸鱼', hearts: 6, speed: 0.95, rate: 8, dmg: 10, shot: '泡泡弹',
-    burst: { name: '星砂海啸', desc: '先把屏幕里的敌人和子弹吸进来，再吐出一道星砂海啸。' },
-    passive: { name: '越多越大', desc: '屏幕上敌人越多，海啸范围越大。' },
+    burst: { name: '星砂海啸', desc: '先吸进敌人和子弹，再吐出星砂海啸' },
+    passive: { name: '越多越大', desc: '敌人越多，海啸越大' },
     star3: '海啸之后再追加一道小浪',
     colors: { body: '#4f63d6', accent: '#ffe38a', exp: ['#6ff0ff', '#ffe38a', '#8f9dff'] },
   },
   clock: {
     id: 'clock', name: '闹钟号', rarity: 'SSR', look: '金色圆闹钟', hearts: 5, speed: 1, rate: 8, dmg: 10, shot: '指针弹',
-    burst: { name: '时间暂停', desc: '时间暂停 2 秒，所有敌人被标记，时间恢复时一起爆开。' },
-    passive: { name: '准点充能', desc: 'Boss 切换阶段时自动充能一半大招。' },
-    star3: '暂停时间延长到 3 秒',
-    special: '专属 Boss 互动：暂停期间失控闹钟的指针也会停下，核心完全暴露。',
+    burst: { name: '时间暂停', desc: '时间暂停，恢复时被标记的敌人一起爆开' },
+    passive: { name: '准点充能', desc: 'Boss 换阶段时大招自动充一截' },
+    star3: '暂停更久',
+    special: '暂停时失控闹钟的指针也会停下',
     colors: { body: '#ffd76a', accent: '#fff3c8', exp: ['#ffd76a', '#fff3c8', '#ff9a6b'] },
   },
 };
@@ -65,23 +65,23 @@ const PLANE_ORDER = ['moon', 'cloud', 'candy', 'paper', 'whale', 'clock'];
    开局子弹固定向前、单发、命中即消失；这些能力只能在局内二选一获得，新一局清空。 */
 const SKILLS = {
   pierce: { id: 'pierce', slot: 'gun', name: '穿透', stream: '贯穿', icon: 's-pierce', canvas: 'pierce', color: '#ffe38a', glow: 'rgba(255,227,138,0.9)', max: 3,
-    lv: ['同一颗子弹最多命中 2 个不同敌人', '最多命中 3 个', '最多命中 4 个'], look: '弹头拉长，贯穿后留下短光轨' },
+    lv: ['子弹穿过敌人继续飞', '穿得更多', '一颗子弹扫一整排'], fx: [[['穿透', 1]], [['穿透', 2]], [['穿透', 3]]], look: '弹头拉长，贯穿后留下短光轨' },
   homing: { id: 'homing', slot: 'gun', name: '追踪', stream: '追踪', icon: 's-homing', canvas: 'homing', color: '#6ff0ff', glow: 'rgba(111,240,255,0.9)', max: 3,
-    lv: ['子弹缓慢转向前方目标', '转得更快、找得更宽', '目标死了会重新找前方敌人'], look: '子弹尾迹弯曲，转向清楚可见' },
+    lv: ['子弹自己拐弯找敌人', '拐得更快、找得更远', '目标没了自动换下一个'], fx: [[['追踪', 1]], [['追踪', 2]], [['追踪', 3]]], look: '子弹尾迹弯曲，转向清楚可见' },
   multi: { id: 'multi', slot: 'gun', name: '多重', stream: '散射', icon: 's-multi', canvas: 'multi', color: '#ffb347', glow: 'rgba(255,179,71,0.9)', max: 3,
-    lv: ['主炮变成 2 路', '主炮 3 路', '主炮 4 路'], look: '炮口分出几道并排弹' },
+    lv: ['主炮一次打出好几路', '路数更多', '火力铺满前方'], fx: [[['弹道', 1]], [['弹道', 2]], [['弹道', 3]]], look: '炮口分出几道并排弹' },
   bomb: { id: 'bomb', slot: 'gun', name: '爆破', stream: '爆破', icon: 's-bomb', canvas: 'bomb', color: '#ff9a6b', glow: 'rgba(255,154,107,0.9)', max: 3,
-    lv: ['命中会标记敌人，被标记的敌人死亡时爆炸', '爆炸更大，并把周围敌人一起标记', '每颗子弹最后一次命中时都会爆开'], look: '命中处留下橙色准星' },
+    lv: ['打过的敌人死时会爆炸', '炸得更大，还会连着标记', '每颗子弹最后都会炸开'], fx: [[['爆炸', 1]], [['爆炸', 2], ['范围', 1]], [['爆炸', 3], ['范围', 1]]], look: '命中处留下橙色准星' },
   thunder: { id: 'thunder', slot: 'support', name: '雷球', stream: '雷暴', icon: 's-thunder', canvas: 'bolt', color: '#8fd3ff', glow: 'rgba(143,211,255,0.9)', max: 3,
-    lv: ['定时放出追踪雷球，命中后跳电', '双雷球，被电到的小怪麻痹', '雷暴核心：巨型雷球环绕你持续放电'] },
+    lv: ['雷球追着敌人放电', '雷球更多，电到的会麻痹', '巨型雷球绕着你放电'], fx: [[['雷电', 1]], [['雷电', 2], ['控制', 1]], [['雷电', 3], ['控制', 1]]] },
   wing: { id: 'wing', slot: 'support', name: '分身', stream: '蜂群', icon: 's-wing', canvas: 'wing', color: '#fff3c8', glow: 'rgba(255,243,200,0.9)', max: 3,
-    lv: ['1 架纸飞机分身，继承主炮改造', '2 架分身', '3 架金色分身，射速更快'] },
+    lv: ['纸飞机分身陪你一起打', '分身更多', '金色分身，打得更快'], fx: [[['分身', 1]], [['分身', 2]], [['分身', 3], ['射速', 1]]] },
   rainbow: { id: 'rainbow', slot: 'support', name: '彩虹光束', stream: '彩虹', icon: 's-rainbow', canvas: 'rainbow', color: '#ff9fcf', glow: 'rgba(255,159,207,0.9)', max: 3,
-    lv: ['定期扫出一道彩虹光束', '光束更宽，击败的敌人掉糖果强化', '双彩虹交叉扫射'] },
+    lv: ['彩虹光束定时扫过前方', '光束更宽，打倒的会掉糖果', '两道彩虹交叉扫'], fx: [[['光束', 1]], [['光束', 2], ['范围', 1]], [['光束', 3], ['范围', 2]]] },
   ice: { id: 'ice', slot: 'support', name: '冰晶', stream: '冰晶', icon: 's-ice', canvas: 'snow', color: '#bff4ff', glow: 'rgba(191,244,255,0.9)', max: 3,
-    lv: ['扇形冰晶，命中可能冻结', '必定冻结，冻住的敌人碎裂伤害周围', '暴风雪：定期冻结身边所有敌人'] },
+    lv: ['冰晶有机会冻住敌人', '一定冻住，碎冰伤到旁边', '暴风雪冻住身边所有敌人'], fx: [[['冻结', 1]], [['冻结', 2], ['伤害', 1]], [['冻结', 3], ['范围', 2]]] },
   magnet: { id: 'magnet', slot: 'support', name: '磁吸星砂', stream: '吸星', icon: 's-magnet', canvas: 'magnet', color: '#c9a8ff', glow: 'rgba(201,168,255,0.9)', max: 3,
-    lv: ['吸附变大，每吸一颗星砂射出一枚星弹', '每 6 秒一次磁暴，吸来全屏掉落物', '星砂海啸：定期掀起一道星尘浪'] },
+    lv: ['吸得更远，吸到星砂就射出星弹', '定时磁暴，吸来全屏掉落', '定时掀起星砂浪'], fx: [[['吸附', 1], ['星弹', 1]], [['吸附', 2], ['星弹', 1]], [['吸附', 2], ['星弹', 2]]] },
 };
 const GUN_ORDER = ['pierce', 'homing', 'multi', 'bomb'];
 const SUPPORT_ORDER = ['thunder', 'wing', 'rainbow', 'ice', 'magnet'];
@@ -92,23 +92,40 @@ const synKey = (a, b) => [a, b].sort((x, y) => SKILL_ORDER.indexOf(x) - SKILL_OR
 const HOMING = { turn: [0, 90, 150, 210], cone: [0, 35, 50, 65] };
 
 const BURST_MODS = {
-  thunderB: { id: 'thunderB', name: '雷霆大招', icon: 's-thunder', color: '#8fd3ff', lv: ['大招时降下 8 道落雷', '落雷增加到 14 道'] },
-  iceB: { id: 'iceB', name: '冰封大招', icon: 's-ice', color: '#bff4ff', lv: ['大招冻结全场敌人 1.5 秒', '冻结 3 秒，冻住的敌人碎裂'] },
-  bombB: { id: 'bombB', name: '连爆大招', icon: 's-bomb', color: '#ff9a6b', lv: ['大招标记全场敌人，死亡即爆炸', '爆炸范围再大一半'] },
-  dustB: { id: 'dustB', name: '星砂回收', icon: 's-magnet', color: '#c9a8ff', lv: ['大招吸回全场星砂，返还 25% 充能', '返还 45% 充能'] },
+  thunderB: { id: 'thunderB', name: '雷霆大招', icon: 's-thunder', color: '#8fd3ff', lv: ['大招时降下落雷', '落雷更多'], fx: [[['落雷', 1]], [['落雷', 2]]] },
+  iceB: { id: 'iceB', name: '冰封大招', icon: 's-ice', color: '#bff4ff', lv: ['大招冻住全场敌人', '冻得更久，冻住的会碎'], fx: [[['冻结', 1]], [['冻结', 2], ['伤害', 1]]] },
+  bombB: { id: 'bombB', name: '连爆大招', icon: 's-bomb', color: '#ff9a6b', lv: ['大招让全场敌人死时爆炸', '炸得更大'], fx: [[['爆炸', 1]], [['爆炸', 1], ['范围', 2]]] },
+  dustB: { id: 'dustB', name: '星砂回收', icon: 's-magnet', color: '#c9a8ff', lv: ['大招吸回星砂，返还充能', '返还更多充能'], fx: [[['充能', 1]], [['充能', 2]]] },
 };
 const BURST_MOD_ORDER = ['thunderB', 'iceB', 'bombB', 'dustB'];
 
 /* 联动：两个前置都拿到后才会出现在候选里（第三次选择保证至少一个能联动） */
 const SYNERGIES = {
-  'pierce+bomb': { name: '贯穿终点爆炸', desc: '穿透子弹用完最后一次命中时炸开一大团。', need: ['pierce', 'bomb'], stream: '贯穿爆破流' },
-  'homing+wing': { name: '蜂群同步开火', desc: '分身跟主炮同步开火，分身子弹追踪 +1 级。', need: ['homing', 'wing'], stream: '追踪蜂群流' },
-  'homing+thunder': { name: '追踪雷链', desc: '追踪弹命中时再向旁边的敌人放一道电。', need: ['homing', 'thunder'], stream: '追踪雷暴流' },
-  'multi+ice': { name: '散射冰晶', desc: '多重的侧翼子弹命中即冻结。', need: ['multi', 'ice'], stream: '散射冰晶流' },
-  'bomb+thunder': { name: '雷爆连锁', desc: '雷击会标记目标，标记爆炸再放电。', need: ['bomb', 'thunder'], stream: '雷爆流' },
-  'bomb+rainbow': { name: '彩虹烟火', desc: '标记爆炸变成彩色烟火，范围 +40%。', need: ['bomb', 'rainbow'], stream: '烟火流' },
-  'multi+magnet': { name: '星砂散射', desc: '吸到星砂时一次射出三枚星弹。', need: ['multi', 'magnet'], stream: '星砂散射流' },
+  'pierce+bomb': { name: '贯穿终点爆炸', desc: '穿透子弹最后一下炸开一大团', fx: [['爆炸', 2]], need: ['pierce', 'bomb'], stream: '贯穿爆破流' },
+  'homing+wing': { name: '蜂群同步开火', desc: '分身跟着主炮开火，子弹也会追踪', fx: [['分身', 1], ['追踪', 1]], need: ['homing', 'wing'], stream: '追踪蜂群流' },
+  'homing+thunder': { name: '追踪雷链', desc: '追踪弹打中时顺带放电', fx: [['雷电', 1], ['追踪', 1]], need: ['homing', 'thunder'], stream: '追踪雷暴流' },
+  'multi+ice': { name: '散射冰晶', desc: '侧翼子弹打中就冻住', fx: [['冻结', 2]], need: ['multi', 'ice'], stream: '散射冰晶流' },
+  'bomb+thunder': { name: '雷爆连锁', desc: '雷击会标记，爆炸再放电', fx: [['爆炸', 1], ['雷电', 1]], need: ['bomb', 'thunder'], stream: '雷爆流' },
+  'bomb+rainbow': { name: '彩虹烟火', desc: '爆炸变成彩色烟火', fx: [['范围', 2]], need: ['bomb', 'rainbow'], stream: '烟火流' },
+  'multi+magnet': { name: '星砂散射', desc: '吸到星砂时射出一把星弹', fx: [['星弹', 2]], need: ['multi', 'magnet'], stream: '星砂散射流' },
 };
+
+/* ================================================== 文字规范 ==================================================
+   机制 / 技能一律写成：图标 + 名字，换行一句话（不写数值），再配一排方向箭头。
+   箭头：[词, n]——n > 0 绿色 ▲×n（更强 / 更多 / 更快），n < 0 红色 ▼×|n|（变弱 / 变少 / 变慢）；1~3 个，越多变化越大。 */
+const FX_UP = '#6fe39a', FX_DOWN = '#ff7a6b';
+function fxArrows(n) { return (n > 0 ? '▲' : '▼').repeat(clamp(Math.abs(Math.round(n)), 1, 3)); }
+function fxHtml(fx) { return fx && fx.length ? `<span class="fxs">${fx.map(([w, n]) => `<span class="fx ${n > 0 ? 'up' : 'down'}">${esc(w)}<i>${fxArrows(n)}</i></span>`).join('')}</span>` : ''; }
+function fxOf(kind, id, lv) { // 某个能力在某一级的箭头
+  if (kind === 'gun' || kind === 'support') return (SKILLS[id].fx || [])[Math.max(0, (lv || 1) - 1)] || [];
+  if (kind === 'bmod') return (BURST_MODS[id].fx || [])[Math.max(0, (lv || 1) - 1)] || [];
+  if (kind === 'link') return SYNERGIES[id].fx || [];
+  return [];
+}
+/* 飞机之间的差别：和标准机（5 颗心、标准速度）比 */
+function planeFx(P) { const o = []; if (P.hearts !== 5) o.push(['生命', P.hearts - 5]); if (P.speed !== 1) o.push(['速度', P.speed > 1 ? 1 : -1]); return o; }
+/* 共享等级：攻击随等级一档档变强，满 3 / 6 / 9 级各多一颗心 */
+function sharedFx(lv) { const o = []; if (lv > 1) o.push(['攻击', lv >= 8 ? 3 : lv >= 5 ? 2 : 1]); const h = sharedHearts(lv); if (h) o.push(['生命', h]); return o; }
 
 /* 分岔洞口：图标 + 颜色 + 运动特效，不弹说明框 */
 const PORTALS = {
@@ -130,17 +147,17 @@ const ROUTES = {
 };
 const ROUTE_ORDER = ['fire', 'blast', 'collect', 'burst'];
 const NODE_TYPES = {
-  dmg: { name: '火力', icon: 'n-fire', min: 5, max: 8, fmt: (v) => `普通攻击伤害 +${v}%`, score: 3, why: '所有关卡的主炮都更快清怪' },
-  blast: { name: '爆炸', icon: 'n-blast', min: 12, max: 20, fmt: (v) => `爆炸范围 +${v}%`, score: 2, why: '爆破类改造和爆炸范围更大' },
-  charge: { name: '大招充能', icon: 'n-charge', min: 10, max: 16, fmt: (v) => `大招充能速度 +${v}%`, score: 3, why: '更早、更常放专属大招' },
-  magnet: { name: '吸附', icon: 's-magnet', min: 25, max: 40, fmt: (v) => `掉落物吸附范围 +${v}%`, score: 1, why: '捡星砂更轻松' },
-  repeat: { name: '重复', icon: 'n-repeat', min: 6, max: 10, fmt: (v) => `支援技能 ${v}% 概率再触发一次`, score: 2, why: '支援技能有概率多放一次' },
-  heart: { name: '生命', icon: 'i-heart', min: 1, max: 1, fmt: () => '最大生命 +1', score: 3, why: '多一次失误的余地' },
-  boss: { name: 'Boss 伤害', icon: 'n-crown', min: 12, max: 20, fmt: (v) => `Boss 伤害 +${v}%`, score: 2, why: '打 Boss 更快' },
-  pierceX: { name: '穿透强化', icon: 's-pierce', min: 1, max: 1, fmt: () => '已获得穿透时：额外多命中 1 个', score: 2, why: '拿到穿透后，每颗子弹多穿 1 个', needs: 'pierce' },
-  homingX: { name: '追踪强化', icon: 's-homing', min: 15, max: 15, fmt: (v) => `已获得追踪时：转向 +${v}%`, score: 2, why: '拿到追踪后转弯更快', needs: 'homing' },
-  houseFast: { name: '地图充能', icon: 'i-hangar', min: 15, max: 20, fmt: (v) => `梦灯屋 / 星砂矿充能快 ${v}%`, score: 2, why: '梦灯屋和星砂矿更快出奖励' },
-  npcBoost: { name: '伙伴辅助', icon: 'i-heart', min: 25, max: 35, fmt: (v) => `伙伴射击与效果 +${v}%`, score: 1, why: '救出的伙伴更能打' },
+  dmg: { name: '火力', icon: 'n-fire', min: 5, max: 8, fmt: () => '主炮伤害更高', word: '伤害', score: 3, why: '主炮清怪更快' },
+  blast: { name: '爆炸', icon: 'n-blast', min: 12, max: 20, fmt: () => '爆炸范围更大', word: '爆炸', score: 2, why: '爆破类改造更好用' },
+  charge: { name: '大招充能', icon: 'n-charge', min: 10, max: 16, fmt: () => '大招充得更快', word: '充能', score: 3, why: '更常放专属大招' },
+  magnet: { name: '吸附', icon: 's-magnet', min: 25, max: 40, fmt: () => '掉落吸得更远', word: '吸附', score: 1, why: '捡星砂更轻松' },
+  repeat: { name: '重复', icon: 'n-repeat', min: 6, max: 10, fmt: () => '支援技能有机会多放一次', word: '支援', score: 2, why: '支援打得更勤' },
+  heart: { name: '生命', icon: 'i-heart', min: 1, max: 1, fmt: () => '多一颗心', word: '生命', score: 3, why: '多一次失误的余地' },
+  boss: { name: 'Boss 伤害', icon: 'n-crown', min: 12, max: 20, fmt: () => '打 Boss 更疼', word: 'Boss 伤害', score: 2, why: '打 Boss 更快' },
+  pierceX: { name: '穿透强化', icon: 's-pierce', min: 1, max: 1, fmt: () => '拿到穿透后穿得更多', word: '穿透', score: 2, why: '拿到穿透后才生效', needs: 'pierce' },
+  homingX: { name: '追踪强化', icon: 's-homing', min: 15, max: 15, fmt: () => '拿到追踪后拐得更快', word: '追踪', score: 2, why: '拿到追踪后才生效', needs: 'homing' },
+  houseFast: { name: '地图充能', icon: 'i-hangar', min: 15, max: 20, fmt: () => '梦灯屋和星砂矿更快出奖励', word: '地图', score: 2, why: '地图奖励来得更快' },
+  npcBoost: { name: '伙伴辅助', icon: 'i-heart', min: 25, max: 35, fmt: () => '救出的伙伴更能打', word: '伙伴', score: 1, why: '伙伴更能打' },
 };
 /* 大招容量：账号共享的固定里程碑 */
 const ULT_CAP = [{ cap: 1, need: null, text: '初始' }, { cap: 2, need: '1-1', text: '1-1 首次通关' }, { cap: 3, need: '1-3', text: '1-3 首次通关' }];
@@ -307,23 +324,23 @@ const COSMETICS = {
 
 
 const ENEMY_INFO = {
-  jelly: { name: '泡泡水母', desc: '成排漂过来的小怪，一发就散。偶尔吐一颗粉色圆弹。' },
-  moth: { name: '梦尘蛾', desc: '成群乱飞，会掉很多星砂，是连杀的好材料。' },
-  boat: { name: '纸船灯', desc: '横渡梦海，沿途往下投粉色圆弹。' },
-  tick: { name: '小闹钟', desc: '跳到位置后摇铃，炸开一圈子弹，圈上留着缝。' },
-  star: { name: '星星鱼', desc: '朝你所在的高度俯冲，射出一枚金色星弹。' },
-  beacon: { name: '灯塔眼', desc: '先画出白色预警线，再沿线射出细弹。' },
-  jellyE: { name: '守望水母', desc: '精英。吐出旋转的粉弹涡，击败后掉技能晶体和大量充能。' },
-  tickE: { name: '裂纹闹钟', desc: '精英。双层弹环加十字弹列。' },
-  starE: { name: '双瞳星鱼', desc: '精英。连续射出三枚金色星弹。' },
-  armor: { name: '厚甲河豚', desc: '正面三块甲片，普通子弹只能慢慢敲裂；甲碎后露出软核心，一两发就倒。多重、爆破、穿透都会让它变快。' },
-  cmdr: { name: '带队精英', desc: '上下各带一队护卫。平时有护盾，举旗时旗头水晶是弱点；它倒下护卫就散。' },
-  wreck: { name: '残骸刷怪核心', desc: '沉船里的核心会一直放出梦尘蛾，打碎核心才会停。' },
-  mcore: { name: '月亮怪', desc: '1-1 的惊喜：月亮从天上掉下来。先打碎嘴边四块碎片，再打核心。' },
-  mimic: { name: '贴纸拟态', desc: '1-2 的惊喜：角落的装饰贴纸长出眼睛跳进战场。真正的血条和按钮不会被它影响。' },
-  hmimic: { name: '拟态梦灯屋', desc: '1-3 的惊喜：窗户跟着心跳闪、烟囱像在呼吸的梦灯屋。打倒它奖励照样拿。' },
-  mirror: { name: '镜像闹钟', desc: '失控闹钟面对分身流时召唤的镜像，分身会自动锁定它们。' },
-  clock: { name: '失控闹钟', desc: '第一章 Boss（1-3）。会看见你的 Build：雷球让它导电，爆破打开它的护甲，冰晶冻住它的指针。' },
+  jelly: { name: '泡泡水母', desc: '成排漂来，一发就散' },
+  moth: { name: '梦尘蛾', desc: '成群乱飞，掉很多星砂' },
+  boat: { name: '纸船灯', desc: '横着飞过，往下投弹' },
+  tick: { name: '小闹钟', desc: '摇铃炸出一圈子弹，圈上有缝' },
+  star: { name: '星星鱼', desc: '冲到你的高度射星弹' },
+  beacon: { name: '灯塔眼', desc: '先画白线，再沿线射击' },
+  jellyE: { name: '守望水母', desc: '精英：吐旋转弹涡，打倒充很多大招' },
+  tickE: { name: '裂纹闹钟', desc: '精英：双层弹环加十字弹' },
+  starE: { name: '双瞳星鱼', desc: '精英：连射金色星弹' },
+  armor: { name: '厚甲河豚', desc: '先敲碎正面的甲，再打软核心' },
+  cmdr: { name: '带队精英', desc: '举旗时打旗头水晶，它倒下护卫就散' },
+  wreck: { name: '残骸刷怪核心', desc: '一直放出梦尘蛾，打碎核心才停' },
+  mcore: { name: '月亮怪', desc: '月亮掉下来了：先打碎片，再打核心' },
+  mimic: { name: '贴纸拟态', desc: '角落的贴纸长出眼睛跳进战场' },
+  hmimic: { name: '拟态梦灯屋', desc: '会呼吸的假梦灯屋，打倒照样有奖励' },
+  mirror: { name: '镜像闹钟', desc: '闹钟召唤的镜像，分身会自动锁定' },
+  clock: { name: '失控闹钟', desc: '第一章 Boss，会对你的 Build 做出反应' },
 };
 
 /* 数据验收标准（文档 §16） */
@@ -350,13 +367,13 @@ const METRIC_TARGETS = [
 /* 地图物件：飞近会回应；停留 / 穿环 / 绕行 / 看眼睛，全部只靠移动完成 */
 const MAP_OBJECTS = {
   house: { id: 'house', name: '梦灯屋', verb: '点亮', how: 'touch', tag: '主炮', color: '#ffd76a', icon: 'star',
-    hint: ['碰一下梦灯屋门前的铃铛', '屋顶折起、烟囱变成摇柄，整间屋子变成转盘，转出两个主炮改造。'], desc: '碰一下门前的铃铛：屋子变成转盘，转出两个主炮改造二选一；之后它会变成亮着的补给点，敌人经过时帮你打一发。' },
+    hint: ['碰一下梦灯屋门前的铃铛', '屋子会变成转盘，转出主炮改造'], desc: '碰铃铛，转出两个主炮改造' },
   wind: { id: 'wind', name: '风车塔', verb: '吹开', how: 'ring', tag: '推一排', color: '#9fe3f0', icon: 'wing',
-    hint: ['从风车前面的宽风环穿过去', '风会吹散云层、露出藏着的入口，还把一排敌人推到你的炮口前。'], desc: '穿过宽风环：云层被吹开、露出隐藏入口，一排敌人被推到炮口前，然后给一次二选一。' },
+    hint: ['从风车前面的宽风环穿过去', '吹开入口，一排敌人被推到炮口前'], desc: '穿过风环，吹开入口、推来一排敌人' },
   mine: { id: 'mine', name: '星砂矿', verb: '炸开', how: 'tow', tag: '强化', color: '#c9a8ff', icon: 'charge',
-    hint: ['碰一下发光的矿核，把它拖到标记的岩壁', '矿核会自己跟着你飞；碰到岩壁就炸开，露出新航道和动力装置。'], desc: '碰一下矿核，它会跟着你飞；拖到标记的岩壁上炸开：出现新航道、一台动力装置（兼容强化二选一），之后敌人会从裂口钻出。' },
+    hint: ['碰一下发光的矿核，把它拖到标记的岩壁', '矿核会跟着你飞，碰到岩壁就炸开'], desc: '把矿核拖到岩壁，炸开新航道' },
   npc: { id: 'npc', name: '救援吊舱', verb: '救出', how: 'escort', tag: '支援', color: '#ff9fcf', icon: 'heart',
-    hint: ['碰一下伙伴的吊舱，沿光带护送到修理点', '吊舱挨一发不会坏（有三格耐久）；送到后伙伴加入，还会搬出两个支援技能。'], desc: '碰一下吊舱挂上拖绳，沿安全光带护送到修理点：伙伴加入并修好炮台，给一次支援二选一。' },
+    hint: ['碰一下伙伴的吊舱，沿光带护送到修理点', '吊舱挨几下也不怕，送到后伙伴加入'], desc: '把吊舱送到修理点，伙伴加入' },
   bridge: { id: 'bridge', name: '断桥', verb: '修复', how: 'path', tag: '捷径', color: '#9fe3f0', icon: 'wing',
     hint: ['穿过三个灯环，把断桥接起来', '尾流会把灯环连成桥。'], desc: '（旧版装置，当前航线不再出现）' },
   giant: { id: 'giant', name: '巨型梦境生物', verb: '唤醒', how: 'eye', tag: '清场', color: '#6ff0ff', icon: 'crown',
@@ -365,11 +382,11 @@ const MAP_OBJECTS = {
 const MAP_ORDER = ['house', 'wind', 'mine', 'npc'];
 /* 伙伴：救出后跟着飞机，自动射击，并各有一个效果；Boss 出现前各帮一次忙 */
 const NPCS = {
-  bunny: { id: 'bunny', name: '小梦兔', trap: 'bubble', color: '#e7d8ff', effect: '自动把附近的奖励叼回来（二选一的技能晶体除外）' },
-  grandpa: { id: 'grandpa', name: '云朵爷爷', trap: 'vine', color: '#dff2ff', effect: '每 15 秒给飞机铺一层缓冲云，挡下一次伤害' },
-  miner: { id: 'miner', name: '星星矿工', trap: 'vine', color: '#ffe38a', effect: '每击败一行敌人（8 只）挖出一把星砂，顺便充一点大招' },
-  merchant: { id: 'merchant', name: '糖果商人', trap: 'bubble', color: '#ff9fcf', effect: '技能每次升级，额外放一次糖果爆炸' },
-  clockling: { id: 'clockling', name: '小闹钟', trap: 'gear', color: '#ffd76a', effect: 'Boss 每个阶段开始时，补满一次大招' },
+  bunny: { id: 'bunny', name: '小梦兔', trap: 'bubble', color: '#e7d8ff', effect: '把附近的奖励叼回来' },
+  grandpa: { id: 'grandpa', name: '云朵爷爷', trap: 'vine', color: '#dff2ff', effect: '定时铺一层云，帮你挡一下' },
+  miner: { id: 'miner', name: '星星矿工', trap: 'vine', color: '#ffe38a', effect: '打倒一排敌人就挖出星砂' },
+  merchant: { id: 'merchant', name: '糖果商人', trap: 'bubble', color: '#ff9fcf', effect: '每次升级放一次糖果爆炸' },
+  clockling: { id: 'clockling', name: '小闹钟', trap: 'gear', color: '#ffd76a', effect: 'Boss 每换一个阶段补一次大招' },
 };
 const NPC_ORDER = ['bunny', 'grandpa', 'miner', 'merchant', 'clockling'];
 /* 巨型梦境生物：可以互动的活景观 */
@@ -382,10 +399,10 @@ const GIANTS = {
 const GIANT_ORDER = ['whale', 'turtle', 'deer', 'moonbunny'];
 /* P2：每架飞机对地图的专属反应（云朵号文档没写，按它的缓冲云被动补了一条） */
 const PLANE_MAP_REACT = {
-  moon: '月光物件提前亮起：感应范围更大，停留充能快 30%',
-  cloud: '在地图物件旁停留时铺开云垫，靠近的敌弹直接散掉',
-  candy: '互动完成时，奖励变成一场糖果爆炸',
-  paper: '尾流留下充能点：离开物件时充能不会消退，穿环、救援光环判定更宽',
-  whale: '靠近星砂矿就能把周围的星砂吸过来，挖开后星砂翻倍',
-  clock: '互动完成后，时间短暂停止 1.2 秒',
+  moon: '靠近装置时充能更快',
+  cloud: '在装置旁停留时，靠近的敌弹会散掉',
+  candy: '装置完成时来一场糖果爆炸',
+  paper: '离开装置充能也不掉，穿环更容易',
+  whale: '星砂矿挖出的星砂更多',
+  clock: '装置完成后时间停一下',
 };

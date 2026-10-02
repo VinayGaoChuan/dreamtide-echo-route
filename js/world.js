@@ -1093,9 +1093,9 @@ class World {
   bossResponse() {
     const b = this.boss, sid = this.support ? this.support.id : this.gun.bomb ? 'bomb' : this.topId();
     let title = '失控闹钟加快了节奏', sub = '先把 Build 养起来，Boss 会回应你的流派';
-    if (sid === 'thunder') { b.conductive = true; title = '外壳开始导电！'; sub = '雷暴流：击中闹钟时跳电次数 +2，雷击伤害提高'; }
+    if (sid === 'thunder') { b.conductive = true; title = '外壳开始导电！'; sub = '雷暴流：打闹钟会多跳几次电'; }
     else if (sid === 'wing') { title = '闹钟召唤了镜像！'; sub = '分身流：分身会自动锁定镜像闹钟'; for (let i = 0; i < 3; i++) { const ty = lerp(this.arena.top + 90, this.arena.bottom - 90, i / 2); this.addEnemy('mirror', { x: this.W + 60, y: ty, path: 'mirror', tx: this.W * (0.5 + i * 0.07), ty, fireT: 2 + i * 0.6 }); } }
-    else if (sid === 'bomb') { b.marked = true; title = '护甲被标记了！'; sub = '爆破流：爆炸会撬开闹钟的核心，伤害 +50%'; }
+    else if (sid === 'bomb') { b.marked = true; title = '护甲被标记了！'; sub = '爆破流：爆炸能撬开闹钟的核心'; }
     else if (sid === 'magnet') { title = '星砂海！'; sub = '吸星流：闹钟洒出一整片星砂，全部吸进来'; for (let i = 0; i < 70; i++) this.dropPickup('dust', b.x + srand(-160, 60), b.y + srand(-220, 220), { value: 2, vx: srand(-260, -60), vy: srand(-160, 160) }); }
     else if (sid === 'rainbow') { this.carnival = true; title = '彩色狂欢阶段！'; sub = '彩虹流：击中闹钟会掉落更多糖果强化'; }
     else if (sid === 'ice') { b.iceHands = true; title = '指针被冻住了！'; sub = '冰晶流：闹钟指针会周期性冻结，核心更常暴露'; }
