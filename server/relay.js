@@ -16,7 +16,14 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 /* ---------- HTTP：网页 + 健康检查 ---------- */
 const channels = new Map(); // ch -> Map(peerId -> peer)
-function stats() { let n = 0; for (const c of channels.values()) n += c.size; return { ok: true, peers: n, channels: channels.size, uptime: Math.round(process.uptime()) }; }
+/* 当前网页的版本（打包时写进去的哈希）和部署的提交：告诉客户端“有新版本了，刷新一下” */
+let pageInfo = { mtime: 0, build: null };
+function pageBuild() {
+  try { const f = path.join(PUBLIC, 'index.html'), st = fs.statSync(f); if (st.mtimeMs !== pageInfo.mtime) { const m = /DREAMTIDE_BUILD = "([\w-]+)"/.exec(fs.readFileSync(f, 'utf8').slice(0, 4096)); pageInfo = { mtime: st.mtimeMs, build: m ? m[1] : null }; } } catch (e) { pageInfo = { mtime: 0, build: null }; }
+  return pageInfo.build;
+}
+function deployedSha() { try { return fs.readFileSync(path.join(PUBLIC, 'version.txt'), 'utf8').trim().slice(0, 40); } catch (e) { return null; } }
+function stats() { let n = 0; for (const c of channels.values()) n += c.size; return { ok: true, peers: n, channels: channels.size, uptime: Math.round(process.uptime()), build: pageBuild(), commit: deployedSha() }; }
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   if (url.pathname === '/health') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(stats())); return; }
@@ -109,7 +116,7 @@ function hello(conn, m) {
   const P = { id, ch, conn, presence: old ? old.presence : {}, json: old ? old.json : '{}', ver: 1, liteJson: '', liteVer: 1, at: Date.now(), seen: new Map() };
   P.liteJson = JSON.stringify(liteView(P.presence));
   conn.peer = P; C.set(id, P); dirty.add(ch);
-  send(conn, { t: 'hi', you: id, peers: [...C.values()].filter((q) => q !== P).map((q) => view(P, q)) });
+  send(conn, { t: 'hi', you: id, build: pageBuild(), peers: [...C.values()].filter((q) => q !== P).map((q) => view(P, q)) });
   for (const q of C.values()) if (q !== P) P.seen.set(q.id, key(P, q));
   log('join', ch, id, conn.ip, `(${C.size})`);
 }

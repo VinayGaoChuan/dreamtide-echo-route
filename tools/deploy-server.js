@@ -1,4 +1,5 @@
 // 把联机服务器部署到一台 Debian / Ubuntu 主机：装 Node（没有的话）→ 上传 relay.js 和打包好的网页 → systemd 常驻 → 检查健康。
+// 同时装上自动更新（server/autoupdate.py，每 2 分钟看一次 GitHub main）：以后谁推送到 main、检查通过，服务器就自己更新，不用再跑这个脚本。
 // 只用 SSH 密钥登录（BatchMode，不会问密码）；先让服务器信任这把公钥：ssh-copy-id -i ~/.ssh/dreamtide_ed25519.pub root@主机
 // 用法：node tools/deploy-server.js root@主机 [端口=8080] [私钥=~/.ssh/dreamtide_ed25519]
 // macOS / Linux / Windows（自带 OpenSSH）都能跑；需要先 python3 build.py dist/dreamtide.html（脚本会自动打包）。
@@ -17,7 +18,12 @@ function must(r, what) { if (r.status !== 0) { console.error(`✗ ${what} 失败
 step('打包网页');
 const py = process.platform === 'win32' ? ['py', ['-3']] : ['python3', []];
 must(run(py[0], [...py[1], path.join(root, 'build.py'), path.join(root, 'dist', 'dreamtide.html')]), '打包');
-const page = path.join(root, 'dist', 'dreamtide.html'), relay = path.join(root, 'server', 'relay.js');
+const page = path.join(root, 'dist', 'dreamtide.html'), relay = path.join(root, 'server', 'relay.js'), updater = path.join(root, 'server', 'autoupdate.py');
+// 自动更新跟的仓库：从 git 远端地址读 owner/name
+const git = (args) => { const r = run('git', ['-C', root, ...args]); return r.status === 0 ? r.stdout.trim() : ''; };
+const remote = git(['remote', 'get-url', 'origin']), repoM = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(remote);
+if (!repoM) { console.error(`✗ 读不到 GitHub 仓库地址（git remote：${remote || '无'}）`); process.exit(1); }
+const repo = repoM[1], head = git(['rev-parse', 'HEAD']), dirty = !!git(['status', '--porcelain']);
 
 step(`连接 ${target}（只用密钥）`);
 const hello = ssh('echo ok; . /etc/os-release; echo "$PRETTY_NAME"');
@@ -37,6 +43,7 @@ mkdir -p /opt/dreamtide/public`), '安装 Node.js');
 step('上传服务器程序和网页');
 must(run('scp', [...sshOpts, relay, `${target}:/opt/dreamtide/relay.js`]), '上传 relay.js');
 must(run('scp', [...sshOpts, page, `${target}:/opt/dreamtide/public/index.html`]), '上传网页');
+must(run('scp', [...sshOpts, updater, `${target}:/opt/dreamtide/autoupdate.py`]), '上传自动更新');
 
 step(`设置常驻服务（端口 ${port}）`);
 must(ssh(`set -e
@@ -56,7 +63,31 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 UNIT
+cat > /etc/systemd/system/dreamtide-update.service <<'UNIT'
+[Unit]
+Description=Dreamtide auto update from GitHub
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/dreamtide/autoupdate.py
+TimeoutStartSec=900
+UNIT
+cat > /etc/systemd/system/dreamtide-update.timer <<'UNIT'
+[Unit]
+Description=Check GitHub for dreamtide updates every 2 minutes
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=20
+[Install]
+WantedBy=timers.target
+UNIT
+printf 'REPO=%s\nBRANCH=main\n' '${repo}' > /opt/dreamtide/autoupdate.env
+printf '%s' '${head}${dirty ? '-dirty' : ''}' > /opt/dreamtide/public/version.txt
+# 手动部署的是已提交的干净代码：记为已上线；带未提交改动的话，下一轮让自动更新换成 GitHub 上的 main
+${dirty ? 'rm -f /opt/dreamtide/state.json' : `printf '{"deployed": "%s"}' '${head}' > /opt/dreamtide/state.json`}
 systemctl daemon-reload
+systemctl enable --now dreamtide-update.timer >/dev/null 2>&1
 systemctl enable dreamtide-relay >/dev/null 2>&1
 systemctl restart dreamtide-relay
 sleep 1
@@ -66,6 +97,6 @@ if command -v ufw >/dev/null 2>&1 && ufw status | grep -q active; then ufw allow
 
 step('从这台电脑检查能不能访问');
 http.get({ host, port, path: '/health', timeout: 8000 }, (res) => {
-  let b = ''; res.on('data', (d) => (b += d)); res.on('end', () => { console.log(`✓ 外网可以访问：${b}\n\n游戏地址：http://${host}:${port}/`); });
+  let b = ''; res.on('data', (d) => (b += d)); res.on('end', () => { console.log(`✓ 外网可以访问：${b}\n  自动更新：每 2 分钟看一次 ${repo} 的 main（检查通过才上线）\n\n游戏地址：http://${host}:${port}/`); });
 }).on('error', (e) => { console.log(`✗ 服务器上已经在运行，但外网连不上 ${host}:${port}（${e.code || e.message}）\n  → 到云服务器控制台的安全组里放行 TCP ${port} 入方向`); process.exitCode = 3; })
   .on('timeout', function () { this.destroy(new Error('timeout')); });

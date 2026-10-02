@@ -1,5 +1,5 @@
 """Inline js/*.js into one self-contained HTML (used for the published Artifact)."""
-import pathlib, re, sys
+import hashlib, pathlib, re, sys
 
 root = pathlib.Path(__file__).resolve().parent
 out = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'dist' / 'dreamtide.html'
@@ -12,6 +12,9 @@ def inline(m):
     return f'<script>\n{src}\n</script>'
 
 html = re.sub(r'<script src="(js/[\w.-]+\.js)"(?: charset="utf-8")?></script>', inline, html)
+# 版本号 = 打包内容的哈希：联机时不同版本的网页进不了同一个频道（防止玩法代码不一致而不同步），旧网页会提示刷新
+build = hashlib.sha256(html.encode('utf-8')).hexdigest()[:10]
+html = html.replace('<meta charset="utf-8">', f'<meta charset="utf-8"><script>window.DREAMTIDE_BUILD = "{build}";</script>', 1)
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text(html, encoding='utf-8')
-print(out, f'{out.stat().st_size / 1024:.0f} KB')
+print(out, f'{out.stat().st_size / 1024:.0f} KB', build)

@@ -162,7 +162,7 @@ class WsNet {
   onMsg(text) {
     let m; try { m = JSON.parse(text); } catch (e) { return; }
     const put = (q) => this.others.set(q.peer, { presence: Object.freeze(q.p || {}), updatedAt: Date.now() });
-    if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.others.clear(); (m.peers || []).forEach(put); this.emit(); }
+    if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.serverBuild = m.build || null; this.others.clear(); (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'u') { (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'bye') { this.others.delete(m.peer); this.emit(); }
     else if (m.t === 'pong') {
@@ -171,6 +171,7 @@ class WsNet {
     }
   }
   serverNow() { return this.clockOff === null ? null : performance.now() + this.clockOff; } // 服务器时钟（毫秒）
+  stale() { return !!(this.serverBuild && window.DREAMTIDE_BUILD && this.serverBuild !== window.DREAMTIDE_BUILD); } // 服务器上已经是新版本了
   localPerfOf(ms) { return ms - this.clockOff; }
   tick(now) {
     if (!this.open || !this.ws) return;
@@ -235,7 +236,7 @@ const Lobby = {
     let room = null;
     if (!ws) try { if (window.claude && typeof window.claude.use === 'function') room = await window.claude.use('room'); } catch (e) { room = null; }
     if (this.net) return this.net;
-    this.net = ws ? new WsNet(ws, 'dreamtide-' + MP_PROTO) : room ? new RoomNet(room) : new LocalNet();
+    this.net = ws ? new WsNet(ws, `dreamtide-${MP_PROTO}-${window.DREAMTIDE_BUILD || 'dev'}`) : room ? new RoomNet(room) : new LocalNet();
     this.net.onChange(() => this.changed());
     NetTicker.on((now) => this.tick(now)); NetTicker.start();
     return this.net;
