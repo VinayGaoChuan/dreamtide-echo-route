@@ -307,7 +307,7 @@ Object.assign(World.prototype, {
   onCompanionSkill() {
     if (!this.companions.some((c) => c.id === 'merchant')) return;
     const p = this.player;
-    this.later(0.15, () => { this.explode(p.x + 110, p.y, 120 * this.stats.blastK, 36 * this.stats.dmgK, { level: 2, fireworks: true }); this.dropPickup('candy', p.x + 160, p.y); this.text('糖果爆炸', p.x + 110, p.y - 60, '#ff9fcf', 16, 3); });
+    this.later(0.15, () => { this.explode(p.x + 110, p.y, 120 * this.stats.blastK, 36 * this.stats.dmgK, { level: 2, fireworks: true }); this.dropPickup('candy', p.x + 160, p.y, { owner: this.np > 1 ? p.idx : undefined }); this.text('糖果爆炸', p.x + 110, p.y - 60, '#ff9fcf', 16, 3); });
   },
   /* Boss 入口：库存为 0 时补到 1；伙伴 / 修好的炮台各帮一次忙 */
   onMapBoss() {
@@ -317,7 +317,7 @@ Object.assign(World.prototype, {
     for (const b of this.orbs) if (!b.done) { b.done = true; b.apply(); }
     this.orbs = [];
     this.text('Boss 入口 · 库存为 0 的大招补到 1 次', p.x, p.y - 60, '#ffd76a', 20, 5); // 补库存在 startBoss 里按每架飞机做
-    if (this.companions.length) this.later(1.2, () => { for (const c of this.companions) this.fx(c.x, c.y, 2, 50, [NPCS[c.id].color, '#ffffff']); this.text('伙伴助力！', p.x, p.y + 60, '#ff9fcf', 18, 4); this.m.dust += 10 * this.companions.length; });
+    if (this.companions.length) this.later(1.2, () => { for (const c of this.companions) this.fx(c.x, c.y, 2, 50, [NPCS[c.id].color, '#ffffff']); this.text('伙伴助力！', p.x, p.y + 60, '#ff9fcf', 18, 4); for (const q of this.players) q.res.dust += 10 * this.companions.length; });
   },
   onCompanionBossPhase() {
     if (!this.companions.some((c) => c.id === 'clockling')) return;

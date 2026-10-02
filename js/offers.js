@@ -21,15 +21,13 @@ const GUN_PAIR = {
 };
 const ARMOR_FIT = { multi: '对厚甲：每一路都在敲甲片，敲得更快', bomb: '对厚甲：爆炸敲甲比子弹更有效', homing: '对厚甲：它上下晃也打得中', pierce: '对厚甲编队：一发能敲一整列的甲' };
 
+/* 每架飞机自己的 Build：World 上这些字段读写的都是 this.player（模拟里正在行动的那架；界面和渲染时是本机这架）身上的那份 */
+for (const k of ['gun', 'support', 'bmod', 'links', 'ritual', 'ritualQueue', 'offerN', 'dryOffers', 'picks', 'stream', 'recentMods', 'crystals', 'rareNext', 'hudBuild']) {
+  Object.defineProperty(World.prototype, k, { get() { return this.player[k]; }, set(v) { this.player[k] = v; }, configurable: true });
+}
+
 Object.assign(World.prototype, {
-  initBuild() {
-    this.gun = { pierce: 0, homing: 0, multi: 0, bomb: 0 };
-    this.support = null; this.bmod = null; this.links = new Set();
-    this.skills = [];
-    this.ritual = null; this.ritualQueue = []; this.offerN = 0; this.dryOffers = 0; this.focusK = 1;
-    this.picks = []; this.stream = null; this.recentMods = [];
-    this.hudBuild = this.buildSummary();
-  },
+  initBuild() { this.focusK = 1; }, // Build 本身在 makePlayer 里，每架飞机一份
   /* 旧效果代码用的档位：支援 / 爆破 1~3 级 → 1 / 3 / 5 */
   lvOf(id) {
     if (id === 'bomb') return UPG_LEGACY[this.gun.bomb];
@@ -127,12 +125,19 @@ Object.assign(World.prototype, {
   },
 
   /* ---------- 仪式流程 ---------- */
-  queueRitual(src, o = {}) { if (this.mode !== 'run') return; this.ritualQueue.push({ src, full: !!o.full, q: o.q || 0, x: o.x, y: o.y, device: o.device || 'machine', opts: o.opts, rare: !!o.rare, by: this.player ? this.player.idx : 0, obj: o.obj || null, promise: o.promise || null }); },
+  /* 升级来源（装置 / 精英核心 / 惊喜）：单人给自己；多人时每架飞机各来一次、各选各的（o.who 指定时只给那一位）。
+     同一个装置的收尾回调（onRitual）只在第一位选完时调用一次。 */
+  queueRitual(src, o = {}) {
+    if (this.mode !== 'run') return;
+    const tok = { done: false }, who = o.who !== undefined ? [this.players[o.who]] : this.np > 1 ? this.players.filter((q) => !q.gone) : [this.player];
+    for (const q of who) if (q) q.ritualQueue.push({ src, full: !!o.full, q: o.q || 0, x: o.x, y: o.y, device: o.device || 'machine', opts: q === this.player ? o.opts : null, rare: !!o.rare, by: q.idx, obj: o.obj || null, tok, promise: o.promise || null });
+  },
   queueOffer(src, o = {}) { this.queueRitual(src, o); }, // 兼容旧调用
-  canRitual() { return this.mode === 'run' && this.state === 'play' && !this.bursting && !(this.surprise && this.surprise.busy) && this.phase === 'fight'; },
-  ritualFocus() { const R = this.ritual; return !!(R && R.st !== 'resume'); },
+  canRitual() { return this.mode === 'run' && this.state === 'play' && !this.bursting && !(this.surprise && this.surprise.busy) && this.phase === 'fight' && this.player.alive; },
+  ritualFocus() { const R = this.worldRitual(); return !!(R && R.st !== 'resume'); }, // 全场慢放：只有单人
+  myRitualFocus() { const R = this.me.ritual; return !!(R && R.st !== 'resume'); },
   startRitual(q) {
-    const by = this.players[q.by], p = by && by.alive && !by.gone ? by : this.anchor(), top = this.arena.top + 70, bot = this.arena.bottom - 70; // 触发的人就是候选卡摆放的参照
+    const p = this.player, top = this.arena.top + 70, bot = this.arena.bottom - 70, mine = this.mine(); // 选的人就是候选卡摆放的参照
     if (this.rareNext) { this.rareNext = false; q.rare = true; }
     let opts = q.opts && q.opts.every((o) => o && this.stillValid(o)) ? q.opts : this.makeOffer(q.src, q.rare);
     opts = opts.map((o) => Object.assign({}, o));
@@ -141,16 +146,14 @@ Object.assign(World.prototype, {
     const x = q.x !== undefined ? clamp(q.x, 120, this.W - 120) : clamp(p.x + 320, this.W * 0.45, this.W * 0.74), y = q.y !== undefined ? clamp(q.y, top, bot) : clamp(p.y - 40, top, bot);
     const qPlan = q.full && !first ? clamp(q.q, 0, 2) : 0;
     this.ritual = { q, T, opts, st: 'trigger', t: 0, total: 0, x, y, rot: 0, spin: q.full ? 20 : 12, qNow: 0, qPlan, qAt: qPlan === 2 ? [0.35, 0.78] : qPlan === 1 ? [0.62] : [], gates: null, pick: -1, chooseT: 0, first, px: p.x, py: p.y, flyT: 0 };
-    this.offerN++; this.m.offers = (this.m.offers || 0) + 1;
+    this.offerN++; p.res.offers++;
     const hasUp = opts.some((o) => o && o.from > 0);
     this.dryOffers = hasUp || this.offerN < 3 ? 0 : this.dryOffers + 1;
-    // 危险隔离：敌弹化成星点、预警撤掉、贴脸的敌人推开
-    this.clearBullets(true);
-    for (const q2 of this.alivePlayers()) { q2.rx = q2.x; q2.ry = q2.y; for (const e of this.enemies) if (e.alive && !e.isBoss && dist2(e.x, e.y, q2.x, q2.y) < 150 * 150) { e.x = Math.max(e.x, q2.x + 170); } }
+    // 危险隔离（单人）：敌弹化成星点、贴脸的敌人推开。多人时战场照常，选的人自己有护盾（仪式期间不会受伤）
+    if (!this.mp) { this.clearBullets(true); for (const e of this.enemies) if (e.alive && !e.isBoss && dist2(e.x, e.y, p.x, p.y) < 150 * 150) e.x = Math.max(e.x, p.x + 170); }
+    p.rx = p.x; p.ry = p.y;
     this.ritual.who = p.idx;
-    Sound.sfx('ritualTrigger', { ui: true }); Sound.focus(true);
-    this.rumble(0.2, 0.4, 60);
-    this.emit('ritual', { src: q.src, first, full: q.full });
+    if (mine) { Sound.sfx('ritualTrigger', { ui: true }); if (!this.mp) Sound.focus(true); this.rumble(0.2, 0.4, 60); this.emit('ritual', { src: q.src, first, full: q.full }); }
   },
   updateRitual(dt) {
     if (this.mode !== 'run') return;
@@ -173,16 +176,12 @@ Object.assign(World.prototype, {
       case 'reveal': for (const G of R.gates) { G.x = lerp(G.x, G.tx, 1 - Math.pow(0.0005, dt / T.reveal)); G.y = lerp(G.y, G.ty, 1 - Math.pow(0.0005, dt / T.reveal)); G.alpha = Math.min(1, G.alpha + dt * 4); } if (R.t >= T.reveal) this.ritStep('choose'); break;
       case 'choose': {
         R.chooseT += dt;
-        // 共享 Build：任何一架飞机飞进圆圈停住都算替队伍选择（按玩家顺序判定，各端一致）
+        // 只有这场仪式的主人能选：飞进圆圈停住
         R.gates.forEach((G, i) => {
           if (R.st !== 'choose') return;
-          let dmin = 1e9, inside = null;
-          for (const q2 of this.alivePlayers()) {
-            const d = Math.sqrt(dist2(q2.x, q2.y, G.x, G.y)); dmin = Math.min(dmin, d);
-            if (!inside && d < GATE_R + (q2.planeId === 'paper' ? 14 : 0)) inside = q2;
-          }
-          G.near = approach(G.near, dmin < 170 ? 1 : 0, dt * 5);
-          if (inside) { G.dwell += dt; if (G.dwell >= GATE_DWELL) this.chooseRitual(i, inside); }
+          const d = Math.sqrt(dist2(p.x, p.y, G.x, G.y)), inside = p.alive && d < GATE_R + (p.planeId === 'paper' ? 14 : 0);
+          G.near = approach(G.near, d < 170 ? 1 : 0, dt * 5);
+          if (inside) { G.dwell += dt; if (G.dwell >= GATE_DWELL) this.chooseRitual(i, p); }
           else G.dwell = Math.max(0, G.dwell - dt * 2);
         });
         break;
@@ -191,40 +190,45 @@ Object.assign(World.prototype, {
         const G = R.gates[R.pick], u = clamp(R.t / 0.25, 0, 1);
         G.x = lerp(G.x, this.W / 2, u); G.y = lerp(G.y, LH * 0.42, u);
         R.gates.forEach((g2, i) => { if (i !== R.pick) { g2.alpha = Math.max(0, g2.alpha - dt * 4); g2.x = lerp(g2.x, R.x, dt * 4); g2.y = lerp(g2.y, R.y, dt * 4); } });
-        if (R.t >= T.show) { this.ritStep('fly'); R.from = { x: this.W / 2, y: LH * 0.42 }; R.to = this.slotTarget(R.gates[R.pick].opt); Sound.sfx('flyIn', { ui: true }); }
+        if (R.t >= T.show) { this.ritStep('fly'); R.from = { x: this.W / 2, y: LH * 0.42 }; R.to = this.slotTarget(R.gates[R.pick].opt); if (this.mine()) Sound.sfx('flyIn', { ui: true }); }
         break;
       }
       case 'fly': {
         const u = clamp(R.t / T.fly, 0, 1), k = Ease.inOutCubic ? Ease.inOutCubic(u) : u, a = R.from, b = R.to, cx = (a.x + b.x) / 2, cy = Math.min(a.y, b.y) - 120;
         R.fx = (1 - k) * (1 - k) * a.x + 2 * (1 - k) * k * cx + k * k * b.x; R.fy = (1 - k) * (1 - k) * a.y + 2 * (1 - k) * k * cy + k * k * b.y;
-        if (Math.random() < 0.9) this.part('mote', R.fx, R.fy, rand(-40, 40), rand(-40, 40), 0.35, 3.5, R.gates[R.pick].info.color);
+        if (this.mine() && Math.random() < 0.9) this.part('mote', R.fx, R.fy, rand(-40, 40), rand(-40, 40), 0.35, 3.5, R.gates[R.pick].info.color);
         if (u >= 1) this.landRitual(R);
         break;
       }
       case 'resume':
-        if (R.t >= T.resume) { this.ritual = null; this.onRitualDone(R.q.src, R.picked); if (R.q.obj && R.q.obj.onRitual) R.q.obj.onRitual(R.picked); }
+        if (R.t >= T.resume) {
+          this.ritual = null;
+          const first = !R.q.tok || !R.q.tok.done; if (R.q.tok) R.q.tok.done = true; // 多人：同一个装置各选各的，装置只收尾一次
+          if (first) { this.onRitualDone(R.q.src, R.picked); if (R.q.obj && R.q.obj.onRitual) R.q.obj.onRitual(R.picked); }
+        }
         break;
     }
-    // 焦点期间飞机稳住（选择阶段除外）
-    if (R.st !== 'choose' && R.st !== 'resume' && this.ritual) for (const q2 of this.alivePlayers()) { if (q2.rx === undefined) { q2.rx = q2.x; q2.ry = q2.y; } q2.x = smooth(q2.x, q2.rx, 6, dt); q2.y = smooth(q2.y, q2.ry, 6, dt); }
+    // 焦点期间飞机稳住（选择阶段除外）：只稳住选的这一架
+    if (R.st !== 'choose' && R.st !== 'resume' && this.ritual && p.alive) { if (p.rx === undefined) { p.rx = p.x; p.ry = p.y; } p.x = smooth(p.x, p.rx, 6, dt); p.y = smooth(p.y, p.ry, 6, dt); }
   },
   ritStep(st) {
-    const R = this.ritual, p = this.players[R.who] || this.anchor();
+    const R = this.ritual, p = this.player, mine = this.mine();
     R.st = st; R.t = 0;
-    if (st === 'transform') Sound.sfx('transform', { ui: true });
-    if (st === 'roll') Sound.sfx('spin', { ui: true });
+    if (st === 'transform' && mine) Sound.sfx('transform', { ui: true });
+    if (st === 'roll' && mine) Sound.sfx('spin', { ui: true });
     if (st === 'reveal') {
       // 两个安全候选区：在飞机前方（飞机太靠右时放到它左边），上下各一个，离飞机至少 150
       const top = this.arena.top + 96, bot = this.arena.bottom - 100, mid = (top + bot) / 2, left = p.x > this.W * 0.55, side = left ? -1 : 1;
       const gx = left ? clamp(p.x - 250, 350, this.W * 0.7) : clamp(p.x + 250, this.W * 0.3, this.W - 350); // 确认圈朝着飞机，卡片在圈的另一边
       R.gates = R.opts.map((opt, i) => { const info = Object.assign(this.optInfo(opt), this.fitNote(opt)); return { opt, info, side, x: R.x, y: R.y, tx: gx, ty: clamp(mid + (i ? 135 : -135), top, bot), near: 0, dwell: 0, alpha: 0 }; });
-      R.spin = 0.4; Sound.sfx('reveal', { r: R.qNow >= 2 ? 'SR' : R.qNow ? 'R' : 'N', ui: true });
+      R.spin = 0.4; if (mine) Sound.sfx('reveal', { r: R.qNow >= 2 ? 'SR' : R.qNow ? 'R' : 'N', ui: true });
     }
-    if (st === 'choose') for (const q2 of this.players) { q2.rx = q2.x; q2.ry = q2.y; }
-    if (st === 'resume') { for (const q2 of this.alivePlayers()) q2.inv = Math.max(q2.inv, 0.8); Sound.focus(false); }
+    if (st === 'choose') { p.rx = p.x; p.ry = p.y; }
+    if (st === 'resume') { p.inv = Math.max(p.inv, 0.8); if (mine && !this.mp) Sound.focus(false); }
   },
   qualityUp(R) {
     R.qNow++; R.opts = R.opts.map((o) => this.upgradeOpt(o));
+    if (!this.mine()) return; // 别人的升级仪式不在本机上演
     Sound.sfx('qualityUp', { ui: true, k: R.qNow });
     const C = QUALITY[R.qNow].color;
     this.part('ring', R.x, R.y, 0, 0, 0.5, 120 + R.qNow * 30, C); this.part('flash', R.x, R.y, 0, 0, 0.25, 110, C);
@@ -233,23 +237,24 @@ Object.assign(World.prototype, {
     this.rumble(0.3, 0.5, 70);
   },
   chooseRitual(i, who) {
-    const R = this.ritual, G = R.gates[i]; R.by = who ? who.idx : R.who;
+    const R = this.ritual, G = R.gates[i], p = this.player; R.by = p.idx;
     R.pick = i; R.picked = G.opt;
-    this.m.choiceTimes = this.m.choiceTimes || []; this.m.choiceTimes.push(R.chooseT);
+    p.res.choiceTimes.push(R.chooseT);
     if (this.m.firstSkill === null) this.m.firstSkill = this.runT;
     const pre = this.buildSummary();
-    this.withPlayer(who || this.player, () => this.applyOption(G.opt)); // 数据在确认时写入（资源类奖励给选的那位）
+    this.applyOption(G.opt); // 数据在确认时写入
     R.word = G.opt.kind === 'link' ? '组合完成' : G.opt.from > 0 ? '升级' : '获得';
     R.prevBuild = pre;
-    Sound.sfx(G.opt.kind === 'link' ? 'synergy' : 'crystal', { ui: true });
-    this.rumble(0.35, 0.3, 80);
+    if (this.mine()) { Sound.sfx(G.opt.kind === 'link' ? 'synergy' : 'crystal', { ui: true }); this.rumble(0.35, 0.3, 80); }
     this.ritStep('show');
   },
   landRitual(R) {
     const G = R.gates[R.pick];
     this.hudBuild = this.buildSummary();
-    this.emit('slotLand', { slot: SLOT_OF[G.opt.kind] || 'gun', kind: G.opt.kind, id: G.opt.id, lv: G.info.lv, name: G.info.name, desc: G.info.desc, color: G.info.color, tag: G.info.tag, replace: G.opt.replace || null, word: R.word, first: this.picks.length === 1 });
-    Sound.sfx('slotLand', { ui: true });
+    if (this.mine()) {
+      this.emit('slotLand', { slot: SLOT_OF[G.opt.kind] || 'gun', kind: G.opt.kind, id: G.opt.id, lv: G.info.lv, name: G.info.name, desc: G.info.desc, color: G.info.color, tag: G.info.tag, replace: G.opt.replace || null, word: R.word, first: this.picks.length === 1 });
+      Sound.sfx('slotLand', { ui: true });
+    }
     this.ritStep('resume');
   },
   slotTarget(o) {
@@ -257,25 +262,25 @@ Object.assign(World.prototype, {
     return pos || { gun: { x: 64, y: 150 }, support: { x: 120, y: 150 }, bmod: { x: 176, y: 150 }, link: { x: 100, y: 196 }, res: { x: this.W - 90, y: LH - 90 } }[k];
   },
   applyOption(o) {
-    const p = this.player, info = this.optInfo(o);
+    const p = this.player, info = this.optInfo(o), mine = this.mine();
     switch (o.kind) {
-      case 'gun': this.gun[o.id] = o.to; if (o.to >= 3) this.m.lv5++; this.recentMods = [o.id, ...this.recentMods.filter((x) => x !== o.id)].slice(0, 3); break;
+      case 'gun': this.gun[o.id] = o.to; if (o.to >= 3) p.res.lv5++; this.recentMods = [o.id, ...this.recentMods.filter((x) => x !== o.id)].slice(0, 3); break;
       case 'support':
         this.support = { id: o.id, ulv: o.to, lv: UPG_LEGACY[o.to], t: 0.4, t2: 3 };
-        if (o.to >= 3) this.m.lv5++;
+        if (o.to >= 3) p.res.lv5++;
         if (o.replace && o.replace.id === 'thunder') this.storm = null;
         break;
       case 'bmod': this.bmod = { id: o.id, lv: o.to }; break;
-      case 'link': this.links.add(o.id); this.m.syns++; if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); break;
+      case 'link': this.links.add(o.id); p.res.syns++; if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); if (mine) { this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); } break;
       case 'res': if (o.id === 'charge') this.addCharge(0.5, true); else if (p.hp < p.maxHp) p.hp++; break;
     }
     if (o.bonus) this.addCharge(o.bonus, true);
-    this.skills = this.support ? [this.support] : [];
-    for (const q2 of this.players) q2.skills = this.support ? [Object.assign({}, this.support, { t: 0.4, t2: 3 })] : []; // 每架飞机自己的支援冷却
-    this.picks.push(o); this.crystals = this.picks.length; this.m.crystals++;
-    if (o.kind === 'gun' || o.kind === 'support') { if (this.cb.onSkill) this.cb.onSkill(o.id); }
-    this.eachPlayer(() => this.syncWingmen());
+    p.skills = this.support ? [Object.assign({}, this.support, { t: 0.4, t2: 3 })] : []; // 自己的支援技能和冷却
+    this.picks.push(o); this.crystals = this.picks.length; p.res.crystals++;
+    if (mine && (o.kind === 'gun' || o.kind === 'support') && this.cb.onSkill) this.cb.onSkill(o.id);
+    this.syncWingmen();
     this.updateStream();
+    if (!mine) { this.onCompanionSkill(); if (!this.ritual) this.hudBuild = this.buildSummary(); return; } // 队友的升级：数据照常，表现只在他自己那边
     Sound.setCardMods([this.support ? { thunder: 'echo', wing: 'mirror', magnet: 'gentle', ice: 'tide', rainbow: 'paperboat' }[this.support.id] : null, this.gun.bomb ? 'overheat' : null].filter(Boolean));
     this.emit('pick', { kind: o.kind, id: o.id, name: info.name, lv: info.lv, desc: info.desc, color: info.color, tag: info.tag, first: this.picks.length === 1 });
     this.onCompanionSkill();
@@ -296,8 +301,7 @@ Object.assign(World.prototype, {
     if (!name) return;
     if (!this.stream && this.picks.length >= 4) {
       this.stream = { id: this.topId(), name };
-      this.highlight(); this.emit('stream', { id: this.stream.id, name });
-      Sound.sfx('stream', { ui: true });
+      this.highlight(); if (this.mine()) { this.emit('stream', { id: this.stream.id, name }); Sound.sfx('stream', { ui: true }); }
     } else if (this.stream) this.stream = { id: this.topId(), name };
   },
   buildSummary() {

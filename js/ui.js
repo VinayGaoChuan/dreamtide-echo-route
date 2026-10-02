@@ -243,7 +243,7 @@ function showMultiplayer(back) {
   hideHud(); G.world = null; Input.gameActive = false; stopPreview();
   const leaveAndBack = () => { Lobby.leave(); Lobby.onUpdate = null; back(); };
   const el = showScreen('mp', `${backBtn()}
-    <div class="screen-title"><h2>联机</h2><p>2–4 人同屏合作 · 共用一套升级 · 倒下的队友飞过去就能救起</p></div>
+    <div class="screen-title"><h2>联机</h2><p>2–4 人同屏合作 · 升级和掉落各拿各的 · 倒下的队友飞过去就能救起</p></div>
     <div class="mp-wrap">
       <div class="panel set-sec mp-me">
         <h3>你</h3>
@@ -313,7 +313,7 @@ function startRun(stageId, mp) {
   m.records.runs++; Tele.log('run_started', { stage: stageId });
   applySettings(); clearScreens(); stopPreview();
   G.bg = 'world'; G.paused = false; G.mapHint = null; G.hintId = null;
-  G.tutorial = { on: !m.tutorialDone };
+  G.tutorial = { on: !mp && !m.tutorialDone }; // 联机不显示单人的开局教学清单
   G.world = new World({
     mode: 'run', W: mp ? 1280 : G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first,
     seed: mp ? mp.st.seed : undefined, me: mp ? mp.idx : 0,
@@ -338,7 +338,7 @@ function startRun(stageId, mp) {
     const sr = $('#stage').getBoundingClientRect(), r = el.getBoundingClientRect(); if (!r.width && k !== 'link') return null;
     return { x: (r.left + (r.width || 60) / 2 - sr.left) / G.scale, y: (r.top + (r.height || 20) / 2 - sr.top) / G.scale };
   };
-  if (mp) { G.mpLoop = { t0: performance.now(), steps: 0, dx: 0, dy: 0, waitT: 0, desyncShown: false, last: performance.now() }; banner(`${stageId} ${STAGES[stageId].name} · ${mp.st.roster.length} 人联机`, '队伍共用一套升级：谁先飞进候选圈谁替大家选', 2.4); }
+  if (mp) { G.mpLoop = { t0: performance.now(), steps: 0, dx: 0, dy: 0, waitT: 0, desyncShown: false, last: performance.now() }; banner(`${stageId} ${STAGES[stageId].name} · ${mp.st.roster.length} 人联机`, '升级和掉落各拿各的：别人的掉落你看不见', 2.4); }
   else banner(`${stageId} ${STAGES[stageId].name}`, `${PLANES[id].name} · 目标一个一个来：先清掉普通怪群`, 2);
   persist();
 }
@@ -1008,7 +1008,7 @@ function updateHud(force) {
   setText(R.dust, 'dust', String(h.dust));
   if (R.team && h.team) { // 联机：队友状态（生命 / 倒下倒计时 / 已离开）
     const tk = h.team.map((q) => `${q.hp}/${q.maxHp}/${q.alive}/${q.down}/${q.gone}`).join('|');
-    if (L.team !== tk) { L.team = tk; R.team.innerHTML = h.team.filter((q) => !q.me).map((q) => `<div class="${q.gone ? 'gone' : !q.alive ? 'down' : ''}"><i style="background:${q.color}"></i><b>${esc(q.name)}</b>${q.gone ? '已离开' : !q.alive ? `倒下 · ${q.down} 秒内飞过去救` : `<span class="hp">${'♥'.repeat(Math.max(0, q.hp))}</span>`}</div>`).join(''); }
+    if (L.team !== tk) { L.team = tk; R.team.innerHTML = h.team.filter((q) => !q.me).map((q) => `<div class="${q.gone ? 'gone' : !q.alive ? 'down' : ''}"><i style="background:${q.color}"></i><b>${esc(q.name)}</b>${q.gone ? '已离开' : !q.alive ? `倒下 · 飞过去救 · ${q.down}` : `<span class="hp">${'♥'.repeat(Math.max(0, q.hp))}</span>`}</div>`).join(''); }
   }
   setText(R.stream, 'stream', h.stream || '');
   // 三个槽：主炮改造链（只显示最高阶造型 + 各改造等级）/ 支援 / 大招改造
@@ -1054,7 +1054,7 @@ function updateHud(force) {
   if (L.bp !== p) { L.bp = p; R.burst.style.setProperty('--p', p); }
   if (L.ready !== h.ready) { L.ready = h.ready; R.burst.classList.toggle('ready', h.ready); }
   setText(R.stock, 'stock', `${h.stock}/${h.cap}`);
-  const bs = h.down ? `倒下了 · 队友 ${h.down} 秒内飞到你身边就能救起` : h.stock >= h.cap ? `可释放 · 已存满 ${h.stock}/${h.cap}` : h.stock > 0 ? `可释放 · 还能再存 ${h.cap - h.stock} 次` : `大招充能 ${p}%`;
+  const bs = h.down ? `倒下了 · 队友贴过来就能救起（${h.down} 秒后自动复活）` : h.stock >= h.cap ? `可释放 · 已存满 ${h.stock}/${h.cap}` : h.stock > 0 ? `可释放 · 还能再存 ${h.cap - h.stock} 次` : `大招充能 ${p}%`;
   if (L.bs !== bs) { L.bs = bs; R.bstate.textContent = bs; R.bstate.classList.toggle('ready', h.stock > 0); }
   updateTutorial(h, R);
   const key = Input.hintFor('burst');

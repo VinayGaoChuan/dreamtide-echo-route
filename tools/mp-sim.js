@@ -63,7 +63,10 @@ function runDirect(stage, n) {
     if (R(ctxs[0], '__w.done') ) break;
   }
   const res = R(ctxs[0], '__res && { win: __res.win, runT: Math.round(__res.runT), kills: __res.stats.kills }');
-  return { stage, n, ok: true, frames: frame, res };
+  // 每架飞机自己的 Build 和星砂（各端看到的必须一样；不同飞机之间应该各不相同）
+  const per = R(ctxs[0], `JSON.stringify(__w.players.map((q) => ({ build: q.picks.map((o) => o.kind[0] + ':' + o.id).join('>'), dust: Math.round(q.res.dust), offers: q.res.offers })))`);
+  const ends = ctxs.map((c) => R(c, '__res && JSON.stringify([__res.stats.dust, __res.stats.crystals, __res.build.gun])'));
+  return { stage, n, ok: true, frames: frame, res, per: JSON.parse(per), myResults: ends };
 }
 
 async function runNet(stage, n) {

@@ -83,7 +83,7 @@ Object.assign(World.prototype, {
     if (this.D.mapAt >= 0 && G.t >= this.D.mapAt && !this.focusBusy()) { this.D.mapAt = -1; this.spawnMapObject(G.B.map, { optional: true }); }
     let done = false;
     switch (G.kind) {
-      case 'crowd': done = G.n >= G.total && this.m.firstSkill !== null && !this.ritual && !this.ritualQueue.length; break;
+      case 'crowd': done = G.n >= G.total && this.m.firstSkill !== null && !this.worldRitualBusy(); break;
       case 'armor1': case 'cmdr': case 'spawner': done = G.t > 1 && this.targetsAlive() === 0; break;
       case 'pack': if (G.t > 1 && this.targetsAlive() === 0) { if (G.wave + 1 < G.waves) this.packWave(G, G.wave + 1); else done = true; } break;
       case 'chase': {
@@ -120,14 +120,14 @@ Object.assign(World.prototype, {
     const D = this.D; D.t += dt;
     this.updateProps(dt);
     if (D.st === 'goal') this.goalTick(dt);
-    else if (D.st === 'adv') { if (!this.ritual && !D.demo) D.advT -= dt; if (D.advT <= 0) this.previewNext(); }
+    else if (D.st === 'adv') { if (!this.worldRitual() && !D.demo) D.advT -= dt; if (D.advT <= 0) this.previewNext(); }
     else if (D.st === 'preview') {
       const busy = this.enemies.filter((e) => e.alive && !e.fodder && e.x < this.W + 40).length;
       if (D.t >= PREVIEW_T && (busy < 10 || D.t > 5) && !this.focusBusy() && !D.demo) this.beginBeat(this.beatIdx + 1);
-    } else if (D.st === 'reward' && D.reward === 'core' && D.t > 30 && !this.props.some((p) => p.kind === 'core') && !this.ritual && !this.ritualQueue.length) { D.st = 'adv'; D.advT = 3; }
+    } else if (D.st === 'reward' && D.reward === 'core' && D.t > 30 && !this.props.some((p) => p.kind === 'core') && !this.worldRitualBusy()) { D.st = 'adv'; D.advT = 3; }
     // 验收记录：没有主目标、屏幕上也没有可打的东西的时长（优势窗口里验证编队还在就不算）
     const idle = D.st === 'preview' || (D.st === 'adv' && !this.enemies.some((e) => e.alive && !e.isBoss && e.x < this.W));
-    if (idle && !this.ritual) { D.noGoalT += dt; this.m.noGoalMax = Math.max(this.m.noGoalMax, D.noGoalT); } else D.noGoalT = 0;
+    if (idle && !this.worldRitual()) { D.noGoalT += dt; this.m.noGoalMax = Math.max(this.m.noGoalMax, D.noGoalT); } else D.noGoalT = 0;
     this.fill(dt);
     this.burstDemo(dt);
   },
@@ -136,7 +136,7 @@ Object.assign(World.prototype, {
     this.D.st = 'preview'; this.D.t = 0; this.D.verify = null;
     this.emit('goalNext', { title: nb.goal, kind: nb.kind, portrait: nb.kind === 'surprise' ? nb.surprise : PORTRAIT_OF[nb.kind] || 'jelly', boss: nb.kind === 'boss' });
   },
-  focusBusy() { return !!(this.ritual || (this.surprise && this.surprise.busy) || this.bursting); },
+  focusBusy() { return !!(this.worldRitual() || (this.surprise && this.surprise.busy) || this.bursting); },
   /* 首次大招教学：只在“预告下一个目标”的空档里开（不和验证编队、装置操作抢）；清掉敌弹、停刷怪、摆一排好打的靶子，
      同一时间只有这一个中央教学；放过一次（或 9 秒后）就收回，之后只剩大招按钮发光 */
   burstDemo(dt) {
@@ -146,7 +146,7 @@ Object.assign(World.prototype, {
       if (this.m.bursts > 0 || D.demo.t > 9) { D.demo = null; this.emit('burstDemoEnd'); }
       return;
     }
-    if (!(this.first || this.tutorial) || this.tutorCharge || this.m.bursts > 0 || this.runT < 40 || this.ritual || this.ritualQueue.length) return;
+    if (!(this.first || this.tutorial) || this.tutorCharge || this.m.bursts > 0 || this.runT < 40 || this.worldRitualBusy()) return;
     if (D.st !== 'preview' || this.mapObjs.some((o) => ['idle', 'tow', 'blow', 'boom'].includes(o.state) && o.x < this.W) || (this.surprise && this.surprise.busy)) return;
     this.tutorCharge = true; D.demo = { t: 0 };
     if (p.stock < 1) this.addStock(1, false, true);
@@ -158,7 +158,7 @@ Object.assign(World.prototype, {
   /* ---------- 背景杂兵：一直都有，主目标在场 / 预告 / 仪式时减少 ---------- */
   fill(dt) {
     const D = this.D, st = this.stage;
-    if (this.ritual || (this.surprise && this.surprise.busy) || D.demo) return;
+    if (this.worldRitual() || (this.surprise && this.surprise.busy) || D.demo) return;
     let rate = st.fill || 2.3;
     if (this.runT < 6) rate *= 0.5;
     if (D.st === 'preview') rate *= 0.35;
@@ -353,7 +353,7 @@ Object.assign(World.prototype, {
         case 'core': { // 精英核心：飘到飞机前方，碰到（或 3 秒后）变成水晶转盘
           const tx = clamp(p.x + 220, this.W * 0.35, this.W * 0.7), ty = clamp(p.y, this.arena.top + 90, this.arena.bottom - 90);
           P.x = smooth(P.x, tx, 1.5, dt); P.y = smooth(P.y, ty, 1.5, dt);
-          if ((dist2(P.x, P.y, p.x, p.y) < 70 * 70 || P.t > 3.2) && !P.done && !this.ritual) {
+          if ((dist2(P.x, P.y, p.x, p.y) < 70 * 70 || P.t > 3.2) && !P.done && !this.worldRitual()) { // 多人：碰到后每架飞机各来一次升级
             P.done = true;
             this.queueRitual('core', { full: true, q: 1, x: P.x, y: P.y, device: 'crystal', promise: '强化 Build' });
             this.m.interacts++;
@@ -397,8 +397,9 @@ Object.assign(World.prototype, {
   },
   /* 奖励装置的当前一步：穿过风环 → 已激活 → 选择强化（之后是“验证新能力”） */
   rewardStep(k) {
-    if (this.ritual) return this.ritual.st === 'choose' ? '选择强化 · 飞进一个方案' : '强化来了 · 看它转出什么';
-    if (this.ritualQueue.length) return '强化装置启动中…';
+    const MR = this.me.ritual; // 目标卡上的提示只看本机这架
+    if (MR) return MR.st === 'choose' ? '选择强化 · 飞进一个方案' : '强化来了 · 看它转出什么';
+    if (this.me.ritualQueue.length) return '强化装置启动中…';
     if (k === 'core') return this.props.some((p) => p.kind === 'core') ? '碰一下精英掉下的核心' : '强化装置启动中…';
     const o = this.mapObjs.find((q) => q.kind === k && q.reward);
     if (!o) return REWARD_GOAL[k] || '拿奖励';

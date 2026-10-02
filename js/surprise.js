@@ -29,7 +29,7 @@ Object.assign(World.prototype, {
     if (S.st === 'clue') {
       F.blink = (S.t % 1.7) < 0.18 ? 1 : 0; F.notch += dt * 1.4; F.shade = clamp(S.t / 7, 0, 1);
       if (S.t > 3 && !S.said) { S.said = true; this.text('月亮刚刚……眨了一下眼？', this.W * 0.4, LH * 0.2 + 90, '#dcd0ff', 18, 4); Sound.sfx('moonBlink'); }
-      if (S.t > 7 && !this.ritual) { this.surpriseTo(S, 'detach'); S.busy = true; this.clearBullets(true); Sound.sfx('moonDetach'); this.shake(0.3); this.rumble(0.5, 0.3, 300); S.title = '月亮掉下来了！'; S.sub = null; }
+      if (S.t > 7 && !this.worldRitual()) { this.surpriseTo(S, 'detach'); S.busy = true; this.clearBullets(true); Sound.sfx('moonDetach'); this.shake(0.3); this.rumble(0.5, 0.3, 300); S.title = '月亮掉下来了！'; S.sub = null; }
     } else if (S.st === 'detach') {
       const u = Ease.inOutCubic ? Ease.inOutCubic(clamp(S.t / 2.2, 0, 1)) : clamp(S.t / 2.2, 0, 1);
       F.gone = true;
@@ -52,7 +52,7 @@ Object.assign(World.prototype, {
       S.sub = teeth.length ? '碎片在不同高度，对准了打' : '核心露出来了';
       if (!teeth.length && !S.exposed) { S.exposed = true; Sound.sfx('weakOpen'); this.text('核心露出来了！', S.mx, S.my - 140, '#fff3c8', 22, 5); }
       // 攻击：咬（先画出一条航道预警）/ 手臂甩出扇形弹
-      if (!this.ritual) S.atkT -= dt;
+      if (!this.worldRitual()) S.atkT -= dt;
       if (S.atkT <= 0 && this.state === 'play') {
         S.atkT = teeth.length ? 3.3 : 2.8; S.atk++;
         if (S.atk % 2) {
@@ -94,7 +94,7 @@ Object.assign(World.prototype, {
     if (S.st === 'clue') {
       S.wob = (S.t % 2.2) < 0.35 ? Math.sin(S.t * 40) * 0.2 : 0; S.eyes = clamp((S.t - 3) / 0.6, 0, 1); S.peel = clamp((S.t - 6) / 2, 0, 1);
       if (S.t > 3.2 && !S.said) { S.said = true; Sound.sfx('moonBlink'); S.sub = '它长出眼睛了……'; }
-      if (S.t > 9 && !this.ritual) { this.surpriseTo(S, 'peel'); S.busy = true; this.clearBullets(true); Sound.sfx('peel'); S.title = '贴纸撕下来跳进战场了！'; S.sub = null; S.x0 = S.sx; S.y0 = S.sy; }
+      if (S.t > 9 && !this.worldRitual()) { this.surpriseTo(S, 'peel'); S.busy = true; this.clearBullets(true); Sound.sfx('peel'); S.title = '贴纸撕下来跳进战场了！'; S.sub = null; S.x0 = S.sx; S.y0 = S.sy; }
     } else if (S.st === 'peel') {
       const u = clamp(S.t / 1.2, 0, 1), k = Ease.inOutCubic ? Ease.inOutCubic(u) : u;
       S.mx = lerp(S.x0, this.W * 0.74, k); S.my = lerp(S.y0, mid, k) - Math.sin(u * Math.PI) * 80; S.r = lerp(26, 46, k);
@@ -112,7 +112,7 @@ Object.assign(World.prototype, {
           e.x = lerp(this.W * 0.74, this.W * 0.3, k); e.y = S.dash.y; if (u >= 1) S.dash = null;
         } else { e.x = smooth(e.x, this.W * 0.74, 3, dt); e.y = smooth(e.y, mid + Math.sin(S.t * 0.8) * 110, 2, dt); }
         S.prog = { type: 'hp', u: e.hp / e.maxHp };
-        if (!this.ritual) S.atkT -= dt;
+        if (!this.worldRitual()) S.atkT -= dt;
         if (S.atkT <= 0 && !S.dash && this.state === 'play') {
           S.atkT = 3.4; S.n = (S.n || 0) + 1;
           if (S.n % 2) {
@@ -135,7 +135,7 @@ Object.assign(World.prototype, {
       S.hx = smooth(S.hx, this.W * 0.66, 0.9, dt); S.beat = (S.t % 0.9) < 0.12 ? 1 : 0;
       const bx = S.hx - 122, by = S.hy + 36; S.guide = { x: bx, y: by };
       if (S.t > 3.5 && !S.said) { S.said = true; S.sub = '烟囱在呼吸，门缝里好像有牙'; }
-      if ((this.players.some((q) => q.alive && dist2(q.x, q.y, bx, by) < 60 * 60) || S.t > 12) && !this.ritual) {
+      if ((this.players.some((q) => q.alive && dist2(q.x, q.y, bx, by) < 60 * 60) || S.t > 12) && !this.worldRitual()) {
         this.surpriseTo(S, 'wake'); S.busy = true; S.guide = null; this.clearBullets(true); Sound.sfx('houseWake'); this.shake(0.4); this.rumble(0.6, 0.4, 200);
         S.title = '梦灯屋站起来了！'; S.sub = null;
       }
@@ -152,7 +152,7 @@ Object.assign(World.prototype, {
       if (e.alive) {
         S.hy = smooth(S.hy, S.ty, 4, dt); S.hx = smooth(S.hx, this.W * 0.72, 2, dt); e.x = S.hx; e.y = S.hy - 30;
         S.prog = { type: 'hp', u: e.hp / e.maxHp };
-        if (!this.ritual) S.atkT -= dt;
+        if (!this.worldRitual()) S.atkT -= dt;
         if (S.atkT <= 0 && this.state === 'play') {
           S.atkT = 3.0;
           const ny = spick([this.arena.top + 150, mid + 20, this.arena.bottom - 80].filter((y) => Math.abs(y - S.ty) > 60));
