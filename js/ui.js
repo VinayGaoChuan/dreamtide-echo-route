@@ -269,10 +269,11 @@ function showMultiplayer(back) {
     if (G.screen !== 'mp' || !document.body.contains(el)) { Lobby.onUpdate = null; return; }
     const net = Lobby.net, body = $('#mp-body', el); if (!net) return;
     const rooms = Lobby.openRooms(), room = Lobby.code ? Lobby.room() : null;
-    if (Lobby.code && !Lobby.isHost && !room) { Lobby.leave(); toast('房主离开了，房间已解散', '#ffb2a8'); }
+    if (Lobby.code && !Lobby.isHost && !room && net.connected()) { Lobby.leave(); toast('房主离开了，房间已解散', '#ffb2a8'); }
+    $('#mp-net', el).textContent = net.kind === 'ws' ? (net.connected() ? `已连上联机服务器${net.rtt !== null ? ` · 延迟 ${net.rtt} 毫秒` : ''}` : '正在连接联机服务器…')
+      : net.kind === 'room' ? '通过 Claude 房间连接：打开同一个游戏链接的人都能看到你的房间。' : '本机测试模式：在这个浏览器里再开一个窗口打开游戏，就能互相看到。';
     const k = JSON.stringify([Lobby.code, Lobby.isHost, stage, delay, room && room.members.map((x) => [x.peer, x.name, x.plane, x.playing]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.members[0].name])]);
     if (k === sig) return; sig = k;
-    $('#mp-net', el).textContent = net.kind === 'room' ? '通过 Claude 房间连接：打开同一个游戏链接的人都能看到你的房间。' : '本机测试模式：在这个浏览器里再开一个窗口打开游戏，就能互相看到。（在 Claude 里打开游戏链接才能和别人联机）';
     if (!Lobby.code) {
       body.innerHTML = `<h3>房间</h3>
         <div class="row wrap"><button class="btn primary" id="mp-create" type="button" autofocus>${icon('i-play')} 创建房间</button><span class="dim-text">建好后把同一个链接发给朋友</span></div>
@@ -283,7 +284,7 @@ function showMultiplayer(back) {
     }
     const ms = room ? room.members : [], host = Lobby.isHost, n = ms.length;
     const chips = STAGE_ORDER.map((id) => { const ok = stageUnlocked(id); return `<button class="stage-chip ${id === stage ? 'sel' : ''} ${ok ? '' : 'locked'}" data-mst="${id}" type="button" ${ok ? '' : 'aria-disabled="true"'}><b>${id}</b><span>${STAGES[id].name}</span>${ok ? '' : icon('i-lock')}</button>`; }).join('');
-    const dOpts = net.kind === 'room' ? [[4, '短'], [5, '标准'], [8, '长']] : [[3, '短'], [5, '标准'], [8, '长']], dNow = delay || (net.kind === 'room' ? 5 : 3);
+    const dOpts = net.kind === 'room' ? [[4, '短'], [5, '标准'], [8, '长']] : net.kind === 'ws' ? [[3, '短'], [4, '标准'], [6, '长']] : [[3, '短'], [5, '标准'], [8, '长']], dNow = delay || (net.kind === 'room' ? 5 : net.kind === 'ws' ? 4 : 3);
     body.innerHTML = `<h3>房间 <b class="mp-code">${esc(Lobby.code)}</b> <small class="dim-text">${n}/${MP_MAX} 人</small></h3>
       <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : ''}<br><small class="dim-text">${PLANES[x.plane].name}</small></span></div>`).join('')}</div>
       ${host ? `<div class="label">关卡</div><div class="stage-row">${chips}</div>

@@ -45,6 +45,8 @@ Q 版手绘风的横版自动射击 Roguelite（HTML / Canvas Demo，目标平�
 | `js/main.js` | 启动、自适应舞台、固定步长主循环、联机主循环 |
 | `tools/smoke-sim.js` | 无头冒烟测试（假画布跑三关） |
 | `tools/mp-sim.js` | 联机同步测试：几个独立 JS 环境各跑一份同一局，逐帧比对状态 |
+| `server/relay.js` | 联机中转服务器（零依赖 Node）：同一个端口提供游戏网页和 WebSocket `/mp` |
+| `tools/relay-test.js` · `tools/deploy-server.js` | 中转服务器自测；一键部署到 Debian / Ubuntu 主机 |
 | `build.py` | 把 js 内联成单个 HTML |
 | `docs/` | 全部策划文档和美术规范；先看 [docs/README.md](docs/README.md)（阅读顺序、冲突时以哪份为准、哪些部分已不做） |
 
@@ -59,6 +61,7 @@ node tools/smoke-sim.js js 1-2                             # 只跑一关
 node tools/mp-sim.js js all 2 direct                       # 联机：2 人跑三关，逐帧比对是否同步
 node tools/mp-sim.js js 1-2 3 net 0.2 100 5                # 联机：3 人，20% 丢包、100 毫秒延迟、缓冲 5 帧
 node tools/mp-sim.js js 1-1 2 net 0.15 80 4 1@2500         # 联机：第 2 位玩家在第 2500 帧掉线
+node tools/relay-test.js                                   # 联机中转服务器：握手、转发、房间范围、断开
 python3 build.py dist/dreamtide.html                       # 打包单文件（dist/ 不入库）
 ```
 
@@ -89,11 +92,20 @@ GitHub Actions（`.github/workflows/check.yml`）会在每次推送到 main 和�
 
 | 环境 | 转发 | 说明 |
 |---|---|---|
+| 联机服务器提供的网页（`http://服务器:8080/`） | `WsNet`：WebSocket 连 `server/relay.js` | 主力方案。服务器在网页里写入 `window.DREAMTIDE_WS`，网页和连接同源、不需要证书；断线自动重连、身份不变，自己掉线时不会误判别人掉线；也可以用 `?mp=ws://主机:端口/mp` 指定 |
 | 在 Claude 里打开的游戏 Artifact | `RoomNet`：Claude Artifact 的 `room` 能力 | 打开同一个链接、已登录的同组织成员互相可见；每人的在场状态 ≤ 4 KiB、约 30 次 / 秒、只保留最新——所以每份状态都带着“别人还缺的那段操作帧”，丢了下一份补上 |
 | GitHub Pages / 本地 / 未登录 | `LocalNet`：BroadcastChannel | 只连同一浏览器的多个窗口，用来测试：同一个地址开两个窗口就能进同一个房间 |
 | Steam（下一步） | 待做：Steam 大厅 + `ISteamNetworkingMessages`（Electron + steamworks.js） | 实现同一套在场状态接口即可，帧同步和游戏代码不用改 |
 
 标签页切到后台时浏览器会停掉画面刷新，联机由 Worker 计时器（`NetTicker`）继续采操作、跑模拟，队友不用等。
+
+**联机服务器**：`server/relay.js` 只转发在场状态、不跑游戏逻辑；同一房间的人收完整状态，房间外的人只收大厅摘要。部署：
+
+1. 让服务器信任部署密钥（在自己的终端运行，会问一次 root 密码）：`ssh-copy-id -i ~/.ssh/dreamtide_ed25519.pub root@服务器`
+2. 云控制台安全组放行 TCP 8080 入方向
+3. `node tools/deploy-server.js root@服务器`（打包网页 → 装 Node → 上传 → systemd 常驻 → 从本机检查外网能否访问）
+
+联机网址是 `http://服务器:8080/`。GitHub Pages（https）连不了 `ws://`，要让 Pages 也能联机，需要给服务器配域名和证书（`wss://`）。
 
 ## 协作流程
 

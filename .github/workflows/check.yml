@@ -25,5 +25,7 @@ jobs:
         run: node tools/mp-sim.js js all 2 direct
       - name: 联机网络（3 人、20% 丢包、中途掉线）
         run: node tools/mp-sim.js js 1-2 3 net 0.2 100 5 2@3000
+      - name: 联机中转服务器
+        run: node tools/relay-test.js
       - name: 打包单文件
         run: python3 build.py dist/dreamtide.html

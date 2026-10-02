@@ -3,10 +3,11 @@
    · 操作帧：30 帧 / 秒，每帧推进 4 个模拟步（1/120 秒）；本机操作晚 delay 帧生效，用来盖住网络延迟。
    · 传输：每端持续发布一份“在场状态”（最新的覆盖旧的，丢了下一份会补上），里面带着所有玩家最近收到的操作帧（互相转发，谁掉线了别人也能补齐）、
      自己收到了哪些帧、以及每秒一次的状态哈希。谁都可以发在场状态，不需要额外权限。
-   · 转发层可换：Claude Artifact 房间（room 能力）/ 同一浏览器多窗口（BroadcastChannel，本地测试）/ 以后的 Steam 网络（同一套接口）。
+   · 转发层可换：自己的联机服务器（WebSocket，server/relay.js）/ Claude Artifact 房间（room 能力）/ 同一浏览器多窗口（BroadcastChannel，本地测试）/ 以后的 Steam 网络（同一套接口）。
    · 断线：房主（名单里最靠前、还在线的那位）等其他人收齐掉线者的操作后，宣布“从第 F 帧起移除”；所有端在同一帧移除那架飞机。 */
 
 const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, runAhead: 30, catchUp: 4 };
+const MP_PROTO = 1; // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
 
 /* ---------- 操作编码：一帧 5 个字符 ---------- */
 const NetCodec = {
@@ -73,7 +74,7 @@ class LockstepSession {
     }
     if (Array.isArray(msg.a) && msg.a.length === this.n) this.peerAck[from] = msg.a.slice();
     if (Array.isArray(msg.h) && this.hashLog.has(msg.h[0]) && this.hashLog.get(msg.h[0]) !== msg.h[1] && !this.desync) this.desync = { frame: msg.h[0], mine: this.hashLog.get(msg.h[0]), theirs: msg.h[1], from };
-    if (Array.isArray(msg.d)) for (const [j, F] of msg.d) if (this.drops[j] === undefined && j !== this.me) this.drops[j] = F;
+    if (Array.isArray(msg.d)) for (const [j, F] of msg.d) { if (j === this.me) { if (this.kicked === undefined) this.kicked = F; } else if (this.drops[j] === undefined) this.drops[j] = F; } // 别人把我判成掉线了：本机这局也结束
   }
   /* 发布：所有人里还有谁缺哪些帧，就把那段帧带上（每人最多 window 帧） */
   flush(extra) {
@@ -139,6 +140,55 @@ class RoomNet {
   connected() { return this.room.connected(); }
   close() { try { this.room.presence({ mp: null }); } catch (e) { /* ignore */ } if (this.unsub) this.unsub(); this.subs = []; }
 }
+/* 自己的联机服务器（server/relay.js）：WebSocket 连接，服务器约 30 次 / 秒推送别人的最新在场状态；断线自动重连，身份不变 */
+class WsNet {
+  constructor(url, ch) {
+    this.kind = 'ws'; this.url = url; this.ch = ch; this.subs = []; this.others = new Map(); this.me = {}; this.pending = null;
+    this.selfId = 'W' + Math.random().toString(36).slice(2, 12); this.open = false; this.closed = false; this.retry = 0; this.rtt = null; this.sentAt = 0; this.pingAt = 0;
+    this.off = NetTicker.on((now) => this.tick(now));
+    this.dial();
+  }
+  dial() {
+    if (this.closed) return;
+    let ws; try { ws = new WebSocket(this.url); } catch (e) { this.redial(); return; }
+    this.ws = ws;
+    ws.onopen = () => { this.open = true; this.retry = 0; ws.send(JSON.stringify({ t: 'hello', id: this.selfId, ch: this.ch })); if (Object.keys(this.me).length) this.pending = Object.assign({}, this.me); this.emit(); };
+    ws.onmessage = (ev) => this.onMsg(ev.data);
+    ws.onclose = () => { const was = this.open; this.open = false; this.ws = null; if (was) { this.others.clear(); this.emit(); } this.redial(); };
+    ws.onerror = () => {};
+  }
+  redial() { if (this.closed) return; this.retry++; setTimeout(() => this.dial(), Math.min(5000, 300 * this.retry)); }
+  onMsg(text) {
+    let m; try { m = JSON.parse(text); } catch (e) { return; }
+    const put = (q) => this.others.set(q.peer, { presence: Object.freeze(q.p || {}), updatedAt: Date.now() });
+    if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.others.clear(); (m.peers || []).forEach(put); this.emit(); }
+    else if (m.t === 'u') { (m.peers || []).forEach(put); this.emit(); }
+    else if (m.t === 'bye') { this.others.delete(m.peer); this.emit(); }
+    else if (m.t === 'pong') this.rtt = Math.round(performance.now() - m.c);
+  }
+  tick(now) {
+    if (!this.open || !this.ws) return;
+    if (this.pending && now - this.sentAt >= 30) { this.ws.send(JSON.stringify({ t: 'p', d: this.pending })); this.pending = null; this.sentAt = now; }
+    if (now - this.pingAt > 2000) { this.pingAt = now; this.ws.send(JSON.stringify({ t: 'ping', c: now })); }
+  }
+  emit() { for (const fn of this.subs) fn(); }
+  peers() { return [{ peer: this.selfId, isMe: true, presence: this.me, updatedAt: Date.now() }, ...[...this.others].map(([peer, p]) => ({ peer, isMe: false, presence: p.presence, updatedAt: p.updatedAt }))]; }
+  presence(patch) {
+    const m = Object.assign({}, this.me); for (const k in patch) { if (patch[k] === null) delete m[k]; else m[k] = patch[k]; } this.me = m;
+    this.pending = Object.assign(this.pending || {}, patch); return Promise.resolve();
+  }
+  onChange(fn) { this.subs.push(fn); }
+  connected() { return this.open; }
+  close() { this.closed = true; if (this.off) this.off(); if (this.ws) try { this.ws.close(); } catch (e) { /* ignore */ } this.subs = []; }
+}
+/* 联机服务器地址：网页由服务器提供时，服务器会写入 window.DREAMTIDE_WS（同源 /mp）；测试时也可以用 ?mp=ws://主机:端口/mp 指定 */
+function mpServerUrl() {
+  let u = null; try { u = new URLSearchParams(location.search).get('mp'); } catch (e) { u = null; }
+  u = u || (typeof window !== 'undefined' && window.DREAMTIDE_WS) || null; if (!u) return null;
+  if (u.charAt(0) === '/') u = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + u;
+  return /^wss?:\/\//.test(u) ? u : null;
+}
+
 /* 同一浏览器的多个窗口 / 标签页（本地测试和 GitHub Pages 用）：BroadcastChannel 模拟同样的在场语义 */
 class LocalNet {
   constructor(name = 'dreamtide-mp') {
@@ -173,10 +223,11 @@ const Lobby = {
   linger: null, lastFlush: 0, sessionAt: 0, connectedNow: null,
   async connect() {
     if (this.net) return this.net;
+    const ws = mpServerUrl(); // 优先自己的联机服务器
     let room = null;
-    try { if (window.claude && typeof window.claude.use === 'function') room = await window.claude.use('room'); } catch (e) { room = null; }
+    if (!ws) try { if (window.claude && typeof window.claude.use === 'function') room = await window.claude.use('room'); } catch (e) { room = null; }
     if (this.net) return this.net;
-    this.net = room ? new RoomNet(room) : new LocalNet();
+    this.net = ws ? new WsNet(ws, 'dreamtide-' + MP_PROTO) : room ? new RoomNet(room) : new LocalNet();
     this.net.onChange(() => this.changed());
     NetTicker.on((now) => this.tick(now)); NetTicker.start();
     return this.net;
@@ -209,7 +260,7 @@ const Lobby = {
     const ms = this.members().slice(0, MP_MAX); if (ms.length < 2) return false;
     const roster = ms.map((m) => ({ peer: m.peer, name: m.name, plane: m.plane, stats: (m.prof && m.prof.s) || null, ultCap: (m.prof && m.prof.u) || 1, cos: (m.prof && m.prof.c) || {} }));
     const id = Math.random().toString(36).slice(2, 8), seed = (Math.random() * 4294967296) >>> 0;
-    this.me({ stage, start: { id, stage, seed, roster, delay: delay || (this.net.kind === 'room' ? 5 : 3) } });
+    this.me({ stage, start: { id, stage, seed, roster, delay: delay || (this.net.kind === 'room' ? 5 : this.net.kind === 'ws' ? 4 : 3) } });
     return true;
   },
   hostStart() { const r = this.room(); if (!r) return null; const host = this.net.peers().find((p) => p.peer === r.host); return (host && host.presence.mp && host.presence.mp.start) || null; },
@@ -232,6 +283,7 @@ const Lobby = {
   /* 把别人在场状态里的操作帧喂给会话（同一份状态对象不重复处理；只认这一局的） */
   pump() {
     const S = this.session || this.linger; if (!S || !this.net) return;
+    if (!this.net.connected()) return; // 自己掉线时别人看起来都“不在了”：这时不能判谁掉线，等重连
     const connected = Array(this.roster.length).fill(false); connected[S.me] = true;
     const early = Date.now() - this.sessionAt < 8000; // 开局头几秒，慢一步进来的人还没发出这局的操作，先算在线
     for (const p of this.net.peers()) {

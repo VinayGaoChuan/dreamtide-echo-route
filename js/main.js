@@ -100,6 +100,10 @@
   function mpTick(now) {
     const w = G.world, L = G.mpLoop, S = Lobby.session;
     if (!w || !L || !S || w.done) return;
+    if (S.kicked !== undefined) { // 断线太久，队友已经把我移出这一局
+      toast('网络断开太久，已经退出这一局', '#ffb2a8', null, 4000);
+      w.done = true; const r = w.result(false); r.abandoned = true; Lobby.leave(); onRunEnd(r); return;
+    }
     const dt = Math.min(0.25, Math.max(0, (now - L.last) / 1000)); L.last = now;
     const el = (now - L.t0) / 1000, FR = LOCKSTEP.hz, SP = LOCKSTEP.steps;
     // 1) 本机操作：第 k 帧在 (k - delay) / 30 秒时采样，delay 帧之后才生效
