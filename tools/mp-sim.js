@@ -130,7 +130,7 @@ async function runNet(stage, n) {
   while (true) {
     now += TICK; ticks++;
     queue.sort((a, b) => a.at - b.at);
-    while (queue.length && queue[0].at <= now) { const m = queue.shift(); if (dark[m.to] || dark[m.from]) continue; ctxs[m.to].__msg = m.obj; R(ctxs[m.to], `__sess.receive(${m.from}, __msg)`); }
+    while (queue.length && queue[0].at <= now) { const m = queue.shift(); if (dark[m.to] || dark[m.from]) continue; ctxs[m.to].__msg = m.obj; R(ctxs[m.to], `__sess.receive(${m.from}, __msg)`);}
     if (OUT) {
       if (outAt === null && maxFrame >= OUT.at) { outAt = ticks; outSpan = { from: ctxs.map((c) => R(c, '__sess.simFrame')) }; }
       if (outAt !== null && ticks === outAt + OUT.ticks) outSpan.to = ctxs.map((c) => R(c, '__sess.simFrame')); // 断网结束时其他人推进到哪了
@@ -141,7 +141,7 @@ async function runNet(stage, n) {
     for (let k = 0; k < n; k++) {
       const c = ctxs[k];
       if (gone[k]) continue;
-      c.__conn = gone.map((g, j) => !g && !dark[j]);
+      c.__conn = gone.map((g, j) => !g && !dark[j]); if (!dark[k]) R(c, '__sess.linkUp = __conn');
       if (!dark[k]) R(c, `__sess.isHost = __sess.hostIndex(__conn) === __sess.me; __sess.hostCheckDrops(__conn);`); // 断网的那位自己判断不了谁在线
       // 断线回来、本机多算过几帧：按完全相同的参数建一个新世界，从开局按认定的操作记录重算（和 MpDriver 一样）
       if (R(c, '__sess.needReplay')) { R(c, `__sess.needReplay = false; __sess.simFrame = 0; __sess.hashLog.clear(); __sess.desync = null; __replaying = true; __w = new World(__wopts());`); hashes[k].clear(); outInfo = outInfo || {}; outInfo.replays = (outInfo.replays || 0) + 1; }
@@ -158,7 +158,7 @@ async function runNet(stage, n) {
       if (DROP && k !== DROP[0] && !c.__dropSeen && R(c, '__w.players[' + DROP[0] + '].gone')) { c.__dropSeen = R(c, '__sess.simFrame'); }
     }
     const away = ctxs.map((c, k) => dark[k] || !!R(c, '__sess.awayMe || __replaying')); // 断线 / 追帧中的那位暂时不参与比对（回来后必须重新一致）
-    for (let f = Math.max(0, maxFrame - 5); f <= maxFrame; f++) { const hs = hashes.filter((m, k) => !gone[k] && !away[k]).map((m) => m.get(f)).filter((x) => x !== undefined); if (hs.length > 1 && hs.some((h) => h !== hs[0])) return { stage, n, ok: false, frame: f, note: 'net desync' }; }
+    for (let f = Math.max(0, maxFrame - 5); f <= maxFrame; f++) { const hs = hashes.filter((m, k) => !gone[k] && !away[k]).map((m) => m.get(f)).filter((x) => x !== undefined); if (hs.length > 1 && hs.some((h) => h !== hs[0])) return { stage, n, ok: false, frame: f, note: 'net desync', why: ctxs.map((c, k) => gone[k] ? 'gone' : R(c, 'JSON.stringify({ sim: __sess.simFrame, drops: __sess.drops, aways: __sess.aways.map((L) => L.map((r) => [r[0], r[1] === Infinity ? null : r[1]])), host: __sess.isHost, gone2: __w.players.map((q) => q.gone ? 1 : q.away ? "a" : 0).join("") })')) }; }
     if (allDone || ticks > 30 * 1500) break;
   }
   const live = ctxs.find((c, k) => !gone[k]);

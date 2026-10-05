@@ -11,6 +11,7 @@ const fs = require('fs'), vm = require('vm'), path = require('path');
 const ARGS = process.argv.slice(2).filter((a) => !a.startsWith('--')), FLAG = (k) => { const f = process.argv.find((a) => a.startsWith('--' + k + '=')); return f ? f.split('=')[1] : null; };
 const URL_ = ARGS[0] || 'ws://39.106.153.154:8080/mp', N = +(ARGS[1] || 2), MODE = ARGS[2] === 'vs' ? 'vs' : 'coop', STAGE = MODE === 'vs' ? '1-1' : ARGS[2] || '1-1', MAXS = +(ARGS[3] || 300);
 const HOST_LEAVE = FLAG('host-leave') ? +FLAG('host-leave') : null;
+const LAT = +(FLAG('lat') || 0), SPIKES = !!FLAG('spikes'); // 慢线路模拟：单向延迟毫秒；spikes=1 时每 15~25 秒随机卡住 1~4 秒（消息按顺序堆着，卡完一起到，像 TCP 重传）
 const RELOAD = FLAG('reload') ? (([k, t]) => ({ k: +k, at: +t }))(FLAG('reload').split('@')) : null; // --reload=1@60：第 2 个客户端第 60 秒刷新页面
 const DARK = FLAG('dark') ? (([k, r]) => { const [t, d] = r.split('~').map(Number); return { k: +k, at: t, dur: d }; })(FLAG('dark').split('@')) : null;
 const dir = path.join(__dirname, '..', 'js');
@@ -25,10 +26,24 @@ async function main() {
   let build = 'dev'; try { build = (await (await fetch(httpBase + '/health')).json()).build || 'dev'; } catch (e) { console.log('读不到 /health，用 dev 频道'); }
   const bots = [];
   const makeBot = (k, ss) => { // ss：这个“标签页”的 sessionStorage（刷新页面时原样带到新环境里）
-    const io = { tx: 0, rx: 0, txN: 0, rxN: 0 }; // 收发字节 / 条数（看带宽和服务器限流）
-    class CountingWS extends WebSocket { // 断网模拟：io.dark 时收发全丢（连接本身不关，和线路断掉一样）
-      constructor(u) { super(u); this.addEventListener('message', (ev) => { if (io.dark) { ev.stopImmediatePropagation(); return; } io.rx += String(ev.data).length; io.rxN++; }); }
-      send(d) { if (io.dark) return; io.tx += String(d).length; io.txN++; super.send(d); }
+    const io = { tx: 0, rx: 0, txN: 0, rxN: 0, hold: 0, nextSpike: Date.now() + 15000 + Math.random() * 10000 }; // 收发字节 / 条数（看带宽和服务器限流）
+    const slow = (prev) => { const now = Date.now(); if (SPIKES && now > io.nextSpike) { io.hold = now + 1000 + Math.random() * 3000; io.nextSpike = io.hold + 15000 + Math.random() * 10000; } return Math.max(now + LAT, prev, io.hold); };
+    class CountingWS extends WebSocket { // 断网模拟：io.dark 时收发全丢（连接本身不关，和线路断掉一样）；慢线路模拟：按顺序延迟收发
+      constructor(u) {
+        super(u); let rxAt = 0;
+        this.addEventListener('message', (ev) => {
+          if (io.dark) { ev.stopImmediatePropagation(); return; }
+          io.rx += String(ev.data).length; io.rxN++;
+          if (!LAT && !SPIKES) return;
+          ev.stopImmediatePropagation(); const data = ev.data; rxAt = slow(rxAt); setTimeout(() => { if (this.readyState === 1 && this.onmessage) this.onmessage({ data }); }, rxAt - Date.now()); // 连接关了就不再交付（和真实浏览器一样）
+        });
+        this.txAt = 0;
+      }
+      send(d) {
+        if (io.dark) return; io.tx += String(d).length; io.txN++;
+        if (!LAT && !SPIKES) return super.send(d);
+        this.txAt = slow(this.txAt); setTimeout(() => { try { super.send(d); } catch (e) { /* 已断开 */ } }, this.txAt - Date.now());
+      }
     }
     const ctx = { console, Math, Date, JSON, performance, setTimeout, clearTimeout, setInterval, clearInterval, WebSocket: CountingWS, URL, Blob, __io: io,
       window: { addEventListener: noop, matchMedia: () => ({ matches: false }), DREAMTIDE_BUILD: build }, document: { createElement: () => ({ width: 0, height: 0, getContext: () => fakeCtx }), addEventListener: noop, hidden: false },
@@ -36,7 +51,7 @@ async function main() {
       sessionStorage: { getItem: (x) => (x in ss ? ss[x] : null), setItem: (x, v) => { ss[x] = String(v); }, removeItem: (x) => { delete ss[x]; } }, __ss: ss };
     ctx.globalThis = ctx; vm.createContext(ctx);
     for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
-    ctx.__url = URL_; ctx.__k = k; ctx.__build = build; ctx.__stage = STAGE;
+    ctx.__url = URL_; ctx.__k = k; ctx.__dump = !!FLAG('dump'); ctx.__build = build; ctx.__stage = STAGE;
     vm.runInContext(`
       var meta = freshMeta(); Home.ensure(meta); var settings = DEFAULT_SETTINGS(); settings.particles = 'low';
       var B = { w: null, L: null, res: null, rescues: [], rtts: [], leads: [], started: false, stallMs: 0, maxWait: 0, prev: 0, slack: [], win: null };
@@ -91,7 +106,9 @@ async function main() {
         const now = performance.now();
         if (B.w && !B.w.done && Lobby.session && Lobby.orphaned()) { const S = Lobby.session; console.log('[orphan]', __k, JSON.stringify({ t: Math.round(performance.now()), synced: Lobby.net.synced, open: Lobby.net.open, heard: S.heard.map((h) => h ? Date.now() - h : null), wait: S.waitingFor(), sim: S.simFrame, aways: S.aways, sessionAge: Date.now() - Lobby.sessionAt, peers: Lobby.net.peers().length })); B.orphan = true; B.w.done = true; Lobby.endGame(); } // 队友那边已经结束
         if (B.w && !B.w.done && Lobby.session) {
+          const f0 = Lobby.session.simFrame;
           const stalled = MpDriver.tick(B.w, B.L, Lobby.session, now, () => bot(B.w, Lobby.session.me)); B.w.events.length = 0;
+          if (__dump && Lobby.session.simFrame !== f0 && Lobby.session.simFrame % 30 === 0) { B.dumps = B.dumps || new Map(); B.dumps.set(Lobby.session.simFrame, JSON.stringify(B.w.stateDump())); if (B.dumps.size > 400) B.dumps.delete(B.dumps.keys().next().value); }
           if (stalled) { B.stallMs += now - B.prev; B.win.stallMs += now - B.prev; } B.maxWait = Math.max(B.maxWait, B.L.waitT); B.win.maxWait = Math.max(B.win.maxWait, B.L.waitT);
           if (B.L.ticks % 40 === 0) { B.rtts.push(Lobby.net.rtt); B.leads.push(Lobby.lead); B.win.rtt.push(Lobby.net.rtt); B.win.lead.push(Lobby.lead); }
         }
@@ -150,7 +167,13 @@ async function main() {
   st.forEach((s, k) => console.log(`机器人${k + 1}`, JSON.stringify(s)));
   let failed = 0; const fail = (m) => { failed++; console.log('✗', m); };
   if (!st.every((s) => s.started)) fail('有人没开局');
-  if (st.some((s) => s.desync)) fail('状态不一致（不同步）');
+  if (st.some((s) => s.desync)) {
+    fail('状态不一致（不同步）');
+    if (FLAG('dump')) { // 找两端第一帧不一样的状态明细
+      const D = bots.map((c) => R(c, 'B.dumps ? [...B.dumps] : []')), m1 = new Map(D[0]), m2 = new Map(D[1]);
+      for (const [f, a] of m1) { const b = m2.get(f); if (b === undefined || a === b) continue; const A = JSON.parse(a), Bb = JSON.parse(b); console.log('第一处不同：帧', f); for (const k2 of Object.keys(A)) if (JSON.stringify(A[k2]) !== JSON.stringify(Bb[k2])) console.log('  ', k2, JSON.stringify(A[k2]).slice(0, 400), '\n  ≠', JSON.stringify(Bb[k2]).slice(0, 400)); break; }
+    }
+  }
   const rest = st.filter((s) => !s.left), finished = rest.every((s) => s.done);
   if (finished && MODE !== 'vs' && new Set(rest.map((s) => s.win)).size > 1) fail('各端结局不一样');
   if (finished && MODE === 'vs' && new Set(rest.map((s) => s.vs)).size > 1) fail('各端的对抗分数不一样');
@@ -179,7 +202,7 @@ async function main() {
     if (!rest.every((s) => s.frame > HOST_LEAVE * 30 + 300)) fail('房主离开后其余的人没有继续推进');
   }
   const playMs = (Date.now() - t0) * 1;
-  if (st.some((s, k) => !(DARK && k === DARK.k) && !(RELOAD && k === RELOAD.k) && s.stallMs > playMs * 0.1)) fail('卡顿太多（等待队友操作的时间超过 10%）'); // 断网 / 刷新那位自己离线的时间不算
+  if (!SPIKES && st.some((s, k) => !(DARK && k === DARK.k) && !(RELOAD && k === RELOAD.k) && s.stallMs > playMs * 0.1)) fail('卡顿太多（等待队友操作的时间超过 10%）'); // 断网 / 刷新那位自己离线的时间不算
   console.log(failed ? `真机联机测试失败 ${failed} 项` : `真机联机测试通过${finished ? '' : `（${MAXS} 秒内没打完，按已打部分判定）`}`);
   for (const c of bots) R(c, 'if (!B.left) { Lobby.leave(); Lobby.net.close(); }');
   setTimeout(() => process.exit(failed ? 1 : 0), 300);

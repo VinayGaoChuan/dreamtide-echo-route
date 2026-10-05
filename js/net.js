@@ -84,7 +84,8 @@ class LockstepSession {
       this.advanceHave(j);
     }
     if (Array.isArray(msg.a) && msg.a.length === this.n) this.peerAck[from] = msg.a.slice();
-    if (Array.isArray(msg.h) && this.hashLog.has(msg.h[0]) && this.hashLog.get(msg.h[0]) !== msg.h[1] && !this.desync) this.desync = { frame: msg.h[0], mine: this.hashLog.get(msg.h[0]), theirs: msg.h[1], from };
+    // 状态哈希比对：断线期间对方（或自己）算的状态会被重算，不比对
+    if (Array.isArray(msg.h) && !this.isAway(from, msg.h[0]) && !this.isAway(this.me, msg.h[0]) && this.hashLog.has(msg.h[0]) && this.hashLog.get(msg.h[0]) !== msg.h[1] && !this.desync) this.desync = { frame: msg.h[0], mine: this.hashLog.get(msg.h[0]), theirs: msg.h[1], from };
     if (Array.isArray(msg.d)) for (const [j, F] of msg.d) { if (j === this.me) { if (this.kicked === undefined) this.kicked = F; } else if (this.drops[j] === undefined) this.drops[j] = F; } // 别人把我判成掉线了：本机这局也结束
     if (Array.isArray(msg.w)) for (const w of msg.w) this.noteAway(w);
     if (typeof msg.ry === 'number' && this.openAway(from)) this.backReq[from] = msg.ry; // 断线的人回来了：从这一帧起可以恢复
@@ -95,8 +96,8 @@ class LockstepSession {
     if (!Array.isArray(w) || w.length !== 3) return;
     const [j, F, R] = w; if (!(j >= 0 && j < this.n) || !(F >= 0)) return;
     const L = this.aways[j]; let r = L.find((x) => x[0] === F);
-    if (!r) { r = [F, Infinity]; L.push(r); L.sort((a, b) => a[0] - b[0]); if (j === this.me && R === null) this.meAway(r); }
-    if (typeof R === 'number' && r[1] === Infinity) { r[1] = R; if (j === this.me) this.meBack(r); }
+    if (!r) { r = [F, Infinity]; L.push(r); L.sort((a, b) => a[0] - b[0]); if (j === this.me && R === null) this.meAway(r); if (j !== this.me) this.rejoinReq[j] = false; }
+    if (typeof R === 'number' && r[1] === Infinity) { r[1] = R; if (j === this.me && this.awayMe === r) this.meBack(r); } // 只有自己正在等的那一段结束才算恢复；刷新回来收到的旧区间只是历史记录
   }
   /* 本机被判断线：要是本机已经按自己的操作算过了第 F 帧以后（和大家认定的“断线占位”不一样），就得从开局按认定的记录重算 */
   meAway(r) { this.awayMe = r; this.ready = null; if (this.simFrame > r[0]) this.needReplay = true; }
@@ -116,7 +117,7 @@ class LockstepSession {
       let head = Infinity, lag = Infinity;
       for (let k = 0; k < this.n; k++) {
         if (k === this.me || this.drops[k] !== undefined) continue;
-        if (this.heard[k] && now - this.heard[k] > LOCKSTEP.silentAfter) continue;
+        if (this.linkUp ? !this.linkUp[k] : this.heard[k] && now - this.heard[k] > LOCKSTEP.silentAfter) continue; // 不在线（断线中）的人不参与；在线但网络慢的照样补（落后的单独一段）
         const a = this.peerAck[k] ? this.peerAck[k][j] : 0;
         if (this.have[j] - a <= LOCKSTEP.window) head = Math.min(head, a); else lag = Math.min(lag, a);
       }
@@ -134,7 +135,7 @@ class LockstepSession {
     if (Object.keys(this.drops).length) msg.d = Object.entries(this.drops).map(([j, F]) => [+j, F]); // 已定下的移除大家都转发，房主走了也不会丢
     const w = []; this.aways.forEach((L, j) => { for (const r of L) w.push([j, r[0], r[1] === Infinity ? null : r[1]]); }); if (w.length) msg.w = w; // 断线区间同样大家转发
     if (this.ready !== null && this.awayMe) msg.ry = this.ready;
-    if (this.rejoining) msg.rj = 1;
+    if (this.rejoining && !this.awayMe) msg.rj = 1; // 只在还不知道自己被判断线之前请求；知道了就改发“准备好了”（ry），免得慢网络下房主重复开断线区间
     this.send(msg);
     this.trimOld();
   }
@@ -153,7 +154,8 @@ class LockstepSession {
         if (!open && this.rejoinReq[j]) { // 刷新回来、还没被判断线：从大家都没收到他操作的那一帧起判成断线中，等他追上
           let F = this.have[j];
           for (let k = 0; k < this.n; k++) if (k !== j && connected[k] && this.peerAck[k]) F = Math.max(F, this.peerAck[k][j]);
-          this.aways[j].push([F, Infinity]); this.awayAt[j] = now; this.rejoinReq[j] = false;
+          if (!this.aways[j].some((r) => r[0] >= F)) { this.aways[j].push([F, Infinity]); this.awayAt[j] = now; } // 同一次刷新的迟到请求：已经有从这一帧起的区间了，不重复开
+          this.rejoinReq[j] = false;
         } else if (open && this.backReq[j] !== undefined) { open[1] = Math.max(this.backReq[j], this.simFrame + LOCKSTEP.backLead, open[0]); this.backReq[j] = undefined; this.rejoinReq[j] = false; }
         continue;
       }
@@ -451,7 +453,7 @@ const Lobby = {
     }
     S.isHost = S.hostIndex(connected) === S.me; // 房主走了（或断线中），名单里下一位在线的接手
     if (!this.net.syncedAt || performance.now() - this.net.syncedAt > 3000) S.hostCheckDrops(connected, quit); // 刚（重新）连上的几秒不判别人掉线：等名单和操作帧都到齐
-    this.connectedNow = connected;
+    this.connectedNow = connected; S.linkUp = connected;
   },
   myRtt() { const n = this.net; return n ? Math.round(n.rttHi || n.rtt || 0) : 0; },
   /* 队友那边这一局已经结束了（例如我断线期间他们打完或失败）：我自己确实连着，却 15 秒没收到任何队友的新操作，本机又卡着等 → 本机也结束。

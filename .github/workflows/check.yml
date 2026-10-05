@@ -48,5 +48,7 @@ jobs:
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 60
           node tools/net-bot.js ws://localhost:8091/mp 3 1-1 70 --host-leave=25
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 70 --reload=1@25
+          node tools/net-bot.js ws://localhost:8091/mp 2 1-1 90 --dark=1@10~20 --reload=1@50
+          node tools/net-bot.js ws://localhost:8091/mp 2 1-1 90 --reload=1@30 --lat=150 --spikes=1
       - name: 打包单文件
         run: python3 build.py dist/dreamtide.html
