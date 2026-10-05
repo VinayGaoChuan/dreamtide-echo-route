@@ -15,7 +15,7 @@ Object.assign(World.prototype, {
     this.mapObjs = []; this.orbs = []; this.companions = []; this.journey = [];
     this.mapCalm = false; this.mapDwell = false; this.cam = { z: 1, x: this.W / 2, y: LH / 2 };
     this.seenMap = new Set(o.seenMap || []); this.mapHintKind = null;
-    this.nextRare = false; this.rareNext = false; this.laneT = 0; this.minerKills = 0; this.grandpaT = 0;
+    this.nextRare = false; this.rareNext = false; this.laneT = 0; this.minerKills = 0; this.grandpaT = 0; this.sky = null;
     Object.assign(this.m, { interacts: 0, interactFails: 0, interactMax: 0, firstInteract: null, rescues: 0, giants: 0 });
   },
   spawnMapObject(kind, f = {}) {
@@ -23,15 +23,19 @@ Object.assign(World.prototype, {
     const o = { kind, id: this.eid++, t: 0, state: 'idle', phase: 'in', x: W + 220, y: mid, near: 0, alpha: 0, engageT: null, station: W * 0.64, seed: srand(10), optional: !!f.optional, reward: !!f.reward, wait: f.reward ? 1e9 : 20 };
     switch (kind) {
       case 'house': o.y = clamp(srand(mid - 40, mid + 80), top + 150, bot - 60); o.sensor = { dx: -122, dy: 36, r: 58 }; o.first = this.offerN === 0; if (o.first) o.wait = 1e9; break;
-      case 'wind': o.y = srand(mid - 90, mid + 90); o.station = W * 0.7; o.ringDx = -150; o.ringR = 92; o.spin = 0.6; break;
+      case 'wind':
+        o.y = srand(mid - 40, mid + 90); o.station = W * 0.7; o.ringDx = -150; o.ringR = 92; o.spin = 0.6;
+        if (this.wf.upper) { o.upper = { dx: -150, y: top + 64, r: 62 }; o.y = Math.max(o.y, top + 64 + 200); } // 家园修好了风道：塔顶多一个上层风圈（和下面的风圈分开）
+        break;
       case 'mine': {
         o.y = srand(mid - 100, mid + 100); o.station = W * 0.6; o.core = { x: o.x - 34, y: o.y - 12, towed: false };
         const side = o.y < mid ? 1 : -1; o.wall = { x: W * 0.82, y: side < 0 ? top + 20 : bot - 20, side, shown: 0 };
         break;
       }
       case 'npc': {
-        o.sub = this.pickNpc(); o.y = srand(mid - 80, mid + 80); o.station = W * 0.42; o.wait = f.reward ? 1e9 : 26;
-        o.pod = { x: o.x, y: o.y, hp: 3, inv: 0, towed: false };
+        o.sub = f.sub || this.pickNpc(); o.y = f.y !== undefined ? f.y : srand(mid - 80, mid + 80); o.station = W * 0.42; o.wait = f.reward || f.sub ? 1e9 : 26;
+        o.story = o.sub === this.wf.target; // 家园追踪的这位：一路有箭头
+        const hp = this.wf.beacon ? 5 : 3; o.pod = { x: o.x, y: o.y, hp, max: hp, inv: 0, towed: false }; o.dockR = this.wf.beacon ? 125 : 95; // 小梦兔的救援信标：吊舱更耐打、修理点更大
         const ry = clamp(p.y < mid ? srand(mid + 20, bot - 110) : srand(top + 110, mid - 20), top + 110, bot - 110);
         o.dock = { x: W + 170, y: ry, w: 160 }; o.lane = { y: ry, h: 150 }; // 修理点等挂上拖绳后才从右边慢慢漂过来：护送要走一段
         break;
@@ -41,7 +45,11 @@ Object.assign(World.prototype, {
     return o;
   },
   pickNpc() {
-    const have = new Set(this.companions.map((c) => c.id)), pool = NPC_ORDER.filter((id) => !have.has(id)), p = this.player;
+    const have = new Set(this.companions.map((c) => c.id)), p = this.player, wf = this.wf;
+    if (wf.target && wf.target !== 'merchant' && !have.has(wf.target)) return wf.target; // 家园追踪的伙伴：首次救援一定能遇到
+    let pool = NPC_ORDER.filter((id) => !have.has(id));
+    const fresh = pool.filter((id) => !wf.rescued.includes(id) && id !== 'merchant'); // 糖果商人只在上层云桥出现
+    if (fresh.length) pool = fresh;
     const pref = [];
     if (p.hp <= p.maxHp / 2) pref.push('grandpa');
     if (this.lvOf('wing')) pref.push('clockling');
@@ -62,7 +70,7 @@ Object.assign(World.prototype, {
   mapGoalPos(o) {
     if (o.state === 'idle') {
       if (o.kind === 'house') return { x: o.x + o.sensor.dx, y: o.y + o.sensor.dy };
-      if (o.kind === 'wind') return { x: o.x + o.ringDx, y: o.y };
+      if (o.kind === 'wind') return o.upper && this.wf.target === 'merchant' ? { x: o.x + o.upper.dx, y: o.upper.y } : { x: o.x + o.ringDx, y: o.y }; // 要去救商人：箭头指上层风圈
       if (o.kind === 'mine') return { x: o.core.x, y: o.core.y };
       if (o.kind === 'npc') return { x: o.pod.x, y: o.pod.y };
     }
@@ -84,6 +92,11 @@ Object.assign(World.prototype, {
     this.mapObjs = this.mapObjs.filter((o) => !o.gone);
     this.updateOrbs(dt);
     this.updateCompanions(dt);
+    if (this.sky) { // 上层云桥：商人救下来（或一阵子后）天色回落
+      const S = this.sky; S.t += dt;
+      if (S.on && S.t > 14 && !this.mapObjs.some((o) => o.kind === 'npc' && o.sub === 'merchant' && o.state !== 'done')) S.on = false;
+      S.a = approach(S.a || 0, S.on ? 1 : 0, dt * 0.8); if (!S.on && S.a <= 0) this.sky = null;
+    }
     const p = this.player;
     const lane = this.laneT > 0 ? 125 : 0;
     if (this.laneT > 0) this.laneT -= dt;
@@ -114,8 +127,9 @@ Object.assign(World.prototype, {
       case 'wind':
         o.spin = smooth(o.spin, o.state === 'blow' || o.state === 'ritual' ? 14 : 0.6, 3, dt); o.rot = (o.rot || 0) + o.spin * dt;
         if (o.state === 'idle') {
-          const rx = o.x + o.ringDx, ry = o.y;
-          if (p.alive && Math.abs(p.x - rx) < o.ringR * 0.55 + 14 + reach && Math.abs(p.y - ry) < o.ringR + reach) this.windBlow(o);
+          const rx = o.x + o.ringDx, ry = o.y, U = o.upper;
+          if (U && p.alive && Math.abs(p.x - (o.x + U.dx)) < U.r * 0.6 + 14 + reach && Math.abs(p.y - U.y) < U.r + reach) this.windUpper(o);
+          else if (p.alive && Math.abs(p.x - rx) < o.ringR * 0.55 + 14 + reach && Math.abs(p.y - ry) < o.ringR + reach) this.windBlow(o);
         } else if (o.state === 'blow') {
           o.blowT += dt;
           for (const e of o.pushed) if (e.alive) { e.x = smooth(e.x, e.rowX, 7, dt); e.y = smooth(e.y, e.rowY, 7, dt); e.y0 = e.y; e.stun = Math.max(e.stun, 0.1); }
@@ -153,7 +167,7 @@ Object.assign(World.prototype, {
             if (inLane(b)) { b.on = false; if (Math.random() < 0.3) this.part('mote', b.x, b.y, 0, -30, 0.4, 2.5, 'rgba(255,200,230,0.9)'); return; }
             if (pod.inv <= 0 && dist2(b.x, b.y, pod.x, pod.y) < 24 * 24) { b.on = false; this.podHit(o); }
           });
-          if (o.dock.x < this.W * 0.64 && (dist2(pod.x, pod.y, o.dock.x, o.dock.y) < 95 * 95 || dist2(p.x, p.y, o.dock.x, o.dock.y) < 80 * 80)) this.npcDock(o);
+          if (o.dock.x < this.W * 0.64 && (dist2(pod.x, pod.y, o.dock.x, o.dock.y) < o.dockR * o.dockR || dist2(p.x, p.y, o.dock.x, o.dock.y) < (o.dockR - 15) ** 2)) this.npcDock(o);
         }
         if (o.state === 'bail') { o.dock.x = Math.max(this.W * 0.6, o.dock.x - 95 * dt); pod.x = smooth(pod.x, o.dock.x, 1.2, dt); pod.y = smooth(pod.y, o.dock.y, 1.2, dt); if (dist2(pod.x, pod.y, o.dock.x, o.dock.y) < 40 * 40) this.npcDock(o, true); }
         break;
@@ -218,9 +232,12 @@ Object.assign(World.prototype, {
   },
   npcDock(o, bailed) {
     const d = o.dock, id = o.sub; o.state = 'done'; o.phase = 'out';
+    if (this.cb.onRescue) this.cb.onRescue(id); // 到达修理点 = 救出：当场存档，之后被击落也不会丢（跳伞到达也算）
+    if (bailed && !this.m.rescuedNow.includes(id)) this.m.rescuedNow.push(id);
     Sound.sfx('rescue'); this.fx(d.x, d.y, 3, 140, ['#ff9fcf', '#ffffff', '#ffe38a']);
     if (!bailed) {
       this.companions.push({ id, x: o.pod.x, y: o.pod.y, t: 0, fireT: 0.6, mood: 'happy', moodT: 2, idx: this.companions.length, owner: this.player.idx });
+      if (!this.m.rescuedNow.includes(id)) this.m.rescuedNow.push(id);
       this.m.rescues++; this.emit('companion', { id });
       if (id === 'grandpa') this.player.cloudShield = true;
       if (id === 'clockling') this.addCharge(0.3, true);
@@ -252,11 +269,32 @@ Object.assign(World.prototype, {
     const p = this.player;
     if (this.planeId === 'candy') { for (let i = 0; i < 8; i++) this.addShot('candyBomb', o.x + srand(-260, 260), TOP - 10 - i * 20, Math.PI / 2, srand(420, 560), { dmg: 40 * this.stats.dmgK, r: 10, life: 3, ty: srand(this.arena.top + 60, this.arena.bottom - 60) }); p.candy = Math.max(p.candy, 5); }
     if (this.planeId === 'clock' && !this.bursting) this.timeStop = Math.max(this.timeStop, 1.2);
+    if (WOOD_DROP[o.kind]) this.dropWood(o.kind === 'npc' ? o.dock.x : o.x, o.kind === 'npc' ? o.dock.y : o.y, WOOD_DROP[o.kind]);
     const entry = { kind: o.kind, sub: o.sub || null, verb, name, reward, desc };
     this.journey.push(entry);
     this.emit('mapDone', entry);
     if (this.mapHintKind === o.kind) { this.mapHintKind = null; this.emit('maphint', { kind: null }); }
     if (this.cb.onMap) this.cb.onMap(o.kind, o.sub);
+  },
+  /* 梦木：一小把从装置里蹦出来，自动飞向飞机（多人时每人一份） */
+  dropWood(x, y, n) { for (let i = 0; i < n; i++) this.dropPickup('wood', x + srand(-30, 30), y + srand(-30, 30), { value: 1, vx: srand(-160, 160), vy: srand(-220, -40) }); this.later(0.5, () => { for (const k of this.pickups) if (k.kind === 'wood') k.attract = true; }); },
+  /* ---------- 上层云桥：风道修好后才有的高空航路（v0.10 §10） ---------- */
+  windUpper(o) {
+    const p = this.player, top = this.arena.top;
+    o.state = 'blow'; o.blowT = 0; o.engageT = this.runT; o.pushed = []; o.wentUp = true;
+    Sound.sfx('wind', { pan: this.pan(o.x) }); this.rumble(0.4, 0.5, 140);
+    this.sky = { t: 0, on: true }; this.m.upperRoute++;
+    if (this.wf.target === 'merchant') { // 高空护送：糖果商人困在云桥上
+      this.later(0.8, () => this.spawnMapObject('npc', { sub: 'merchant', y: top + 150, reward: true }));
+      this.text('上层云桥 · 糖果商人困在这里！', clamp(p.x + 260, 220, this.W - 220), top + 120, '#ffd76a', 22, 5);
+    } else { // 密集清怪：一大串梦尘蛾从云桥扑下来，掉更多星砂和梦木
+      for (let i = 0; i < 14; i++) this.later(i * 0.12, () => this.addEnemy('moth', { x: this.W + 30 + (i % 3) * 30, y: top + 60 + (i % 5) * 50, path: 'line', vx: -170 }));
+      this.dropWood(this.W * 0.75, top + 120, 3);
+      this.text('上层云桥 · 一大串梦尘蛾扑下来', clamp(p.x + 260, 220, this.W - 220), top + 120, '#9fe3f0', 20, 5);
+    }
+    this.remember('飞上了上层云桥', 3);
+    o.onRitual = () => { o.state = 'done'; o.phase = 'out'; };
+    this.mapDone(o, '飞上', '上层云桥', '高空航路 + 二选一', '风道修好了：风车塔上方的风圈通往高空云桥');
   },
   mapMissed(o) { this.m.interactFails++; if (this.mapHintKind === o.kind) { this.mapHintKind = null; this.emit('maphint', { kind: null }); } },
 
@@ -339,7 +377,17 @@ Object.assign(World.prototype, {
           if (idle) drawBell(g, o.x + o.sensor.dx, o.y + o.sensor.dy + Math.sin(t * 1.3) * 5, o.sensor.r, o.near, t);
           if (o.state === 'supply' && o.shots > 0) drawStepPill(g, o.x, o.y - 170, `补给点 · 还能帮你打 ${o.shots} 发`, '#ffd76a', 0.9);
           break;
-        case 'wind': drawWindTower(g, o.x, o.y, o.rot || 0, t, idle ? o.ringR : 0, o.ringDx, o.near); break;
+        case 'wind':
+          drawWindTower(g, o.x, o.y, o.rot || 0, t, idle ? o.ringR : 0, o.ringDx, o.near);
+          if (o.upper && idle) { // 上层风圈：金色虚线圈 + 一截云桥；爷爷做风向观察时两个风圈都写明通向哪里
+            const ux = o.x + o.upper.dx, uy = o.upper.y, merchant = this.wf.target === 'merchant';
+            g.strokeStyle = 'rgba(255,215,106,0.85)'; g.lineWidth = 4; g.setLineDash([10, 8]); g.lineDashOffset = -t * 40; g.beginPath(); g.ellipse(ux, uy, o.upper.r * 0.6, o.upper.r, 0, 0, TAU); g.stroke(); g.setLineDash([]);
+            glowAt(g, ux, uy, o.upper.r * 1.3, 'rgba(255,230,160,0.6)', 0.35 + Math.sin(t * 3) * 0.1);
+            g.fillStyle = 'rgba(255,250,235,0.55)'; for (let i = 0; i < 5; i++) { g.beginPath(); g.ellipse(ux + 60 + i * 46, uy + 12 + Math.sin(t + i) * 3, 30, 11, 0, 0, TAU); g.fill(); }
+            if (this.wf.scout || merchant) drawStepPill(g, ux, uy - o.upper.r - 18, merchant ? '上层云桥 · 糖果商人在上面' : '上层云桥 · 密集清怪', '#ffd76a', 0.95);
+            if (this.wf.scout) drawStepPill(g, o.x + o.ringDx, o.y + o.ringR + 22, '下层风圈 · 推一排 + 二选一', '#9fe3f0', 0.9);
+          }
+          break;
         case 'mine':
           if (!o.blown) drawMine(g, o.x, o.y, { r: 60, charge: o.state === 'idle' ? 0.2 : 0, crackA: Math.PI, seed: o.seed, shake: false }, t);
           if (o.state === 'tow' || o.state === 'boom') drawWallMark(g, o.wall, t);
@@ -359,13 +407,13 @@ Object.assign(World.prototype, {
       const tgt = this.mapGoalPos(o);
       if (tgt && (idle || o.state === 'tow')) {
         const step = o.kind === 'house' ? (o.seek ? '铃铛飘过来了 · 碰一下就好' : '碰一下门前的铃铛')
-          : o.kind === 'wind' ? '从风环里穿过去'
+          : o.kind === 'wind' ? (o.upper && this.wf.target === 'merchant' ? '飞进上层风圈 · 去救糖果商人' : '从风环里穿过去')
           : o.kind === 'mine' ? (o.state === 'tow' ? '把矿核拖到发光的岩壁' : '碰一下发光的矿核')
-          : o.state === 'tow' ? `沿光带送到修理点 · 耐久 ${o.pod.hp}/3` : '碰一下吊舱';
+          : o.state === 'tow' ? `沿光带送到修理点 · 耐久 ${o.pod.hp}/${o.pod.max}` : o.story ? `救${NPCS[o.sub].name} · 碰一下吊舱` : '碰一下吊舱';
         const lx = clamp(tgt.x, 150, this.W - 170), ly = clamp(tgt.y, this.arena.top + 110, this.arena.bottom); // 目标在屏幕外时，标签贴在屏幕边上
         drawMapTag(g, lx, ly - 92, M.icon, M.tag, M.color, o.alpha * (0.7 + 0.3 * Math.sin(t * 4)));
         drawStepPill(g, lx, ly - 62, step, M.color, o.alpha);
-        if (p.alive && (o.near > 0.2 || o.state === 'tow' || o.seek || o.reward)) drawPointer(g, p.x, p.y, tgt.x, tgt.y, M.color, t);
+        if (p.alive && (o.near > 0.2 || o.state === 'tow' || o.seek || o.reward || (o.story && this.wf.clue) || (o.upper && this.wf.target === 'merchant'))) drawPointer(g, p.x, p.y, tgt.x, tgt.y, M.color, t);
       }
       g.restore();
     }
@@ -446,7 +494,7 @@ function drawPod(g, x, y, sub, hp, inv, t, bail) {
   else { g.fillStyle = 'rgba(255,200,230,0.9)'; g.beginPath(); g.ellipse(0, -30, 22, 26, 0, 0, TAU); g.fill(); g.stroke(); g.beginPath(); g.moveTo(-8, -6); g.lineTo(-10, 4); g.moveTo(8, -6); g.lineTo(10, 4); g.stroke(); }
   g.fillStyle = 'rgba(40,30,100,0.9)'; g.beginPath(); g.roundRect ? g.roundRect(-18, 2, 36, 24, 8) : g.rect(-18, 2, 36, 24); g.fill(); g.stroke();
   drawNPC(g, sub, 0, 12, 0.7, t, hp >= 2 ? 'idle' : 'scared');
-  for (let i = 0; i < 3; i++) { g.fillStyle = i < hp ? '#ff9fcf' : 'rgba(255,255,255,0.2)'; g.fillRect(-15 + i * 11, 32, 8, 5); }
+  const n = Math.max(3, hp); for (let i = 0; i < n; i++) { g.fillStyle = i < hp ? '#ff9fcf' : 'rgba(255,255,255,0.2)'; g.fillRect(-(n * 11 - 3) / 2 + i * 11, 32, 8, 5); }
   g.restore();
 }
 function drawDock(g, x, y, t, done) {

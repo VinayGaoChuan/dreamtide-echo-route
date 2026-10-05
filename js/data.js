@@ -162,7 +162,7 @@ const NODE_TYPES = {
 /* 大招容量：账号共享的固定里程碑 */
 const ULT_CAP = [{ cap: 1, need: null, text: '初始' }, { cap: 2, need: '1-1', text: '1-1 首次通关' }, { cap: 3, need: '1-3', text: '1-3 首次通关' }];
 /* 共享等级：星尘升级，所有飞机一起变强（原型值） */
-const SHARED = { max: 10, cost: [0, 0, 100, 160, 220, 280, 340, 400, 460, 520, 580], atk: 1.06, heartAt: [3, 6, 9] };
+const SHARED = { max: 10, cost: [0, 0, 100, 140, 180, 230, 290, 360, 440, 530, 630], atk: 1.06, heartAt: [3, 6, 9] }; // 升级费用按 v0.10 §9
 const sharedAtk = (lv) => Math.pow(SHARED.atk, lv - 1);
 const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 
@@ -177,6 +177,38 @@ const STAGES = {
     map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'], intro: '后方追兵和空间裂缝一起出现，最后是第一章 Boss：失控闹钟。' },
 };
 const STAGE_ORDER = ['1-1', '1-2', '1-3'];
+
+/* ================================================== 家园（v0.10 第一阶段：救援 → 建设 → 改变下一局）==================================================
+   资源三种：星尘（策划里叫“星砂”的账户货币；局内拾取的星砂按 50:1 折成星尘）、梦木（地图装置掉落）、货物（工坊用梦木加工）。
+   工作周期按“有效战斗时间”推进（4 分钟一轮），不按现实时间；离线、暂停、升级仪式都不算。 */
+const HOME = { cycle: 240, recipe: 8, sell: 20, startStardust: 120, plots: 8, cols: 4 };
+/* 每个目标完成时当场入账的星尘（失败也保留）；通关另给终点奖励 */
+const beatPay = (S) => Math.round(S.reward / 12);
+const endPay = (S, first) => Math.round(S.reward * (first ? 0.5 : 0.3));
+/* 地图装置给的梦木（每次出击 18~26 左右） */
+const WOOD_DROP = { house: 4, wind: 4, mine: 8, npc: 4, cmdr: 3 };
+/* 常驻 NPC：一个主职 + 一个副职（成为“伙伴”后开放），职责免费改，每次回家最多改一项 */
+const HOME_NPCS = {
+  bunny: { bld: 'rescue', main: { id: 'clue', name: '整理救援线索', line: '下一局要救的伙伴更早出现，一路有箭头' }, side: { id: 'beacon', name: '准备救援信标', line: '修理点更大，吊舱更耐打' }, bond: '救回云朵爷爷' },
+  grandpa: { bld: 'workshop', main: { id: 'craft', name: '看着工坊', line: '工坊每个工作周期把梦木加工成货物' }, side: { id: 'scout', name: '风向观察', line: '风车塔的上下两个风圈会写明各通向哪里' }, bond: '修好风道' },
+  merchant: { bld: 'shop', main: { id: 'sell', name: '看店卖货', line: '每个工作周期卖出货架上的货物换星尘' }, side: { id: 'keep', name: '守着库存', line: '货物先留着不卖，攒给项目和委托' }, bond: '完成第一份委托' },
+};
+const NPC_STAGES = ['初见', '伙伴', '知己'];
+/* 功能建筑：机库一开始就有；其他由救回的 NPC 开放（第一座免费摆放） */
+const HOME_BUILDINGS = {
+  hangar: { name: '机库', icon: 'i-hangar', color: '#ffd76a', line: '换飞机、点天赋、共享升级', fixed: true },
+  rescue: { name: '救援台', icon: 'i-heart', color: '#ff9fcf', line: '追踪下一位要救的伙伴', npc: 'bunny', plot: 0 },
+  workshop: { name: '工坊', icon: 'n-repeat', color: '#9fe3f0', line: '修风道；把梦木加工成货物', npc: 'grandpa', plot: 2, lock: '救回云朵爷爷后开放' },
+  shop: { name: '巡游店', icon: 'i-gacha', color: '#ff9fcf', line: '卖货物换星尘；商人的委托', npc: 'merchant', plot: 5, lock: '修好风道、救回糖果商人后开放' },
+};
+/* 世界项目：交付就完成，下一局地图真的变了 */
+const HOME_PROJECTS = {
+  windRoad: { name: '修风道 · 上层云桥', bld: 'workshop', cost: { wood: 12 }, line: '风车塔多出一个上层风圈：飞进去走高空航路', done: '上层风圈亮了：下一局在风车塔上方' },
+};
+/* 商人的第一份委托：交货物 → 糖果号 */
+const COMMISSIONS = {
+  candy: { name: '糖果商人的第一份委托', need: { goods: 1 }, reward: 'candy', line: '交 1 件货物，商人把糖果号送给你' },
+};
 
 /* 可以追的流派（大厅“下一局目标”、暂停、结算、升级卡片共用） */
 const BUILD_PATHS = [
@@ -253,7 +285,7 @@ const STAGE_PLANS = {
   '1-1': [
     { id: 'crowd', goal: '清掉普通怪群', kind: 'crowd', n: 36, map: 'house', mapAt: 15 },
     { id: 'armor1', goal: '击破第一只厚甲怪', kind: 'armor1', from: 'shell', reward: 'wind' },
-    { id: 'pack', goal: '快速处理厚甲编队', kind: 'pack', from: 'front', reward: 'mine' },
+    { id: 'pack', goal: '快速处理厚甲编队', kind: 'pack', from: 'front', reward: 'mine', map: 'npc', mapAt: 3 },
     { id: 'cmdr', goal: '击败带队精英', kind: 'cmdr', from: 'crack', reward: 'core' },
     { id: 'rear', goal: '挡住后方追兵', kind: 'chase', event: 'rear', waves: 4 },
     { id: 'moon', goal: '月亮不太对劲', kind: 'surprise', surprise: 'moon' },

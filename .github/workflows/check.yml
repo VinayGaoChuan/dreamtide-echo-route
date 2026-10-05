@@ -21,6 +21,8 @@ jobs:
         run: for f in js/*.js tools/*.js; do node --check "$f" || exit 1; done
       - name: 三关无头通关模拟
         run: node tools/smoke-sim.js js
+      - name: 家园规则（第一小时因果链 + 存档安全）
+        run: node tools/home-sim.js
       - name: 联机同步（2 人三关逐帧比对）
         run: node tools/mp-sim.js js all 2 direct
       - name: 联机网络（3 人、20% 丢包、中途掉线）

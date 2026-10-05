@@ -996,6 +996,11 @@ function drawPickup(g, k, t) {
   if (k.kind === 'dust') {
     g.globalCompositeOperation = 'lighter'; drawGlow(g, k.x, k.y, k.big ? 11 : 8, k.big ? GLOW.gold : GLOW.purple, 0.7); g.globalCompositeOperation = 'source-over';
     g.fillStyle = k.big ? '#fff3c8' : '#efe4ff'; BulletArt.star(g, k.x, k.y, 4, k.big ? 5 : 3.5, 1.3); g.fill();
+  } else if (k.kind === 'wood') { // 梦木：一小截发光的木枝
+    g.save(); g.translate(k.x, k.y); g.rotate(Math.sin(t * 3 + k.seed) * 0.5 + 0.6);
+    g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 13, 'rgba(159,242,200,0.8)', 0.7); g.globalCompositeOperation = 'source-over';
+    g.fillStyle = '#c98a4a'; g.strokeStyle = PAL.ink; g.lineWidth = 1.4; g.beginPath(); g.roundRect ? g.roundRect(-9, -3, 18, 6, 3) : g.rect(-9, -3, 18, 6); g.fill(); g.stroke();
+    g.fillStyle = '#9ff2c8'; g.beginPath(); g.ellipse(6, -6, 4, 2.4, -0.6, 0, TAU); g.fill(); g.restore();
   } else if (k.kind === 'crystal') drawCrystal(g, k.skill, k.x, k.y, t + k.seed, k.rare, k.fade !== undefined ? k.fade : 1);
   else if (k.kind === 'candy') {
     g.save(); g.translate(k.x, k.y); g.rotate(Math.sin(t * 4 + k.seed) * 0.4);

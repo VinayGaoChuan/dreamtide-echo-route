@@ -270,7 +270,7 @@ const Lobby = {
     const roster = ms.map((m) => ({ peer: m.peer, name: m.name, plane: m.plane, stats: (m.prof && m.prof.s) || null, ultCap: (m.prof && m.prof.u) || 1, cos: (m.prof && m.prof.c) || {} }));
     const id = Math.random().toString(36).slice(2, 8), seed = (Math.random() * 4294967296) >>> 0;
     const now = this.net.serverNow ? this.net.serverNow() : null, at = now === null ? null : Math.round(now + 900); // 约 0.9 秒后大家在同一刻开局
-    this.me({ stage, start: { id, stage, seed, roster, at, delay: delay || this.autoDelay(ms) } });
+    this.me({ stage, start: { id, stage, seed, roster, at, delay: delay || this.autoDelay(ms), world: typeof Home !== 'undefined' && G.meta ? Home.worldFor(G.meta) : {} } }); // 家园改变的世界状态用房主的（各端一致）
     this.changed(); // 房主自己马上开局（不用等服务器把自己的状态转回来）
     return true;
   },

@@ -29,6 +29,7 @@ Object.assign(World.prototype, {
     this.seg = { tier: i + STAGE_ORDER.indexOf(this.stageId), explosive: false };
     this.goal = { B, id: B.id, kind: B.kind, title: B.goal, t: 0, n: 0, total: B.n || 0, targets: [], wave: 0, waves: 0, state: 'active', portrait: B.kind === 'surprise' ? B.surprise : PORTRAIT_OF[B.kind] || 'jelly', sub: null };
     this.D.st = 'goal'; this.D.t = 0; this.D.mapAt = B.map ? B.mapAt || 6 : -1;
+    if (B.map === 'npc' && this.wf.clue && this.wf.target && this.wf.target !== 'merchant') this.D.mapAt = Math.min(this.D.mapAt, 1); // 小梦兔整理了线索：要救的伙伴更早出现
     this.m.segsDone = i;
     const G = this.goal;
     switch (B.kind) {
@@ -103,7 +104,10 @@ Object.assign(World.prototype, {
     const mem = { armor1: '敲碎了第一身厚甲', pack: '拆散了厚甲编队', cmdr: '打倒了带队精英', spawner: '摧毁了残骸刷怪核心', chase: B.event === 'rear' ? '挡住了后方追兵' : '清空了空间裂缝' }[B.kind];
     if (mem) this.remember(mem);
     Sound.sfx('goalDone'); this.highlight();
-    this.emit('goalDone', { title: B.goal, idx: this.beatIdx });
+    // 每完成一个目标当场入账一份星尘（失败也保留，v0.10 §5）；精英再掉一点梦木
+    const pay = beatPay(this.stage); for (const q of this.players) if (!q.gone) q.res.earned += pay;
+    if (B.kind === 'cmdr') this.dropWood(this.W * 0.7, (this.arena.top + this.arena.bottom) / 2, WOOD_DROP.cmdr);
+    this.emit('goalDone', { title: B.goal, idx: this.beatIdx, pay });
     if (B.reward) {
       this.D.st = 'reward'; this.D.reward = B.reward; this.D.t = 0;
       if (B.reward !== 'core') this.later(0.6, () => this.spawnMapObject(B.reward, { reward: true }));

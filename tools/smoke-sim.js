@@ -42,9 +42,11 @@ function pilot(w) {
   for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
   w.setInput(p.idx, { mx: Math.sign(tx - p.x) * Math.min(1, Math.abs(tx - p.x) / 60), my: dodge ? Math.sign(dodge) : Math.sign(ty - p.y) * Math.min(1, Math.abs(ty - p.y) / 40), burst: p.stock >= 1 && !w.ritual });
 }
-function run(stage, plane, level, cap, pickIdx, godmode) {
+function run(stage, plane, level, cap, pickIdx, godmode, world) {
   let res = null; const meta = freshMeta(); meta.shared.level = level; meta.planes[plane] = newPlaneRecord(plane);
-  const w = new World({ mode: 'run', W: 1280, plane, stage, ultCap: cap, stats: planeStats(meta, plane), first: stage === '1-1' && level === 1, settings, cb: { onEnd: (r) => res = r } });
+  const w = new World({ mode: 'run', W: 1280, plane, stage, ultCap: cap, stats: planeStats(meta, plane), first: stage === '1-1' && level === 1, settings, world, cb: { onEnd: (r) => res = r, onRescue: (id) => rescues.push(id) } });
+  const rescues = [];
+  if (world && world.preferUpper) { const g0 = w.mapGoalPos.bind(w); w.mapGoalPos = (o) => (o.kind === 'wind' && o.upper && o.state === 'idle' ? { x: o.x + o.upper.dx, y: o.upper.y } : g0(o)); } // 测试：主动选上层风圈
   const goalLog = []; let lastGoal = null;
   w.pilotPick = pickIdx;
   if (godmode) { w.player.hp = w.player.maxHp = 999; }
@@ -58,6 +60,7 @@ function run(stage, plane, level, cap, pickIdx, godmode) {
   }
   const m = res ? res.stats : w.m, f = (v) => (v === null || v === undefined ? '—' : typeof v === 'number' ? Math.round(v * 10) / 10 : v);
   const ct = m.choiceTimes || [];
+  if (world) return { stage, win: res && res.win, run: f(res ? res.runT : t), wood: m.wood, earned: m.earned, workT: f(m.workT), rescued: rescues.join(','), upper: m.upperRoute || 0, goals: goalLog.join(' ') };
   return { stage, plane, lv: level, pick: pickIdx, win: res && res.win, run: f(res ? res.runT : t), boss: f(res && res.bossTime), kill: f(m.firstKill), choice1: f(m.firstSkill), choices: ct.length, choiceAvg: f(ct.length ? ct.reduce((a, b) => a + b, 0) / ct.length : null), miss: m.offerMiss || 0,
     avgKill: f(res && res.avgKill), gap: f(m.gapMax), kills: m.kills, kpm: f(m.kills / ((res ? res.runT : t) / 60)), leaks: m.leaks, backlogs: m.backlogs || 0, hits: m.hitsTaken, bursts: m.bursts, stockIdle: f(m.stockIdle), inter: m.interacts, interMax: f(m.interactMax), maxE, maxB,
     noGoal: f(m.noGoalMax), breaks: m.breaks, armor: f(m.armorFirst) + '→' + f(m.armorAfter), hurt: res && res.hurt ? Object.entries(res.hurt).map(([k, v]) => k + v).join(',') : '', last: res && res.lastHurt, build: pickLog.join(' > '), stream: res && res.stream, goals: goalLog.join(' '), mem: res && res.memories && res.memories.join('/') };
@@ -71,6 +74,22 @@ const cases = [['1-1', 1, 1], ['1-2', 2, 2], ['1-3', 3, 2]].filter((c) => !only 
 for (const [st, lv, cap] of cases) for (const pk of [0, 1]) {
   try { const r = R(`run('${st}', 'moon', ${lv}, ${cap}, ${pk}, true)`); show(r); if (!r.win) fail(`${st} 选法 ${pk} 没有通关`); }
   catch (e) { fail(`${st} 脚本报错 ${e && e.stack ? e.stack.split('\n').slice(0, 6).join(' | ') : e}`); }
+}
+// v0.10 家园因果链在真实战斗里成立：要救的伙伴一定出现并能救下；风道修好后上层风圈通往高空云桥，糖果商人在上面
+const story = [
+  ['1-1', { target: 'bunny' }, 'bunny', false],
+  ['1-2', { target: 'grandpa', rescued: ['bunny'] }, 'grandpa', false],
+  ['1-3', { upper: true, target: 'merchant', rescued: ['bunny', 'grandpa'] }, 'merchant', true],
+  ['1-1', { upper: true, rescued: ['bunny', 'grandpa', 'merchant'], scout: true, preferUpper: true }, null, true],
+].filter((c) => !only || c[0] === only);
+for (const [st, wf, want, upper] of story) {
+  try {
+    const r = R(`run('${st}', 'moon', 3, 2, 0, true, ${JSON.stringify(wf)})`); console.log('story', JSON.stringify(r));
+    if (want && !r.rescued.split(',').includes(want)) fail(`${st} 没救到 ${want}`);
+    if (upper && !(r.upper >= 1)) fail(`${st} 没走上层云桥`);
+    if (!(r.wood >= 10)) fail(`${st} 梦木太少（${r.wood}）`);
+    if (!(r.earned > 0)) fail(`${st} 目标没有入账星尘`);
+  } catch (e) { fail(`story ${st} 脚本报错 ${e && e.stack ? e.stack.split('\n').slice(0, 6).join(' | ') : e}`); }
 }
 for (const [st, lv, cap] of cases) { try { console.log('mortal', JSON.stringify(R(`run('${st}', 'candy', ${lv}, ${cap}, 0, false)`))); } catch (e) { fail(`mortal ${st} 脚本报错 ${e.stack.split('\n').slice(0, 6).join(' | ')}`); } }
 try { console.log('preview', R(`(function(){ const w = new World({ mode: 'preview', W: 1280, plane: 'whale', settings }); for (let i = 0; i < 1400; i++) w.step(1/120); return 'ok kills=' + w.m.kills; })()`)); } catch (e) { fail(`大招预览脚本报错 ${e.stack.split('\n').slice(0, 5).join(' | ')}`); }

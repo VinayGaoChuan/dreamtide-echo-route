@@ -3,9 +3,9 @@
 
 (function boot() {
   const cv = $('#cv'), ctx = cv.getContext('2d'), stage = $('#stage'), app = $('#app');
-  G.meta = Store.load(); Tele.bind(G.meta);
+  G.meta = Store.load(); Home.ensure(G.meta); Tele.bind(G.meta);
   if (!G.meta.seenTitle && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { G.meta.settings.shake = false; G.meta.settings.reduceFlash = true; G.meta.settings.flash = 0.3; }
-  G.sea = new SeaScene(); G.hub = new HubScene(); G.map = new MapScene();
+  G.sea = new SeaScene(); G.hub = new HubScene(); G.map = new MapScene(); G.homeScene = new HomeScene();
   try { document.documentElement.style.setProperty('--paper-tex', `url(${makePaper().toDataURL()})`); } catch (e) { /* canvas export blocked */ }
 
   // 拖动：整块舞台（含黑边）都能拖，HUD 按钮自己拦截
@@ -85,6 +85,7 @@
       case 'title':
         G.sea.dim = 0;
         G.sea.draw(ctx, W, LH); drawTrail(W * 0.3, LH * 0.56, t); drawHero(cur, W * 0.3, LH * 0.56, 2.6, t); break;
+      case 'home': G.homeScene.draw(ctx, W, LH, G.meta, G.homeUI); break; // 家园：浮空港
       case 'hub':
         G.hub.draw(ctx, W, LH); if (G.screen === 'hub') { drawTrail(W / 2, LH * 0.4, t); drawHero(cur, W / 2, LH * 0.4, 2.2, t); } break;
       case 'map':
@@ -163,7 +164,7 @@
         if (Input.gameActive && Input.consume('pause')) pauseGame();
       } else {
         acc = 0; if (waitShown) mpWait('');
-        if (G.bg === 'hub') G.hub.update(dt); else if (G.bg === 'map') G.map.update(dt); else G.sea.update(dt);
+        if (G.bg === 'home') G.homeScene.update(dt); else if (G.bg === 'hub') G.hub.update(dt); else if (G.bg === 'map') G.map.update(dt); else G.sea.update(dt);
       }
       if (!Input.gameActive) navUpdate();
       render(now / 1000);

@@ -40,6 +40,9 @@ class World {
     this.np = roster.length; this.mp = this.np > 1 || !!o.mp;
     this.first = !!o.first && !this.mp; this.tutorial = !!o.tutorial && !this.mp; this.targetName = o.target || null; // 这一局追的流派（和大厅“下一局目标”一致）
     this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id;
+    // 家园改变战场（v0.10）：上层风圈是否已修好、这次要救谁、NPC 职责带来的变化。多人时用房主的，各端一致
+    this.wf = Object.assign({ upper: false, target: null, rescued: [], clue: false, beacon: false, scout: false }, o.world || {});
+    this.goalText = o.goalText || null; // HUD 只追踪家园的当前目标（纯显示）
     this.players = roster.map((r, i) => this.makePlayer(r, i));
     this.meIdx = o.me || 0; this.me = this.players[this.meIdx]; this.player = this.players[0];
     this.inputs = this.players.map(() => Object.assign({}, NEUTRAL_INPUT));
@@ -62,7 +65,7 @@ class World {
     this.tutorCharge = false;
     // 全队共用的统计；星砂 / 宝箱 / 碎片 / 升级次数这些“自己的资源”在每架飞机的 res 里
     this.m = { kills: 0, bursts: 0, maxStreak: 0, elites: 0, highlights: 0, firstKill: null, firstSkill: null, firstSyn: null, firstBurst: null,
-      killTimeSum: 0, killTimeN: 0, gapMax: 0, gapT: 0, talent: 0, route: [], streak100: 0, hitsTaken: 0, leaks: 0, offerMiss: 0, stockIdle: 0, segsDone: 0 };
+      killTimeSum: 0, killTimeN: 0, gapMax: 0, gapT: 0, talent: 0, route: [], streak100: 0, hitsTaken: 0, leaks: 0, offerMiss: 0, stockIdle: 0, segsDone: 0, workT: 0, rescuedNow: [], upperRoute: 0 };
     this.hintStep = this.first ? 0 : -1; this.hintShown = null;
     this.initMap(o);
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
@@ -83,7 +86,7 @@ class World {
       gun: { pierce: 0, homing: 0, multi: 0, bomb: 0 }, support: null, bmod: null, links: new Set(), ritual: null, ritualQueue: [], offerN: 0, dryOffers: 0, picks: [], stream: null, recentMods: [], crystals: 0, rareNext: false,
       hudBuild: { gun: { pierce: 0, homing: 0, multi: 0, bomb: 0 }, support: null, bmod: null, links: [], recent: [] },
       // 自己的资源：各吃各的掉落、各算各的结算
-      res: { dust: 0, frags: {}, chests: 0, candies: 0, crystals: 0, syns: 0, lv5: 0, offers: 0, choiceTimes: [] } };
+      res: { dust: 0, frags: {}, chests: 0, candies: 0, crystals: 0, syns: 0, lv5: 0, offers: 0, choiceTimes: [], wood: 0, earned: 0 } };
   }
   /* 兼容单人代码：“当前行动的飞机”的这些属性，读的都是 this.player 身上的 */
   get planeId() { return this.player.planeId; }
@@ -147,7 +150,7 @@ class World {
     if (this.state === 'dying') this.timeScale = 0.35;
     const sdt = dt * this.timeScale * this.focusK;
     this.t += sdt;
-    if (this.state === 'play' && this.mode === 'run' && !this.worldRitual()) this.runT += sdt; // 仪式期间关卡计时暂停（单人）
+    if (this.state === 'play' && this.mode === 'run' && !this.worldRitual()) { this.runT += sdt; this.m.workT += sdt; } // 仪式期间关卡计时暂停（单人）；有效战斗时间推进家园工作
     this.trauma = Math.max(0, this.trauma - dt * 1.8);
     this.flash = Math.max(0, this.flash - dt * 2.2); this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2);
     this.arena.top = approach(this.arena.top, this.arenaTarget.top, 60 * dt); this.arena.bottom = approach(this.arena.bottom, this.arenaTarget.bottom, 60 * dt);
@@ -1028,6 +1031,7 @@ class World {
         if (this.hasSyn('thunder', 'magnet') && this.pickCd.zap <= 0) { this.pickCd.zap = 0.15; const e = this.nearestEnemy(p.x, p.y, 220); if (e) this.zap(p.x, p.y, e, 1, 14); }
         break;
       }
+      case 'wood': p.res.wood += k.value; if (p === this.me) Sound.sfx('dust', { gap: 60 }); break;
       case 'candy': p.candy = 5; p.res.candies++; if (p === this.me) Sound.sfx('candy'); this.text('糖果强化！', p.x, p.y - 40, '#ff9fcf', 16, 3); if (this.planeId === 'paper') this.addClone(10); break;
       case 'heart': if (p.hp < p.maxHp) p.hp++; if (p === this.me) Sound.sfx('heart'); this.text('+1', p.x, p.y - 40, '#9ff2c8', 18, 4); break;
       case 'chest': {
@@ -1220,7 +1224,7 @@ class World {
     const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: p.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual && p.alive, down: !p.alive && !p.gone ? Math.max(0, Math.ceil(p.downT)) : 0,
       team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, down: Math.max(0, Math.ceil(q.downT)), me: q === p, color: q.color })) : null,
       gun: Object.assign({}, B.gun), support: B.support ? Object.assign({}, B.support) : null, bmod: B.bmod ? Object.assign({}, B.bmod) : null, recent: (B.recent || []).slice(),
-      syns: B.links.slice(), stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(p.res.dust), companions: (this.companions || []).map((c) => c.id),
+      syns: B.links.slice(), stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(p.res.dust), wood: Math.floor(p.res.wood), homeGoal: this.goalText, companions: (this.companions || []).map((c) => c.id),
       moved: p.moved, stage: this.stageId, phase: this.phase, candy: p.candy, ritual: this.myRitualFocus(),
       goal: this.mode === 'run' && this.phase === 'fight' && this.goalHud ? this.goalHud() : null };
     if (this.boss && this.phase === 'boss') h.boss = this.boss.hudInfo();
@@ -1236,6 +1240,12 @@ class World {
     if (o.simpleBg) { const gr = g.createLinearGradient(0, 0, 0, LH); gr.addColorStop(0, '#1b1548'); gr.addColorStop(1, '#2e2670'); g.fillStyle = gr; g.fillRect(-20, -20, W + 40, LH + 40); }
     else this.scene.draw(g, W, LH);
     if (this.carnival) { g.globalCompositeOperation = 'soft-light'; const gr = g.createLinearGradient(0, 0, W, LH); gr.addColorStop(0, 'rgba(255,159,207,0.5)'); gr.addColorStop(0.5, 'rgba(255,227,138,0.5)'); gr.addColorStop(1, 'rgba(159,227,240,0.5)'); g.fillStyle = gr; g.fillRect(0, 0, W, LH); g.globalCompositeOperation = 'source-over'; }
+    if (this.sky && this.sky.a > 0) { // 上层云桥：天色变亮，脚下一层云桥流过
+      const a = this.sky.a, gr = g.createLinearGradient(0, 0, 0, LH); gr.addColorStop(0, `rgba(255,236,190,${0.3 * a})`); gr.addColorStop(0.55, `rgba(205,232,255,${0.12 * a})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr; g.fillRect(-20, -20, W + 40, LH + 40);
+      g.fillStyle = `rgba(255,252,240,${0.38 * a})`;
+      for (let i = 0; i < 10; i++) { const x = ((i * 170 - t * 70) % (W + 220) + W + 220) % (W + 220) - 110; g.beginPath(); g.ellipse(x, this.arena.bottom - 6 + Math.sin(i) * 6, 96, 24, 0, 0, TAU); g.fill(); }
+    }
     if (this.arena.top > TOP + 1 || this.arena.bottom < BOTTOM - 1) {
       g.fillStyle = 'rgba(255,138,92,0.14)'; g.fillRect(0, 0, W, this.arena.top); g.fillRect(0, this.arena.bottom, W, LH - this.arena.bottom);
       g.strokeStyle = 'rgba(255,190,150,0.55)'; g.setLineDash([10, 8]); g.lineWidth = 2; g.lineDashOffset = -t * 30;
