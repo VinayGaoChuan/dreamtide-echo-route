@@ -51,7 +51,7 @@ async function main() {
       sessionStorage: { getItem: (x) => (x in ss ? ss[x] : null), setItem: (x, v) => { ss[x] = String(v); }, removeItem: (x) => { delete ss[x]; } }, __ss: ss };
     ctx.globalThis = ctx; vm.createContext(ctx);
     for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
-    ctx.__url = URL_; ctx.__k = k; ctx.__dump = !!FLAG('dump'); ctx.__build = build; ctx.__stage = STAGE;
+    ctx.__url = URL_; ctx.__k = k; ctx.__dump = !!FLAG('dump'); ctx.__trace = !!FLAG('trace'); ctx.__build = build; ctx.__stage = STAGE;
     vm.runInContext(`
       var meta = freshMeta(); Home.ensure(meta); var settings = DEFAULT_SETTINGS(); settings.particles = 'low';
       var B = { w: null, L: null, res: null, rescues: [], rtts: [], leads: [], started: false, stallMs: 0, maxWait: 0, prev: 0, slack: [], win: null };
@@ -113,6 +113,7 @@ async function main() {
           if (B.L.ticks % 40 === 0) { B.rtts.push(Lobby.net.rtt); B.leads.push(Lobby.lead); B.win.rtt.push(Lobby.net.rtt); B.win.lead.push(Lobby.lead); }
         }
         B.prev = now;
+        if (__trace && Lobby.session && (Lobby.session.awayMe || Lobby.session.replaying || Lobby.session.rejoining) && now - (B.traceAt || 0) > 5000) { B.traceAt = now; const S = Lobby.session, L = B.L; console.log('[trace]', __k, JSON.stringify({ t: Math.round(now / 1000), sim: S.simFrame, target: L ? Math.floor(L.steps / 4) + '/' + Math.floor((now - L.t0) / 1000 * 30) : null, avail: S.availFrame(), have: S.have, replaying: !!S.replaying, need: !!S.needReplay, awayMe: S.awayMe, ready: S.ready, rejoining: S.rejoining, synced: Lobby.net.synced, stuck: Lobby.net.stuck || 0 })); }
       }
       function q(a, p) { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); return Math.round(b[Math.min(b.length - 1, Math.floor(p * b.length))]); }
       function winStats() { // 这一段的数，然后开新的一段

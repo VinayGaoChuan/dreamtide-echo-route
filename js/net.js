@@ -8,7 +8,7 @@
      （飞机原地不动、不开火、不受伤、不拖住全队升级），其他人继续打。60 秒内他回来：先按大家认定的操作记录追上（必要时从开局重算一遍），
      再发“准备好了”，房主宣布“从第 R 帧起恢复”；超过 60 秒才宣布“从第 G 帧起移除”。所有决定都写进在场状态、谁都转发，房主走了也不丢。 */
 
-const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, silentAfter: 2500, runAhead: 30, catchUp: 4, seat: 60000, backLead: 45, dropLead: 90, lagWindow: 240 };
+const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, silentAfter: 2500, runAhead: 30, catchUp: 4, seat: 60000, backLead: 45, dropLead: 90, lagWindow: 240, lagEvery: 100 };
 const SS_ID = 'dreamtide.mp.id', SS_ROOM = 'dreamtide.mp.room'; // 本标签页的联机身份和所在房间（刷新后回到原对局）
 function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
 function ssSet(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* 隐私模式等：只是不能刷新回来 */ } }
@@ -42,6 +42,7 @@ class LockstepSession {
     this.trimmed = 0; this.budget = o.budget || 3000; // budget：一份在场状态里留给操作帧的字符数（平台上限 4 KiB）
     this.aways = Array.from({ length: this.n }, () => []); // 每个玩家的断线区间 [F, R)，R 未定时是 Infinity
     this.awayAt = Array(this.n).fill(0); this.backReq = Array(this.n).fill(undefined); this.ready = null; // ready：本机断线回来后“从第几帧起可以恢复”
+    this.pipe = []; this.lagAt = 0; // 给落后的人补帧的流水线进度
     this.rejoining = !!o.rejoin; this.rejoinReq = Array(this.n).fill(false); // 刷新页面回来：先不发新操作，等大家把我判成断线中、追上后再恢复
     this.isHost = !!o.isHost; this.clock = o.clock || (() => Date.now());
   }
@@ -57,6 +58,8 @@ class LockstepSession {
   dropAt(j) { return this.drops[j] !== undefined ? this.drops[j] : Infinity; }
   isAway(j, f) { for (const r of this.aways[j]) if (f >= r[0] && f < r[1]) return true; return false; }
   openAway(j) { const L = this.aways[j]; return L.length && L[L.length - 1][1] === Infinity ? L[L.length - 1] : null; }
+  /* 手里能算到第几帧：其他在线玩家里收得最少的那位（断线中 / 已移除的不算） */
+  availFrame() { let a = Infinity; for (let j = 0; j < this.n; j++) { if (j === this.me || this.drops[j] !== undefined || this.isAway(j, this.simFrame)) continue; a = Math.min(a, this.have[j]); } return a === Infinity ? this.simFrame : a; }
   isReady(f) { for (let j = 0; j < this.n; j++) if (f < this.dropAt(j) && !this.isAway(j, f) && this.inputs[j][f] === undefined) return false; return true; }
   /* 下一帧所有人的操作（凑不齐就返回 null，等） */
   next() {
@@ -112,22 +115,26 @@ class LockstepSession {
      跟得上的人按他们里收得最少的那位补一段；落后很多的人（断线刚回来、正在追帧）单独补一段，不拖住其他人；
      好一阵没消息的人（断线中）不参与——否则他停住的收件进度会把补发起点钉死，新帧永远发不出去，所有人一起卡住 */
   flush(extra) {
-    const seg = [], now = this.clock();
+    const seg = [], now = this.clock(), lagTurn = now - (this.lagAt || 0) >= LOCKSTEP.lagEvery; let lagSent = false;
     for (let j = 0; j < this.n; j++) {
-      let head = Infinity, lag = Infinity;
+      let head = Infinity, lag = Infinity; const lagK = [];
       for (let k = 0; k < this.n; k++) {
         if (k === this.me || this.drops[k] !== undefined) continue;
         if (this.linkUp ? !this.linkUp[k] : this.heard[k] && now - this.heard[k] > LOCKSTEP.silentAfter) continue; // 不在线（断线中）的人不参与；在线但网络慢的照样补（落后的单独一段）
         const a = this.peerAck[k] ? this.peerAck[k][j] : 0;
-        if (this.have[j] - a <= LOCKSTEP.window) head = Math.min(head, a); else lag = Math.min(lag, a);
+        if (this.have[j] - a <= LOCKSTEP.window) { head = Math.min(head, a); continue; }
+        const p = this.pipe[k] ? this.pipe[k][j] || 0 : 0; // 落后的人：不等回执，接着上一段往后发（流水线）
+        lag = Math.min(lag, p > a && p < this.have[j] ? p : a); lagK.push(k);
       }
-      if (head === Infinity && lag === Infinity) continue;
-      if (head === Infinity) { head = lag; lag = Infinity; }
       if (head < this.have[j]) seg.push([j, head, Math.min(this.have[j], head + LOCKSTEP.window)]);
-      if (lag < head) seg.push([j, lag, Math.min(head, lag + LOCKSTEP.lagWindow)]); // 落后很多的人（刷新 / 断线回来）一次多补一些，追得快
+      if (lag < this.have[j] && lagTurn) {
+        const e = Math.min(this.have[j], lag + LOCKSTEP.lagWindow); seg.push([j, lag, e]); lagSent = true;
+        for (const k of lagK) (this.pipe[k] = this.pipe[k] || [])[j] = e >= this.have[j] ? 0 : e; // 发到头了：下一轮从对方的回执重来，补上中途丢掉的段
+      }
     }
+    if (lagSent) this.lagAt = now;
     // 预算不够（4 人 + 网络很差）时每段少带几帧：先补最早缺的，下一份再补后面的
-    let per = LOCKSTEP.window; const cost = () => seg.reduce((c, x) => c + Math.min(x[2] - x[1], per) * 5 + 16, 0);
+    let per = Math.max(0, ...seg.map((x) => x[2] - x[1])); const cost = () => seg.reduce((c, x) => c + Math.min(x[2] - x[1], per) * 5 + 16, 0); // 每段原样带上，超出预算才一起按比例缩短
     while (per > 8 && cost() > this.budget) per = Math.floor(per * 0.75);
     const r = seg.map(([j, a, b]) => [j, a, this.inputs[j].slice(a, Math.min(b, a + per)).join('')]);
     const last = [...this.hashLog.keys()].pop();
@@ -315,10 +322,12 @@ const MpDriver = {
       if (L.steps % SP === 0 && S.simFrame % LOCKSTEP.hashEvery === 0) S.simulated(w.stateHash());
       if (S.replaying) { w.events.length = 0; if (performance.now() > until) break; }
     }
-    if (S.replaying && (target - L.steps < SP * 6 || w.done || (stalled && !S.rejoining && !S.awayMe))) { S.replaying = false; Sound.quiet = false; } // 刷新 / 断线回来时操作记录是一批批补到的：中途缺帧接着等，追上才算完
+    // 追上了：离实时只差一点，或者已经算到了手里能拿到的最新操作、而那些操作离实时不到 2 秒（网络慢时永远差几帧，不能死等“完全实时”）
+    const avail = S.availFrame(), caught = target - L.steps < SP * 6 || (S.simFrame >= avail - 2 && avail * SP >= target - FR * SP * 2);
+    if (S.replaying && (caught || w.done || (stalled && !S.rejoining && !S.awayMe))) { S.replaying = false; Sound.quiet = false; } // 刷新 / 断线回来时操作记录是一批批补到的：中途缺帧接着等，追上才算完
     S.replayPct = S.replaying ? Math.min(99, Math.floor((L.steps / Math.max(1, target)) * 100)) : 0;
     // 断线回来：追上了就告诉大家“从这一帧起可以恢复”，房主据此宣布恢复帧
-    if (S.awayMe && !S.replaying && !S.needReplay && target - L.steps < SP * 8) S.ready = Math.max(S.nextLocal, S.simFrame + S.delay);
+    if (S.awayMe && !S.replaying && !S.needReplay && caught) S.ready = Math.max(S.nextLocal, S.simFrame + S.delay);
     L.waitT = stalled ? L.waitT + dt : 0;
     if (stalled) L.stallTicks = (L.stallTicks || 0) + 1; L.ticks = (L.ticks || 0) + 1;
     // 本机飞机的显示预测：已经发出、还没轮到模拟的操作先在画面上走完（只改画面，模拟里的位置不变）
@@ -374,14 +383,14 @@ const Lobby = {
     return [...rooms.values()].filter((r) => r.host);
   },
   me(patch) { if (!this.net) return; this.net.presence({ mp: Object.assign({}, this.myMp(), patch) }); this.saveRoom(); },
-  create(profile) { this.code = Math.random().toString(36).slice(2, 6).toUpperCase(); this.isHost = true; this.me(Object.assign({ code: this.code, host: true, start: null }, profile)); this.net.presence({ ls: null }); },
-  join(code, profile) { this.code = code; this.isHost = false; this.me(Object.assign({ code, host: false, start: null, rdy: null }, profile)); this.net.presence({ ls: null }); },
-  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null, ls: null }); this.code = null; this.isHost = false; this.gameId = null; this.saveRoom(); },
+  create(profile) { this.code = Math.random().toString(36).slice(2, 6).toUpperCase(); this.isHost = true; this.me(Object.assign({ code: this.code, host: true, start: null }, profile)); this.net.presence({ ls: null, quit: null }); },
+  join(code, profile) { this.code = code; this.isHost = false; this.me(Object.assign({ code, host: false, start: null, rdy: null }, profile)); this.net.presence({ ls: null, quit: null }); },
+  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null, ls: null, quit: 1 }); this.code = null; this.isHost = false; this.gameId = null; this.saveRoom(); }, // quit：明确说“我退出了”（刚连上还没发房间信息的新连接不会被当成退出）
   /* 刷新回到原对局：本标签页记住房间号、自己的在场状态（房主还带着开局单）和正在打的局号 */
   saveRoom() { ssSet(SS_ROOM, this.code ? JSON.stringify({ code: this.code, isHost: this.isHost, mp: this.myMp(), gameId: this.session ? this.gameId : null, at: Date.now() }) : null); },
   savedRoom() { try { const d = JSON.parse(ssGet(SS_ROOM) || 'null'); return d && d.code && Date.now() - d.at < 20 * 60000 ? d : null; } catch (e) { return null; } },
   resume(d) {
-    this.code = d.code; this.isHost = !!d.isHost; this.resumeGame = d.gameId || null; this.net.presence({ mp: Object.assign({}, d.mp), ls: null }); this.saveRoom();
+    this.code = d.code; this.isHost = !!d.isHost; this.resumeGame = d.gameId || null; this.net.presence({ mp: Object.assign({}, d.mp), ls: null, quit: null }); this.saveRoom();
     this.resumeWait = true; setTimeout(() => { this.resumeWait = false; this.changed(); }, 6000); // 刚刷新回来：房间成员的状态还在路上，先别判“房主离开了”
   },
   room() { return this.openRooms().find((x) => x.code === this.code) || null; },
@@ -431,7 +440,7 @@ const Lobby = {
     // 操作帧的预算：4 KiB 减去在场状态里其他字段（房主还带着开局单）
     const other = JSON.stringify({ mp: this.myMp() }).length;
     this.peerRtt = []; this.lead = null; this.leadAt = 0;
-    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, 3800 - other - 220), rejoin,
+    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, (this.net.kind === 'ws' ? 7000 : 3800) - Math.ceil(other * 1.5) - 220), rejoin, // 自己的服务器每份在场状态上限 8 KiB（中文名按 3 字节留余量）
       send: (msg) => this.net.presence({ ls: Object.assign({ g: st.id, rt: this.myRtt() }, msg) }) }); // 操作帧单独一个字段：服务器只转发变化，资料不重发
     if (rejoin) this.session.replaying = true; // 新建的世界从开局按操作记录追上（静音、不放事件）
     this.saveRoom();
@@ -446,7 +455,7 @@ const Lobby = {
     for (const p of this.net.peers()) {
       if (p.isMe) continue;
       const j = this.roster.findIndex((x) => x.peer === p.peer); if (j < 0) continue;
-      const m = p.presence && p.presence.mp; if (!m || m.code !== this.code) { quit[j] = true; continue; } // 人还在线、却已经不在这个房间：主动退出了（不保留席位）
+      const m = p.presence && p.presence.mp; if (!m || m.code !== this.code) { if (p.presence && p.presence.quit) quit[j] = true; continue; } // 明确说了退出：不保留席位（刚连上、还没发房间信息的不算）
       const ls = p.presence.ls, mine = ls && ls.g === this.gameId;
       if (mine || early) connected[j] = true;
       if (mine && this.seenLs.get(j) !== ls) { this.seenLs.set(j, ls); S.receive(j, ls); if (typeof ls.rt === 'number') this.peerRtt[j] = ls.rt; }
