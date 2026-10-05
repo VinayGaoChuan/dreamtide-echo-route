@@ -360,6 +360,16 @@ function lureRows(L) {
 /* ================================================== 联机房间 ================================================== */
 /* 2–4 人同屏合作。只同步操作：每人每 1/30 秒的方向 / 大招 / 拖动，各端用同一个种子各自模拟同一局。
    网页版的转发：Claude Artifact 的房间（打开同一个链接的人互相可见）；不在 Claude 里打开时退回到“同一浏览器多窗口”，用来测试。 */
+/* 房间里每个人的真实成长（v0.11 §12：对抗用真实数值，开局前把差距摆出来，不暗中拉平） */
+function growthHtml(prof) {
+  const s = prof && prof.s; if (!s) return '';
+  return `<br><small class="mp-grow">♥${Math.round(s.hearts || 0)} · 攻 ×${(s.dmgK || 1).toFixed(2)} · 大招 ${prof.u || 1}${s.level ? ` · Lv${s.level}` : ''}</small>`;
+}
+function vsGapHtml(ms) {
+  const atk = ms.map((x) => (x.prof && x.prof.s && x.prof.s.dmgK) || 1), hp = ms.map((x) => (x.prof && x.prof.s && x.prof.s.hearts) || 5);
+  const gap = Math.max(...atk) / Math.min(...atk) > 1.25 || Math.max(...hp) - Math.min(...hp) >= 2;
+  return `<p class="dim-text mp-world">${gap ? '成长差距较大：按各自真实数值对抗，不会拉平' : '各自用真实成长参战'}</p>`;
+}
 function mpProfile() {
   const m = G.meta, id = m.current;
   Home.ensure(m); const g = Home.goal(m);
@@ -373,7 +383,7 @@ function showMultiplayer(back, joinCode) {
   hideHud(); G.world = null; Input.gameActive = false; stopPreview();
   const leaveAndBack = () => { Lobby.onUpdate = null; back(); }; // 回家园时留在房间里：可以先去交项目，房主开局会把你拉进来；“离开房间”才真的离开
   const el = showScreen('mp', `${backBtn()}
-    <div class="screen-title"><h2>联机</h2><p>2–4 人同屏合作 · 升级和掉落各拿各的 · 倒下的队友飞过去就能救起</p></div>
+    <div class="screen-title"><h2>联机</h2><p>2–4 人 · 合作闯关或对抗 · 升级和掉落各拿各的</p></div>
     <div class="mp-wrap">
       <div class="panel set-sec mp-me">
         <h3>你</h3>
@@ -388,7 +398,7 @@ function showMultiplayer(back, joinCode) {
   nick.addEventListener('keydown', (e) => e.stopPropagation()); // 打字时不触发方向键菜单导航
   $('#mp-reload', el).onclick = () => location.reload();
   nick.addEventListener('change', () => { m.nick = nick.value.trim().slice(0, 12) || m.nick; persist(); if (Lobby.code) Lobby.me({ name: m.nick }); });
-  let sig = '', stage = G.mpStage || m.progress.selected || nextStage(), delay = 0;
+  let sig = '', stage = G.mpStage || m.progress.selected || nextStage(), delay = 0, mode = G.mpMode || 'coop'; // 合作 / 对抗（v0.11）
   const paint = () => {
     if (G.screen !== 'mp' || !document.body.contains(el)) { Lobby.onUpdate = null; return; }
     const net = Lobby.net, body = $('#mp-body', el); if (!net) return;
@@ -397,12 +407,13 @@ function showMultiplayer(back, joinCode) {
     const stale = net.stale && net.stale(), nb = $('#mp-reload', el); if (nb) nb.hidden = !stale;
     $('#mp-net', el).textContent = stale ? '游戏有新版本了：刷新页面才能和大家联机' : net.kind === 'ws' ? (net.connected() ? `已连上联机服务器${net.rtt !== null ? ` · 延迟 ${net.rtt} 毫秒` : ''}` : '正在连接联机服务器…')
       : net.kind === 'room' ? '通过 Claude 房间连接：打开同一个游戏链接的人都能看到你的房间。' : '本机测试模式：在这个浏览器里再开一个窗口打开游戏，就能互相看到。';
-    const k = JSON.stringify([Lobby.code, Lobby.isHost, stage, delay, room && room.members.map((x) => [x.peer, x.name, x.plane, x.playing, x.prof && x.prof.g, x.prof && x.prof.w && x.prof.w.target, x.prof && x.prof.w && x.prof.w.upper]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.members[0].name])]);
+    if (room && !Lobby.isHost && room.mode) mode = room.mode; // 跟着房主选的玩法
+    const k = JSON.stringify([Lobby.code, Lobby.isHost, stage, delay, mode, room && room.members.map((x) => [x.peer, x.name, x.plane, x.playing, x.prof && x.prof.g, x.prof && x.prof.w && x.prof.w.target, x.prof && x.prof.w && x.prof.w.upper, x.prof && x.prof.s && x.prof.s.hearts, x.prof && x.prof.u]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.mode, r.members[0].name])]);
     if (k === sig) return; sig = k;
     if (!Lobby.code) {
       body.innerHTML = `<h3>房间</h3>
         <div class="row wrap"><button class="btn primary" id="mp-create" type="button" autofocus>${icon('i-play')} 创建房间</button><span class="dim-text">建好后把同一个链接发给朋友</span></div>
-        <div class="mp-list">${rooms.length ? rooms.map((r) => `<div class="mp-room"><b class="mp-code">${esc(r.code)}</b><span>${esc(r.members[0].name)} 的房间 · ${r.members.length}/${MP_MAX} 人${r.started ? ' · 进行中' : r.stage ? ` · ${esc(r.stage)}` : ''}</span><button class="btn small" data-join="${esc(r.code)}" type="button" ${r.started || r.members.length >= MP_MAX ? 'disabled' : ''}>加入</button></div>`).join('') : '<p class="dim-text">现在没有可加入的房间。</p>'}</div>`;
+        <div class="mp-list">${rooms.length ? rooms.map((r) => `<div class="mp-room"><b class="mp-code">${esc(r.code)}</b><span>${esc(r.members[0].name)} 的房间 · ${r.mode === 'vs' ? '对抗' : '合作'} · ${r.members.length}/${MP_MAX} 人${r.started ? ' · 进行中' : r.stage && r.mode !== 'vs' ? ` · ${esc(r.stage)}` : ''}</span><button class="btn small" data-join="${esc(r.code)}" type="button" ${r.started || r.members.length >= MP_MAX ? 'disabled' : ''}>加入</button></div>`).join('') : '<p class="dim-text">现在没有可加入的房间。</p>'}</div>`;
       $('#mp-create', body).onclick = () => { Sound.sfx('select'); Lobby.create(mpProfile()); sig = ''; paint(); };
       $$('[data-join]', body).forEach((b) => b.onclick = () => { Sound.sfx('select'); Lobby.join(b.dataset.join, mpProfile()); sig = ''; paint(); });
       return;
@@ -411,12 +422,14 @@ function showMultiplayer(back, joinCode) {
     const chips = STAGE_ORDER.map((id) => { const ok = stageUnlocked(id); return `<button class="stage-chip ${id === stage ? 'sel' : ''} ${ok ? '' : 'locked'}" data-mst="${id}" type="button" ${ok ? '' : 'aria-disabled="true"'}><b>${id}</b><span>${STAGES[id].name}</span>${ok ? '' : icon('i-lock')}</button>`; }).join('');
     const dOpts = [[0, '自动'], [3, '短'], [6, '中'], [10, '长']], dNow = delay; // 0 = 按大家的延迟自动定
     body.innerHTML = `<h3>房间 <b class="mp-code">${esc(Lobby.code)}</b> <small class="dim-text">${n}/${MP_MAX} 人</small></h3>
-      <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : ''}<br><small class="dim-text">${PLANES[x.plane].name}${x.prof && x.prof.g ? ` · ${esc(x.prof.g)}` : ''}</small></span></div>`).join('')}</div>
-      ${(() => { const w = Lobby.mergeWorld(ms); const bits = []; if (w.upper) bits.push('上层云桥开着'); if (w.targets.length) bits.push(`这局会遇到：${w.targets.map((t) => NPCS[t].name).join('、')}`); return bits.length ? `<p class="dim-text mp-world">${esc(bits.join(' · '))}</p>` : ''; })()}
-      ${host ? `<div class="label">关卡</div><div class="stage-row">${chips}</div>
+      <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : ''}<br><small class="dim-text">${PLANES[x.plane].name}${mode === 'vs' ? '' : x.prof && x.prof.g ? ` · ${esc(x.prof.g)}` : ''}</small>${growthHtml(x.prof)}</span></div>`).join('')}</div>
+      ${mode === 'vs' ? vsGapHtml(ms) : ''}
+      ${mode === 'vs' ? '' : (() => { const w = Lobby.mergeWorld(ms); const bits = []; if (w.upper) bits.push('上层云桥开着'); if (w.targets.length) bits.push(`这局会遇到：${w.targets.map((t) => NPCS[t].name).join('、')}`); return bits.length ? `<p class="dim-text mp-world">${esc(bits.join(' · '))}</p>` : ''; })()}
+      ${host ? `<div class="row wrap"><span class="label">玩法</span><div class="seg" role="group"><button type="button" data-mm="coop" class="${mode === 'coop' ? 'on' : ''}">合作</button><button type="button" data-mm="vs" class="${mode === 'vs' ? 'on' : ''}">对抗</button></div></div>
+        ${mode === 'vs' ? `<p class="dim-text">${icon('i-trophy')} 自由竞争 · 每人一条航道 · 三段约 6 分钟<br>清风塔拿目标分 → 进洞口给对手送干扰 → 冲突区里能直接打对手</p>` : `<div class="label">关卡</div><div class="stage-row">${chips}</div>`}
         <div class="row wrap"><span class="label">网络缓冲</span><div class="seg" role="group">${dOpts.map(([v, t]) => `<button type="button" data-md="${v}" class="${v === dNow ? 'on' : ''}">${t}</button>`).join('')}</div><span class="dim-text">卡顿就调长，操作会晚一点生效</span></div>
-        <div class="row wrap"><button class="btn primary big" id="mp-start" type="button" ${n >= 2 ? '' : 'disabled'}>${icon('i-hangar')} 开始 · ${stage} ${STAGES[stage].name}</button>${n < 2 ? '<span class="dim-text">至少 2 人才能开始</span>' : ''}</div>`
-        : `<p class="dim-text">${room && room.started ? '这一局已经开始了，等下一局。' : '等房主选关开始…'}</p>`}
+        <div class="row wrap"><button class="btn primary big" id="mp-start" type="button" ${n >= 2 ? '' : 'disabled'}>${icon('i-hangar')} ${mode === 'vs' ? '开始对抗' : `开始 · ${stage} ${STAGES[stage].name}`}</button>${n < 2 ? '<span class="dim-text">至少 2 人才能开始</span>' : ''}</div>`
+        : `<p class="dim-text">${room && room.started ? '这一局已经开始了，等下一局。' : mode === 'vs' ? '房主选了对抗 · 等房主开始…' : '等房主选关开始…'}</p>`}
       ${host && /^https?:$/.test(location.protocol) ? `<div class="row wrap"><span class="label">邀请链接</span><input class="mp-link" id="mp-link" readonly value="${esc(inviteLink(Lobby.code))}"><button class="btn small cyan" id="mp-copy" type="button">复制</button></div>` : ''}
       <div class="row"><button class="btn coral small" id="mp-leave" type="button">离开房间</button></div>`;
     paintPlaneCanvases(body);
@@ -426,7 +439,8 @@ function showMultiplayer(back, joinCode) {
     if (cp) cp.onclick = () => { const done = () => { Sound.sfx('ui'); toast('邀请链接已复制，发给朋友就行', '#9ff2c8'); }; try { navigator.clipboard.writeText(li.value).then(done, () => { li.select(); toast('按 Ctrl+C 复制', '#ffe38a'); }); } catch (e) { li.select(); toast('按 Ctrl+C 复制', '#ffe38a'); } };
     $$('[data-mst]', body).forEach((b) => b.onclick = () => { if (!stageUnlocked(b.dataset.mst)) { Sound.sfx('denied'); toast('你还没解锁这一关', '#ffb2a8'); return; } Sound.sfx('ui'); stage = G.mpStage = b.dataset.mst; Lobby.me({ stage }); paint(); });
     $$('[data-md]', body).forEach((b) => b.onclick = () => { Sound.sfx('ui'); delay = +b.dataset.md; paint(); });
-    const sb = $('#mp-start', body); if (sb) sb.onclick = () => { if (!Lobby.start(stage, dNow)) { Sound.sfx('denied'); return; } Sound.sfx('select'); };
+    $$('[data-mm]', body).forEach((b) => b.onclick = () => { Sound.sfx('ui'); mode = G.mpMode = b.dataset.mm; Lobby.me({ mode }); paint(); });
+    const sb = $('#mp-start', body); if (sb) sb.onclick = () => { if (!Lobby.start(stage, dNow, mode)) { Sound.sfx('denied'); return; } Sound.sfx('select'); };
   };
   Lobby.onStart = (st) => { if (G.mpRun) return false; startMpRun(st); return true; };
   Lobby.connect().then(() => {
@@ -456,9 +470,10 @@ function startMpRun(st) {
 function startRun(stageId, mp) {
   ensureTasks();
   const m = G.meta, id = m.current;
+  const vsRun = !!(mp && mp.st.mode === 'vs'); // 对抗不算关卡进度（不改“下一关”、不记尝试次数）
   stageId = mp ? mp.st.stage : stageId || m.progress.selected || nextStage();
   if (!mp && !stageUnlocked(stageId)) stageId = nextStage();
-  m.progress.selected = stageId; m.progress.attempts[stageId] = (m.progress.attempts[stageId] || 0) + 1;
+  if (!vsRun) { m.progress.selected = stageId; m.progress.attempts[stageId] = (m.progress.attempts[stageId] || 0) + 1; }
   if (G.endShownAt) { const dt = (performance.now() - G.endShownAt) / 1000; m.telemetry.lastRestart = Math.round(dt * 10) / 10; G.endShownAt = null; }
   if (m.records.runs === 1) Tele.log('second_run_started');
   const first = !mp && !m.firstRunDone && stageId === '1-1', cap = ultCapNow(); m.ultCap = cap;
@@ -469,9 +484,9 @@ function startRun(stageId, mp) {
   G.tutorial = { on: !mp && !m.tutorialDone }; // 联机不显示单人的开局教学清单
   G.homeArrive = null; G.runRescued = []; Home.ensure(m);
   G.world = new World({
-    mode: 'run', W: mp ? 1280 : G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first,
+    mode: 'run', W: mp ? 1280 : G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first, vs: vsRun,
     seed: mp ? mp.st.seed : undefined, me: mp ? mp.idx : 0,
-    world: mp ? mp.st.world || {} : Home.worldFor(m), goalText: Home.runGoalText(m), // 家园改变战场：多人时用房主的世界状态，各端一致
+    world: mp ? mp.st.world || {} : Home.worldFor(m), goalText: vsRun ? null : Home.runGoalText(m), // 家园改变战场：多人时用房主的世界状态，各端一致
     players: mp ? mp.st.roster.map((r) => ({ id: r.peer, name: r.name, plane: r.plane, stats: r.stats || planeStats(null, r.plane), ultCap: r.ultCap || 1, cos: r.cos || {} })) : undefined, target: (m.nextHint && (m.nextHint.target || m.nextHint.buildName)) || null, tutorial: !m.tutorialDone, settings: m.settings, scene: G.sea, cos: m.cosmetics, seenMap: Object.keys(m.codex.map || {}),
     cb: {
       onEnd: onRunEnd,
@@ -494,14 +509,17 @@ function startRun(stageId, mp) {
     const sr = $('#stage').getBoundingClientRect(), r = el.getBoundingClientRect(); if (!r.width && k !== 'link') return null;
     return { x: (r.left + (r.width || 60) / 2 - sr.left) / G.scale, y: (r.top + (r.height || 20) / 2 - sr.top) / G.scale };
   };
-  if (mp) { G.mpLoop = { t0: mp.t0 || performance.now(), steps: 0, dx: 0, dy: 0, waitT: 0, desyncShown: false, last: performance.now() }; banner(`${stageId} ${STAGES[stageId].name} · ${mp.st.roster.length} 人联机`, '升级和掉落各拿各的：别人的掉落你看不见', 2.4); }
+  if (mp) { G.mpLoop = { t0: mp.t0 || performance.now(), steps: 0, dx: 0, dy: 0, waitT: 0, desyncShown: false, last: performance.now() }; if (vsRun) banner(`对抗 · ${mp.st.roster.length} 人自由竞争`, '清风塔拿分 · 洞口送干扰 · 冲突区能打对手', 2.6); else banner(`${stageId} ${STAGES[stageId].name} · ${mp.st.roster.length} 人联机`, '升级和掉落各拿各的：别人的掉落你看不见', 2.4); }
   else banner(`${stageId} ${STAGES[stageId].name}`, `${PLANES[id].name} · 目标一个一个来：先清掉普通怪群`, 2);
   persist();
 }
 function onRunEnd(res) {
   if (G.world && G.world._rewarded) return; // 奖励只发一次
+  const gid = G.mpRun && G.mpRun.st && G.mpRun.st.id; // 联机奖励账本（v0.11 §9）：同一局只结算一次，重连 / 重复结束只补展示
   if (G.mpRun) { Lobby.endGame(); G.mpRun = null; G.mpLoop = null; G.mpLock = false; window.dispatchEvent(new Event('resize')); }
   if (G.world) G.world._rewarded = true;
+  if (gid) { const L = G.meta.mpLedger || (G.meta.mpLedger = []); if (L.includes(gid)) { toast('这一局已经结算过了', '#ffe38a'); showHub(); return; } L.push(gid); while (L.length > 40) L.shift(); }
+  if (res.vs) { settleVs(res); return; }
   const m = G.meta, st = res.stats, S = STAGES[res.stage], P = m.progress, first = !m.firstRunDone;
   const firstClear = res.win && !P.cleared[res.stage];
   // v0.10 失败保留：每完成一个目标当场入账的星尘、捡到的星砂（50:1 折算）、梦木都带回来；通关另给终点奖励
@@ -545,6 +563,43 @@ function onRunEnd(res) {
   const sold = workLog.filter((e) => e.k === 'sell').length;
   G.homeArrive = { dust: dust + sold * HOME.sell, wood, log: workLog, rescued: (G.runRescued || []).slice(), newNpcs: (G.runRescued || []).filter((r) => r.resident).map((r) => r.id), lightDock: (G.runRescued || []).some((r) => r.id === 'bunny') };
   showEnd(G.lastRes);
+}
+/* 对抗结算（v0.11 §12）：参与就有常规星尘，清塔另算，胜者额外一点（有限，不形成越强越赚）；不算关卡进度、不救伙伴；
+   有效战斗时间照常推进家园工作（这是自己实际参与的出击） */
+const VS_PAY = { base: 30, tower: 10, win: 25 };
+function settleVs(res) {
+  const m = G.meta, st = res.stats, v = res.vs; Home.ensure(m);
+  const won = !res.abandoned && v.rank === 1 && !v.draw, sand = Math.floor(st.dust), sandStar = Math.floor(sand / 50);
+  const pay = VS_PAY.base + v.towers[v.me] * VS_PAY.tower + (won ? VS_PAY.win : 0), dust = pay + sandStar, before = Math.floor(m.stardust);
+  m.stardust += dust; m.home.visit++;
+  const workLog = Home.work(m, st.workT || 0);
+  const Sx = m.stats; Sx.kills += st.kills; Sx.bursts += st.bursts; Sx.runs += 1; Sx.crystals += st.crystals;
+  m.records.vs = m.records.vs || { n: 0, wins: 0 }; m.records.vs.n++; if (won) m.records.vs.wins++;
+  Tele.log('vs_completed', { rank: v.rank, of: v.of });
+  persist();
+  G.lastRes = { res, rewards: { dust, pay, sand, sandStar, before, after: Math.floor(m.stardust), won } };
+  const sold = workLog.filter((e) => e.k === 'sell').length;
+  G.homeArrive = { dust: dust + sold * HOME.sell, wood: 0, log: workLog, rescued: [], newNpcs: [], lightDock: false };
+  showVsEnd(G.lastRes);
+}
+function showVsEnd(E) {
+  Input.gameActive = false; hideHud(); Sound.setMode('result'); Sound.focus(false);
+  $('#toast').innerHTML = ''; $('#banner').innerHTML = ''; banner._until = 0;
+  G.endShownAt = performance.now();
+  const r = E.res, v = r.vs, rw = E.rewards;
+  const order = v.scores.map((sc, k) => k).sort((a, b) => v.scores[b] - v.scores[a] || v.towers[b] - v.towers[a] || a - b);
+  const rows = order.map((k, i) => `<div class="vs-row ${k === v.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${PLAYER_COLORS[k % 4]}"></i><span>${esc(v.names[k])}${v.gone[k] ? ' <small class="dim-text">（中途离开）</small>' : ''}</span><span class="num">${v.scores[k]}</span><small class="dim-text">风塔 ${v.towers[k]} · 防守 ${v.held[k]} · 被击毁 ${v.kos[k]}</small></div>`).join('');
+  const el = showScreen('end', `
+    <div class="center-col">
+      <div class="h-display" style="font-size:var(--fs-xl);color:${rw.won ? 'var(--lamp2)' : 'var(--paper)'}">${r.abandoned ? '已退出对抗' : v.draw ? '平局！' : rw.won ? '你赢了！' : `第 ${v.rank} 名`}</div>
+      <div class="dim-text">对抗 · ${v.of} 人自由竞争 · ${fmtTime(r.runT)}</div>
+      <div class="panel vs-board">${rows}</div>
+      <div class="rewards"><span class="reward">${icon('i-dust').replace('class="ic"', 'class="ic" style="fill:#dcc8ff"')}星尘 +${rw.dust} <small class="dim-text">参与 ${VS_PAY.base} · 风塔 ${v.towers[v.me] * VS_PAY.tower}${rw.won ? ` · 胜利 ${VS_PAY.win}` : ''} · 星砂折算 ${rw.sandStar}</small></span></div>
+      <div class="panel end-card"><div class="label">这一局的 Build ${r.stream ? `· <span style="color:var(--lamp2)">${esc(r.stream)}</span>` : ''}</div><div class="row wrap">${buildChips(r)}</div></div>
+      <div class="row wrap" style="justify-content:center"><button class="btn primary" id="end-again" type="button" autofocus>${icon('i-team')} 回到联机房间</button><button class="btn small" id="end-hub" type="button">${icon('i-hangar')} 回家园</button></div>
+    </div>`, { bg: 'world', cls: 'dim', label: '对抗结算' });
+  $('#end-hub', el).onclick = () => { Sound.sfx('uiBack'); showHub(); };
+  $('#end-again', el).onclick = () => { Sound.sfx('select'); showMultiplayer(showHub); };
 }
 /* 下一局的构筑目标：大厅、暂停、结算、升级卡片都用同一个 buildPlan（data.js），不再各说各的 */
 function makeLure(res) {
@@ -1050,7 +1105,7 @@ function showPauseMenu() {
         <button class="btn" id="p-codex" type="button">${icon('i-book')} 图鉴</button>
         <button class="btn coral" id="p-quit" type="button">${G.mpRun ? '退出联机' : '结束本局'}</button>
       </div>
-      <span class="dim-text" style="font-size:var(--fs-xs)">现在结束：按完成度 ${Math.round(w.result(false).progress * 100)}% 领奖励</span>
+      <span class="dim-text" style="font-size:var(--fs-xs)">${w.vs ? '现在退出：已经拿到的成果照常保留，之后的不再算' : `现在结束：按完成度 ${Math.round(w.result(false).progress * 100)}% 领奖励`}</span>
     </div>`, { bg: 'world', cls: 'dim', back: resumeGame, label: '暂停' });
   $('#p-resume', el).onclick = resumeGame;
   $('#p-help', el).onclick = () => { Sound.sfx('ui'); showHelp(showPauseMenu); };
@@ -1182,7 +1237,7 @@ function updateHud(force) {
   if (L.hg !== h.homeGoal) { L.hg = h.homeGoal; R.hgoal.hidden = !h.homeGoal; R.hgoal.textContent = h.homeGoal || ''; } // HUD 只追踪家园的当前目标
   if (R.team && h.team) { // 联机：队友状态（生命 / 倒下倒计时 / 已离开）
     const tk = h.team.map((q) => `${q.hp}/${q.maxHp}/${q.alive}/${q.down}/${q.gone}`).join('|');
-    if (L.team !== tk) { L.team = tk; R.team.innerHTML = h.team.filter((q) => !q.me).map((q) => `<div class="${q.gone ? 'gone' : !q.alive ? 'down' : ''}"><i style="background:${q.color}"></i><b>${esc(q.name)}</b>${q.gone ? '已离开' : !q.alive ? `倒下 · 飞过去救 · ${q.down}` : `<span class="hp">${'♥'.repeat(Math.max(0, q.hp))}</span>`}</div>`).join(''); }
+    if (L.team !== tk) { L.team = tk; R.team.innerHTML = h.team.filter((q) => !q.me).map((q) => `<div class="${q.gone ? 'gone' : !q.alive ? 'down' : ''}"><i style="background:${q.color}"></i><b>${esc(q.name)}</b>${q.gone ? '已离开' : !q.alive ? '倒下 · 飞进圈里救' : `<span class="hp">${'♥'.repeat(Math.max(0, q.hp))}</span>`}</div>`).join(''); }
   }
   setText(R.stream, 'stream', h.stream || '');
   // 三个槽：主炮改造链（只显示最高阶造型 + 各改造等级）/ 支援 / 大招改造
@@ -1228,7 +1283,7 @@ function updateHud(force) {
   if (L.bp !== p) { L.bp = p; R.burst.style.setProperty('--p', p); }
   if (L.ready !== h.ready) { L.ready = h.ready; R.burst.classList.toggle('ready', h.ready); }
   setText(R.stock, 'stock', `${h.stock}/${h.cap}`);
-  const bs = h.down ? `倒下了 · 队友贴过来就能救起（${h.down} 秒后自动复活）` : h.stock >= h.cap ? `可释放 · 已存满 ${h.stock}/${h.cap}` : h.stock > 0 ? `可释放 · 还能再存 ${h.cap - h.stock} 次` : `大招充能 ${p}%`;
+  const bs = h.down ? `倒下了 · 等队友飞进圈里救${h.save > 0 ? ` ${Math.round(h.save * 100)}%` : ''}` : h.stock >= h.cap ? `可释放 · 已存满 ${h.stock}/${h.cap}` : h.stock > 0 ? `可释放 · 还能再存 ${h.cap - h.stock} 次` : `大招充能 ${p}%`;
   if (L.bs !== bs) { L.bs = bs; R.bstate.textContent = bs; R.bstate.classList.toggle('ready', h.stock > 0); }
   updateTutorial(h, R);
   const key = Input.hintFor('burst');

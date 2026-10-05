@@ -4,6 +4,7 @@
    目标调度见 director.js，敌人阶梯与命中反馈见 foes.js，升级仪式见 offers.js，地图互动见 mapfx.js，场景惊喜见 surprise.js。 */
 
 const LH = 720, TOP = 64, BOTTOM = LH - 22;
+const RESCUE = { r: 92, dwell: 2, hp: 0.4, inv: 2, clear: 160 }; // 联机击毁救援（v0.11 §8）：救援圈半径、停多久救起、救起回多少生命、保护几秒、倒下时清掉多大范围的敌弹
 const B_RADIUS = { pink: 7, blue: 6.5, gold: 8, white: 4 };
 let _eid = 1; // 只给不进同步的场合兜底；每个 World 用自己的 this.eid
 const PLAYER_COLORS = ['#ffe38a', '#9fe3f0', '#ff9fcf', '#9ff2c8'];
@@ -71,6 +72,7 @@ class World {
     this.initMap(o);
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
     if (this.mode === 'preview') this.setupPreview();
+    else if (o.vs && this.np > 1) this.initVs(); // 对抗（v0.11）：每人一条航道、三段计分，不走合作关卡的目标链
     else this.initDirector();
     this.eachPlayer(() => this.syncWingmen());
     this.player = this.me; // 模拟之外（界面、HUD、渲染）读到的“当前飞机”就是本机这架
@@ -102,9 +104,21 @@ class World {
   get storm() { return this.player.storm; }
   set storm(v) { this.player.storm = v; }
   get syn() { return this.player.links; }
-  /* 世界级的“升级焦点”：单人时升级仪式会让全场慢放、暂停刷怪和计时；多人时仪式只属于选的那位，战场照常 */
-  worldRitual() { return this.mp ? null : this.players[0].ritual; }
-  worldRitualBusy() { return !this.mp && !!(this.players[0].ritual || this.players[0].ritualQueue.length); }
+  /* 世界级的“升级焦点”：升级仪式让全场慢放、暂停刷怪和计时。
+     联机（v0.11 §7）：同一轮升级全队同时开始，任何一架还在选，全场都处在安全减速里；选好的先等着，都选好了一起继续 */
+  worldRitual() {
+    if (!this.mp) return this.players[0].ritual;
+    let any = null;
+    for (const q of this.players) { if (q.gone || !q.ritual) continue; if (q.ritual.st !== 'resume') return q.ritual; any = any || q.ritual; }
+    return any;
+  }
+  worldRitualBusy() { return this.mp ? this.players.some((q) => !q.gone && (q.ritual || (q.alive && q.ritualQueue.length))) : !!(this.players[0].ritual || this.players[0].ritualQueue.length); }
+  /* 选好的飞机停在“等队友”；在线的都选好了，一起恢复（倒下 / 离开的人不拖住全队） */
+  teamRitualSync() {
+    const act = this.players.filter((q) => !q.gone && q.ritual);
+    if (!act.some((q) => q.ritual.st === 'wait') || !act.every((q) => q.ritual.st === 'wait' || q.ritual.st === 'resume')) return;
+    for (const q of act) if (q.ritual.st === 'wait') this.withPlayer(q, () => this.ritStep('resume'));
+  }
   mine() { return this.player === this.me; } // 只给本机看 / 听的表现（音效、横幅、仪式画面）
   /* 同步校验：把会影响结局的状态压成一个 32 位哈希（浮点按原始位比较，表现层的东西不算进来） */
   stateHash() {
@@ -113,6 +127,7 @@ class World {
     mix(this.t); mix(this.runT); mix(this.rng.s); mix(this.rng.n); mix(this.m.kills); mix(this.beatIdx || 0); mix(this.eid);
     for (const q of this.players) { mix(q.x); mix(q.y); mix(q.hp); mix(q.stock); mix(q.burst); mix(q.alive ? 1 : 0); mix(q.res.dust); mix(q.picks.length); mix(q.ritual ? 1 : 0); }
     for (const e of this.enemies) { mix(e.id); mix(e.x); mix(e.y); mix(e.hp); }
+    if (this.vs) { for (const v of this.vs.score) mix(v); mix(this.vs.t); }
     let nb = 0; this.bullets.each((b) => { nb++; mix(b.x); mix(b.y); }); mix(nb);
     let ns = 0; this.shots.each((s2) => { ns++; mix(s2.x); mix(s2.y); }); mix(ns);
     for (const k of this.pickups) { mix(k.x); mix(k.y); }
@@ -175,7 +190,7 @@ class World {
       if (this.bursting) this.player = this.players[this.bursting.owner] || this.anchor();
       this.updateBurst(sdt);
       this.player = this.anchor();
-      if (this.mode === 'run') { this.updateDirector(sdt); this.updateSurprise(sdt); }
+      if (this.mode === 'run') { if (this.vs) this.updateVs(sdt); else { this.updateDirector(sdt); this.updateSurprise(sdt); } }
       else this.updatePreview(sdt);
       if (this.boss) { this._firer = 'boss'; this.boss.update(sdt); this._firer = null; if (this.bossProxy) { this.bossProxy.x = this.boss.x; this.bossProxy.y = this.boss.y; } }
       if (this.bossIntroT > 0) this.bossIntroT -= sdt;
@@ -197,6 +212,7 @@ class World {
     this.updateHints();
     this.updateMap(sdt);
     for (const q of this.players) { if (q.gone) continue; this.player = q; this.updateRitual(dt); } // 每架飞机自己的升级队列 / 仪式
+    if (this.mp) this.teamRitualSync();
     this.player = this.anchor();
     if (this.mode === 'run' && this.state === 'play' && this.me.stock >= this.me.ultCap && !this.me.ritual) this.m.stockIdle += sdt;
     this.player = this.anchor();
@@ -227,13 +243,14 @@ class World {
     const ox = p.x, oy = p.y;
     if (!(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx)) { p.x += mx * spd * dt + dx; p.y += my * spd * dt + dy; }
     p.x = clamp(p.x, 34, this.W * 0.82); p.y = clamp(p.y, this.arena.top + 14, this.arena.bottom - 14);
+    if (this.vs) this.vsClamp(p, dt); // 对抗：只能在自己的航道里（冲突区开放时能伸进交界的带子）
     p.vx = (p.x - ox) / Math.max(dt, 1e-4); p.vy = (p.y - oy) / Math.max(dt, 1e-4);
     p.moved += Math.hypot(p.x - ox, p.y - oy);
     p.tilt = smooth(p.tilt, clamp(p.vy / 900, -0.35, 0.35), 12, dt);
     p.trailT -= dt; if (p.trailT <= 0) { p.trailT = 0.018; p.trail.push({ x: p.x - 26, y: p.y + 2, t: 0 }); if (p.trail.length > 28) p.trail.shift(); }
     for (const q of p.trail) { q.t += dt; q.x -= 180 * dt; }
     if (this.state !== 'play') return;
-    if (this.mode === 'run' && I.burst) { I.burst = false; this.tryBurst(); }
+    if (this.mode === 'run' && I.burst) { I.burst = false; if (this.ritual && this.ritual.st === 'choose') this.chooseRecommended(); else this.tryBurst(); } // 选升级时大招键 = 选推荐
     p.fireT -= dt;
     const rate = this.P.rate * (p.candy > 0 ? 1.5 : 1) * (this.streak.n >= 30 ? 1.1 : 1);
     if (this.ritual && this.ritual.st !== 'resume') p.fireT = Math.max(p.fireT, 0.05); // 仪式期间自动射击暂停
@@ -298,31 +315,33 @@ class World {
     if (p.planeId === 'cloud' && p.cloudCd <= 0 && p.hp > 0) { p.cloudShield = true; p.cloudCd = 12; this.text('缓冲云层', p.x, p.y - 44, '#dcefff', 15, 3); }
     if (p.hp <= 0) {
       p.hp = 0; p.alive = false;
-      if (this.np > 1 && this.alivePlayers().length) { // 多人：倒下 10 秒后在队友身边复活；全员倒下才算失败
-        p.downT = 10; this.text(`${p.name || '队友'} 倒下了`, p.x, p.y - 40, '#ffb2a8', 18, 5);
+      if (this.vs) { this.vsDown(p, src); return; } // 对抗：短暂击毁后原地复归
+      if (this.np > 1 && this.alivePlayers().length) { // 多人：倒下后等队友来救（不自动复活）；在线的全部倒下才算失败
+        p.downT = 0; p.saveT = 0; this.text(`${p.name || '队友'} 倒下了`, p.x, p.y - 40, '#ffb2a8', 18, 5);
+        this.bullets.each((b) => { if (dist2(b.x, b.y, p.x, p.y) < RESCUE.clear * RESCUE.clear) b.on = false; }); // 救援点留出空间
         for (let i = 0; i < 14; i++) this.part('dot', p.x, p.y, rand(-220, 220), rand(-220, 220), 0.6, 4, 'rgba(255,122,107,0.95)');
         this.emit('down', { idx: p.idx });
       } else { this.state = 'dying'; this.stateT = 1.6; this.slowT = 1.4; Sound.sfx('lose'); this.clearBullets(false); }
     }
   }
-  /* 多人：倒下的飞机——队友飞过来贴住 1 秒就地救起；没人来的话 10 秒后在队友身边自动复活 */
+  /* 多人：倒下的飞机留下残骸和一个宽救援圈——队友飞进圈里停约 2 秒就地救起（不加按键），不会自动复活（v0.11 §8）。
+     救起后回约 40% 生命、约 2 秒保护；不送大招、不加全队 Buff。救援圈里的敌弹会化掉，队友不用贴着看不见的弹幕冒险 */
   downTick(p, dt) {
-    if (this.np < 2 || p.gone || this.state !== 'play') return;
-    p.downT -= dt;
-    const near = this.alivePlayers().find((q) => dist2(q.x, q.y, p.x, p.y) < 72 * 72);
+    if (this.np < 2 || p.gone || this.state !== 'play' || this.vs) return; // 对抗不用救援：到时间原地复归
+    p.downT += dt; const R2 = RESCUE.r * RESCUE.r;
+    this.bullets.each((b) => { if (dist2(b.x, b.y, p.x, p.y) < R2) { b.on = false; if (Math.random() < 0.4) this.part('mote', b.x, b.y, rand(-30, 30), rand(-60, -10), 0.5, 2.5, 'rgba(159,242,200,0.9)'); } });
+    const near = this.alivePlayers().find((q) => dist2(q.x, q.y, p.x, p.y) < R2);
     p.saveT = near ? (p.saveT || 0) + dt : Math.max(0, (p.saveT || 0) - dt * 0.5);
-    if (p.saveT >= 1 || p.downT <= 0) {
-      const mate = near || this.alivePlayers()[0]; if (!mate) return;
-      p.alive = true; p.hp = Math.min(2, p.maxHp); p.inv = 2.5; p.saveT = 0;
-      if (!near) { p.x = clamp(mate.x - 50, 34, this.W * 0.82); p.y = clamp(mate.y + (p.idx % 2 ? 60 : -60), this.arena.top + 14, this.arena.bottom - 14); }
-      this.fx(p.x, p.y, 2, 80, ['#ffffff', '#9ff2c8', '#ffe38a']); this.text(near ? `${mate.name || '队友'} 救起了 ${p.name || '队友'}` : '复活！', p.x, p.y - 44, '#9ff2c8', 18, 5); Sound.sfx('heart');
-      this.emit('revive', { idx: p.idx });
+    if (near && p.saveT >= RESCUE.dwell) {
+      p.alive = true; p.hp = Math.max(1, Math.ceil(p.maxHp * RESCUE.hp)); p.inv = RESCUE.inv; p.saveT = 0; p.downT = 0;
+      this.fx(p.x, p.y, 2, 80, ['#ffffff', '#9ff2c8', '#ffe38a']); this.text(`${near.name || '队友'} 救起了 ${p.name || '队友'}`, p.x, p.y - 44, '#9ff2c8', 18, 5); Sound.sfx('heart');
+      this.emit('revive', { idx: p.idx, by: near.idx });
     }
   }
   /* 多人：有人断线 —— 从约定好的那一帧起移除这架飞机 */
   dropPlayer(i) {
     const p = this.players[i]; if (!p || p.gone) return;
-    p.gone = true; p.alive = false; p.wingmen = [];
+    p.gone = true; p.alive = false; p.wingmen = []; p.ritual = null; p.ritualQueue = []; // 离开的人不再参与升级确认，其他人照常继续
     if (this.bursting && this.bursting.owner === i) { this.bursting = null; this.bfx = null; }
     this.text(`${p.name || '队友'} 离开了`, p.x, p.y - 40, '#ffb2a8', 18, 5);
     this.emit('left', { idx: i });
@@ -379,6 +398,7 @@ class World {
         this.withPlayer(this.players[s.owner], () => this.onShotHit(s, e)); // 命中 / 击杀算在开枪的人头上（充能、掉落）
         if (s.pierce-- <= 0) { s.on = false; return; }
       }
+      if (this.vs && s.gun) this.vsPvpShot(s); // 对抗：冲突区里主炮能打到对手
     });
   }
   onShotHit(s, e) {
@@ -584,6 +604,7 @@ class World {
     if (e.clockMark && !o.clock) this.later(0.02, () => this.explode(e.x, e.y, 60 * this.stats.blastK, 40, { level: 2 }));
     this.onCompanionKill(e);
     if (this.mode === 'run' && this.onGoalEvent) this.onGoalEvent('kill', e);
+    if (this.vs) this.vsKill(e);
     if (this.cb.onKill) this.cb.onKill(e.type);
   }
   freezeEnemy(e, s) { if (e.isBoss || !e.alive) return; if (e.frozen <= 0) Sound.sfx('freeze', { pan: this.pan(e.x), gap: 60 }); e.frozen = Math.max(e.frozen, s); }
@@ -992,6 +1013,7 @@ class World {
   /* 多人：掉落各吃各的——每架飞机各掉一份，只有自己看得见、吸得到；o.owner 指定时只给那一位（自己的机型 / 技能掉的） */
   dropPickup(kind, x, y, o = {}) {
     const k = Object.assign({ kind, x, y, vx: srand(-110, 110), vy: srand(-140, 60), t: 0, value: 1, seed: srand(10) }, o);
+    if (this.vs && k.owner === undefined && !k.rain) k.owner = this.player.idx; // 对抗：击破掉的东西只归开枪的人（不出现在别人航道里）
     if (this.np > 1 && k.owner === undefined) { let first = null; for (const q of this.players) { if (q.gone) continue; const c = Object.assign({}, k, { owner: q.idx }); this.pickups.push(c); first = first || c; } return first; }
     this.pickups.push(k); return k;
   }
@@ -1119,6 +1141,7 @@ class World {
   }
   finish(win) {
     this.done = true; this.phase = 'end';
+    if (this.vs) { const v = this.vsResult(); win = v.rank === 1 && !v.draw; } // 对抗：赢 = 本机这架排第一（平局不算）
     if (this.cb.onEnd) this.cb.onEnd(this.result(win));
   }
   result(win) { return this.withPlayer(this.me, () => this.resultOf(win)); }
@@ -1126,13 +1149,13 @@ class World {
     const R = this.me.res, m = Object.assign({}, this.m, R, { frags: Object.assign({}, R.frags), choiceTimes: R.choiceTimes.slice() }); // 自己的资源 + 全队统计
     return {
       win, plane: this.me.planeId, runT: this.runT, stats: m, mp: this.np > 1, team: this.players.map((q) => ({ name: q.name, plane: q.planeId, gone: q.gone })),
-      stage: this.stageId, build: this.buildSummary(), progress: win ? 1 : clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1),
+      stage: this.stageId, build: this.buildSummary(), progress: win ? 1 : this.vs ? clamp(this.vs.t / (VS.stages * VS.stageT), 0, 1) : clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1),
       memories: this.pickMemories ? this.pickMemories() : [], hurt: Object.assign({}, m.hurt || {}), lastHurt: m.lastHurt || null, clue: pick(STAGE_CLUES[this.stageId] || ['']), goalTimes: (m.goalTimes || []).slice(),
       choiceAvg: m.choiceTimes.length ? m.choiceTimes.reduce((a, b) => a + b, 0) / m.choiceTimes.length : null,
       skills: [...GUN_ORDER.filter((id) => this.gun[id] > 0).map((id) => ({ id, lv: this.gun[id] })), ...(this.support ? [{ id: this.support.id, lv: this.support.ulv }] : [])],
       syns: [...this.links], stream: this.buildName(), streamId: this.topId(),
       avgKill: m.killTimeN ? m.killTimeSum / m.killTimeN : null, bossTime: this.bossTime || 0, bossEarly: this.bossEarly,
-      journey: (this.journey || []).slice(), companions: (this.companions || []).map((c) => c.id),
+      journey: (this.journey || []).slice(), companions: (this.companions || []).map((c) => c.id), vs: this.vs ? this.vsResult() : null,
     };
   }
 
@@ -1222,12 +1245,12 @@ class World {
   /* ================================================== HUD snapshot ================================================== */
   hud() {
     const p = this.me, B = this.hudBuild || this.buildSummary(); // 槽位按“已经飞进槽里”的状态显示；生命 / 大招看本机这架
-    const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: p.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual && p.alive, down: !p.alive && !p.gone ? Math.max(0, Math.ceil(p.downT)) : 0,
-      team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, down: Math.max(0, Math.ceil(q.downT)), me: q === p, color: q.color })) : null,
+    const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: p.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual && p.alive, down: !p.alive && !p.gone, save: !p.alive && !p.gone ? clamp((p.saveT || 0) / RESCUE.dwell, 0, 1) : 0,
+      team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, down: !q.alive && !q.gone, me: q === p, color: q.color })) : null,
       gun: Object.assign({}, B.gun), support: B.support ? Object.assign({}, B.support) : null, bmod: B.bmod ? Object.assign({}, B.bmod) : null, recent: (B.recent || []).slice(),
       syns: B.links.slice(), stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(p.res.dust), wood: Math.floor(p.res.wood), homeGoal: this.goalText, companions: (this.companions || []).map((c) => c.id),
       moved: p.moved, stage: this.stageId, phase: this.phase, candy: p.candy, ritual: this.myRitualFocus(),
-      goal: this.mode === 'run' && this.phase === 'fight' && this.goalHud ? this.goalHud() : null };
+      goal: this.mode === 'run' && this.phase === 'fight' && this.goalHud && !this.vs ? this.goalHud() : null };
     if (this.boss && this.phase === 'boss') h.boss = this.boss.hudInfo();
     return h;
   }
@@ -1252,6 +1275,7 @@ class World {
       g.strokeStyle = 'rgba(255,190,150,0.55)'; g.setLineDash([10, 8]); g.lineWidth = 2; g.lineDashOffset = -t * 30;
       g.beginPath(); g.moveTo(0, this.arena.top); g.lineTo(W, this.arena.top); g.moveTo(0, this.arena.bottom); g.lineTo(W, this.arena.bottom); g.stroke(); g.setLineDash([]);
     }
+    if (this.vs) this.drawVsUnder(g);
     if (this.mapObjs) this.drawMap(g);
     if (this.surprise) this.drawSurprise(g);
     for (const w of this.walls) { g.globalCompositeOperation = 'lighter'; const gr = g.createLinearGradient(w.x - 40, 0, w.x + 10, 0); gr.addColorStop(0, 'rgba(201,168,255,0)'); gr.addColorStop(1, 'rgba(255,243,200,0.7)'); g.fillStyle = gr; g.fillRect(w.x - 40, this.arena.top, 50, this.arena.bottom - this.arena.top); g.globalCompositeOperation = 'source-over'; }
@@ -1264,6 +1288,7 @@ class World {
     this.drawArcs(g);
     for (const k of this.pickups) if (k.kind === 'crystal' && this.seesPickup(k)) drawPickup(g, k, t);
     this.drawPlayers(g);
+    if (this.vs) this.drawVsMarks(g);
     if (this.mapObjs) this.drawMapFront(g);
     // 装饰性的爆炸在下面，危险轮廓（预警 / 入场提示 / 敌弹）永远压在上面
     this.drawParticles(g);
@@ -1288,6 +1313,7 @@ class World {
     }
     if (this.ritual) { if (f > 0.01) this.drawPlayers(g); this.withPlayer(this.me, () => this.drawRitual(g)); }
     this.drawOverlays(g, o);
+    if (this.vs) this.drawVsBoard(g);
   }
   drawPlayers(g) {
     const keep = this.player;
@@ -1301,13 +1327,15 @@ class World {
     if (this.np > 1) { // 多人：队友半透明 + 名字，倒下的显示复活倒计时
       if (!p.alive && !p.gone) {
         g.save(); g.globalAlpha = 0.35; drawPlane(g, p.planeId, p.x, p.y, 0.8, t, { hurt: true }); g.restore();
-        g.strokeStyle = 'rgba(159,242,200,0.35)'; g.lineWidth = 2; g.setLineDash([5, 7]); g.beginPath(); g.arc(p.x, p.y, 72, 0, TAU); g.stroke(); g.setLineDash([]); // 救援范围
-        if (p.saveT > 0) { g.strokeStyle = '#9ff2c8'; g.lineWidth = 5; g.beginPath(); g.arc(p.x, p.y, 34, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, p.saveT)); g.stroke(); }
-        drawStepPill(g, p.x, p.y - 44, isMe ? `等队友来救 · ${Math.ceil(Math.max(0, p.downT))}` : `${p.name || '队友'} · 飞过去救 · ${Math.ceil(Math.max(0, p.downT))}`, '#ffb2a8', 0.9); return;
+        g.fillStyle = 'rgba(159,242,200,0.07)'; g.beginPath(); g.arc(p.x, p.y, RESCUE.r, 0, TAU); g.fill();
+        g.strokeStyle = 'rgba(159,242,200,0.55)'; g.lineWidth = 2.5; g.setLineDash([6, 7]); g.lineDashOffset = -t * 20; g.beginPath(); g.arc(p.x, p.y, RESCUE.r, 0, TAU); g.stroke(); g.setLineDash([]); // 救援范围
+        if (p.saveT > 0) { g.strokeStyle = '#9ff2c8'; g.lineWidth = 5; g.beginPath(); g.arc(p.x, p.y, 34, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, p.saveT / RESCUE.dwell)); g.stroke(); }
+        drawStepPill(g, p.x, p.y - 44, isMe ? '等队友来救' : `${p.name || '队友'} · 飞进圈里救`, '#ffb2a8', 0.9); return;
       }
-      if (p.ritual && p.ritual.st !== 'resume') { // 在升级的飞机：一层护盾（期间不受伤）；队友头上写着在升级
+      if (p.ritual && p.ritual.st !== 'resume') { // 在升级的飞机：一层护盾（期间不受伤）；队友头上写着在选 / 已选好
         g.strokeStyle = hexA(p.color, 0.55); g.lineWidth = 2.5; g.beginPath(); g.arc(p.x, p.y, 40 + Math.sin(t * 5) * 2, 0, TAU); g.stroke();
-        if (!isMe) drawStepPill(g, p.x, p.y - 48, `${p.name || '队友'} · 选升级中`, p.color, 0.85);
+        if (!isMe) drawStepPill(g, p.x, p.y - 48, p.ritual.st === 'wait' ? `${p.name || '队友'} ✓ 选好了` : `${p.name || '队友'} · 选升级中`, p.ritual.st === 'wait' ? '#9ff2c8' : p.color, 0.85);
+        if (!isMe && p.lastPick && p.ritual.st === 'wait') drawIcon(g, p.lastPick.icon, p.x + 30, p.y - 22, 20, p.lastPick.color); // 队友这次拿了什么：只给一个小图标
       }
       g.strokeStyle = hexA(p.color, isMe ? 0.9 : 0.6); g.lineWidth = 2; g.beginPath(); g.ellipse(p.x, p.y + 22, 26, 7, 0, 0, TAU); g.stroke();
       if (!isMe) { g.font = '700 12px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.fillStyle = p.color; g.fillText(p.name || `${p.idx + 1}P`, p.x, p.y - 32); g.textAlign = 'start'; }
@@ -1509,7 +1537,7 @@ class World {
       g.save(); g.translate(W / 2, LH * 0.42); g.scale(s, s); g.rotate(Math.sin(t * 2) * 0.05);
       g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 220, GLOW.gold, 0.8); g.globalCompositeOperation = 'source-over';
       drawIcon(g, 'star', 0, 0, 200, '#ffd76a', '#2d2358');
-      g.font = '400 54px "ZCOOL KuaiLe", sans-serif'; g.textAlign = 'center'; g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText('清屏！', 0, 150); g.fillStyle = '#fff6c8'; g.fillText('清屏！', 0, 150);
+      g.font = '400 54px "ZCOOL KuaiLe", sans-serif'; g.textAlign = 'center'; g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText(this.vs ? '对抗结束' : '清屏！', 0, 150); g.fillStyle = '#fff6c8'; g.fillText(this.vs ? '对抗结束' : '清屏！', 0, 150);
       g.restore();
     }
     if (!o.simpleBg && !this.low) {

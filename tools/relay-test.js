@@ -38,9 +38,9 @@ function client(name) {
   b.send({ t: 'hello', id: 'Wbbbbbbbb2', ch: 'test' });
   const hi = await b.wait((m) => m.t === 'hi'); check(hi && hi.you === 'Wbbbbbbbb2' && hi.peers.some((p) => p.peer === 'Waaaaaaaa1'), 'hello：拿到自己的身份和已在线的人');
   // a 建房、带操作帧（操作帧单独在 ls 字段）；b 还没进房 → 只能看到摘要
-  a.send({ t: 'p', d: { mp: { code: 'ROOM', host: true, name: '甲', plane: 'moon', prof: { s: { dmgK: 1 } }, start: null }, ls: { g: 'G1', r: [[0, 0, 'IIAgg']] } } });
+  a.send({ t: 'p', d: { mp: { code: 'ROOM', host: true, name: '甲', plane: 'moon', mode: 'vs', prof: { s: { dmgK: 1 } }, start: null }, ls: { g: 'G1', r: [[0, 0, 'IIAgg']] } } });
   const okLite = await b.until((s) => s.Waaaaaaaa1 && s.Waaaaaaaa1.mp && s.Waaaaaaaa1.mp.code === 'ROOM');
-  const la = b.state.Waaaaaaaa1 || {}; check(okLite && la.mp.name === '甲' && la.ls === undefined && la.mp.prof === undefined, '房间外：只收到房间摘要，不带操作帧和资料');
+  const la = b.state.Waaaaaaaa1 || {}; check(okLite && la.mp.name === '甲' && la.mp.mode === 'vs' && la.ls === undefined && la.mp.prof === undefined, '房间外：只收到房间摘要（含玩法），不带操作帧和资料');
   b.send({ t: 'p', d: { mp: { code: 'ROOM', host: false, name: '乙', plane: 'cloud' } } });
   check(await b.until((s) => s.Waaaaaaaa1 && s.Waaaaaaaa1.ls && s.Waaaaaaaa1.mp.prof), '进房后：收到房主的完整状态（含操作帧、资料）');
   check(await a.until((s) => s.Wbbbbbbbb2 && s.Wbbbbbbbb2.mp && s.Wbbbbbbbb2.mp.name === '乙'), '房主看到新成员');

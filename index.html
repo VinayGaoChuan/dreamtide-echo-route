@@ -498,6 +498,13 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .mp-mem.me{border-color:rgba(255,201,74,.6)}
 .mp-mem > i{width:10px;height:10px;border-radius:50%;flex:none}
 .mp-mem canvas{width:max(40px,calc(52px*var(--u)));height:auto;flex:none}
+.mp-grow{color:#ffd9a8;font-size:var(--fs-xs)}
+.vs-board{display:flex;flex-direction:column;gap:6px;min-width:min(520px,90vw);padding:.6em .8em}
+.vs-row{display:grid;grid-template-columns:2em 12px 1fr auto;align-items:center;gap:4px 10px;padding:.35em .6em;border-radius:10px;background:rgba(10,8,30,.4);border:1px solid var(--edge)}
+.vs-row.me{border-color:rgba(255,201,74,.7)}
+.vs-row > i{width:10px;height:10px;border-radius:50%}
+.vs-row .num{font-size:var(--fs-l);color:var(--lamp2);font-variant-numeric:tabular-nums}
+.vs-row small{grid-column:3 / -1}
 .team{display:flex;flex-direction:column;gap:3px;font-size:var(--fs-xs)}
 .team div{display:flex;align-items:center;gap:6px;padding:1px 8px 1px 4px;border-radius:999px;background:rgba(15,12,42,.55);width:max-content}
 .team div > i{width:9px;height:9px;border-radius:50%;flex:none}
@@ -582,6 +589,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 <script src="js/surprise.js" charset="utf-8"></script>
 <script src="js/boss.js" charset="utf-8"></script>
 <script src="js/captain.js" charset="utf-8"></script>
+<script src="js/vs.js" charset="utf-8"></script>
 <script src="js/home.js" charset="utf-8"></script>
 <script src="js/homeart.js" charset="utf-8"></script>
 <script src="js/net.js" charset="utf-8"></script>

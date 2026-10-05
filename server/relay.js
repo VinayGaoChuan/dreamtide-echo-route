@@ -126,7 +126,7 @@ const sameRoom = (a, b) => { const r = roomOf(a); return !!r && r === roomOf(b);
 /* 房间外的人只需要大厅列表要用的字段（不带操作帧和资料） */
 function liteView(pres) {
   const mp = pres.mp; if (!mp || typeof mp !== 'object') return {};
-  return { mp: { code: mp.code, host: mp.host, name: mp.name, plane: mp.plane, stage: mp.stage, start: mp.start ? { id: mp.start.id } : null } };
+  return { mp: { code: mp.code, host: mp.host, name: mp.name, plane: mp.plane, stage: mp.stage, mode: mp.mode, start: mp.start ? { id: mp.start.id } : null } };
 }
 function fieldsJson(obj) { const o = {}; for (const k of Object.keys(obj)) o[k] = JSON.stringify(obj[k]); return o; }
 function viewFJ(rcv, q) { return sameRoom(rcv, q) ? q.fj : q.lfj; }

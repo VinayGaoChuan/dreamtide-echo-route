@@ -5,8 +5,9 @@
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const dir = process.argv[2] || path.join(__dirname, '..', 'js');
 const stageArg = process.argv[3] || 'all', N = +(process.argv[4] || 2), MODE = process.argv[5] || 'direct', LOSS = +(process.argv[6] || 0.15), LAT = +(process.argv[7] || 80), DELAY = +(process.argv[8] || 4);
+const VSM = stageArg === 'vs'; // 对抗模式（v0.11）：stage 写 vs
 const DROP = process.argv[9] ? process.argv[9].split('@').map(Number) : null; // 例如 1@3000：第 1 号玩家在第 3000 帧掉线
-const FILES = ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain', 'net'];
+const FILES = ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain', 'vs', 'net'];
 const noop = () => {};
 function makeCtx(k) {
   const fakeCtx = new Proxy({}, { get: (t, key) => {
@@ -25,14 +26,35 @@ function makeCtx(k) {
   ctx.__g = fakeCtx; ctx.__world = JSON.parse(JSON.stringify(WORLD)); ctx.globalThis = ctx; vm.createContext(ctx);
   for (const f of FILES) { const p = path.join(dir, f + '.js'); if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f + '.js' }); }
   vm.runInContext(`
-    var __settings = DEFAULT_SETTINGS(); __settings.particles = ${k % 2 ? "'low'" : "'full'"};
+    var __ev = [], __vsSends = []; var __settings = DEFAULT_SETTINGS(); __settings.particles = ${k % 2 ? "'low'" : "'full'"};
+    /* 对抗机器人：清自己航道的怪、优先打风塔守卫、洞口开了就进（按段交替选两种干扰）、侧风来了换到另一半；
+       冲突区开放时 0 号贴着交界打，1 号有一半时间也进带子（让直攻真的发生） */
+    function __vsBot(w, i) {
+      const p = w.players[i], V = w.vs, L = V.lanes[i], mid = (L.top + L.bot) / 2;
+      let tx = w.W * 0.22, ty = mid, best = null, bd = 1e9;
+      for (const e of w.enemies) { if (!e.alive || e.lane !== i || e.x < p.x + 30 || e.x > w.W) continue; const d = e.x - p.x + Math.abs(e.y - p.y) * 0.6 - (e.vsGuard || e.vsInt ? 220 : 0); if (d < bd) { bd = d; best = e; } }
+      if (best) ty = best.y;
+      const holes = V.holes.filter((h) => h.lane === i && h.st === 'open');
+      if (holes.length) { const H = holes.find((h) => h.kind === (V.stage % 2 ? 'wind' : 'armor')) || holes[0]; tx = H.x; ty = H.y; }
+      else if (V.clash && (i === 0 || Math.floor(w.t / 6) % 2 === 0)) { // 冲突区：贴到交界，看到带子里的对手就对准他、绕到他身后开火
+        ty = i === 0 ? L.bot + 30 : L.top - 30;
+        const o = w.players.find((q) => q !== p && q.alive && w.vsInBand(q.y));
+        if (o && w.vsInBand(p.y)) { ty = o.y; tx = Math.max(60, o.x - 220); }
+      }
+      if (L.wind && L.wind.st !== 'done') ty = L.wind.dir > 0 ? Math.min(L.bot - 30, L.wind.bot + 40) : Math.max(L.top + 30, L.wind.top - 40);
+      if (w.ritual && w.ritual.st === 'choose') { const G = w.ritual.gates[i % 2]; tx = G.x; ty = G.y; }
+      const gain = w.ritual && w.ritual.st === 'choose' ? 160 : 60;
+      return { mx: Math.sign(tx - p.x) * Math.min(1, Math.abs(tx - p.x) / gain), my: Math.sign(ty - p.y) * Math.min(1, Math.abs(ty - p.y) / (gain * 0.7)), burst: p.stock >= 1 && !w.ritual && !w.bursting, focus: false, dx: 0, dy: 0 };
+    }
     function __bot(w, i) {
       const p = w.players[i]; if (!p || !p.alive) return { mx: 0, my: 0, burst: false };
+      if (w.vs) return __vsBot(w, i);
       const mid = (TOP + BOTTOM) / 2; let tx = w.W * 0.22 + i * 30, ty = mid + (i - 0.5) * 60;
       let best = null, bd = 1e9; for (const e of w.enemies) { if (!e.alive || e.x < p.x + 30 || e.x > w.W) continue; const d = e.x - p.x + Math.abs(e.y - p.y) * 0.6 - (e.goal ? 260 : 0); if (d < bd) { bd = d; best = e; } }
       if (best) ty = best.y + (i - 0.5) * 24;
       if (w.boss && w.boss.plates) { const pl = w.boss.plates.find((q) => q.alive); if (pl) ty = w.boss.y + pl.dy; }
       const gt = w.guideTarget(); if (gt && i === w.beatIdx % w.players.length && !(w.ritual && w.ritual.st === 'choose')) { tx = Math.min(gt.x - 6, w.W * 0.8); ty = gt.y; }
+      const mate = w.players.find((q) => q !== p && !q.alive && !q.gone); if (mate && !w.ritual) { tx = mate.x; ty = mate.y; } // 队友倒下：飞进救援圈
       if (w.ritual && w.ritual.st === 'choose') { const G = w.ritual.gates[i % 2]; tx = G.x; ty = G.y; }
       let dodge = 0; for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
       const gain = w.ritual && w.ritual.st === 'choose' ? 160 : 60; // 选卡时慢慢靠过去：有操作延迟时不容易冲过头
@@ -48,13 +70,13 @@ function roster(n) { return Array.from({ length: n }, (_, i) => ({ id: 'p' + i, 
 function runDirect(stage, n) {
   const seed = 12345 + stage.charCodeAt(2) * 7;
   const ctxs = Array.from({ length: n }, (_, k) => makeCtx(k));
-  ctxs.forEach((c, k) => { c.__roster = roster(n); R(c, `var __res = null; var __w = new World({ mode: 'run', W: 1280, stage: '${stage}', seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
-  let frame = 0;
+  ctxs.forEach((c, k) => { c.__roster = roster(n); R(c, `var __res = null; var __w = new World({ mode: 'run', W: 1280, stage: '${VSM ? '1-1' : stage}', vs: ${VSM}, seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
+  let frame = 0, teamSolo = 0, teamEarly = 0; const downs = { down: 0, revive: 0 };
   for (; frame < 30 * 900; frame++) {
     // 每个玩家只在自己那一端算自己的操作，再“发给”所有人（经过 net.js 的量化编码，和真实联机一致）
     const inputs = ctxs.map((c, k) => R(c, `NetCodec.decodeFrame(NetCodec.encodeFrame(__bot(__w, ${k})))`));
     // 0 号端在模拟步之间画画面、读 HUD（真实游戏里渲染穿插在步与步之间）；其他端不画：画面代码不许动到玩法状态
-    ctxs.forEach((c, k) => { c.__inputs = inputs; R(c, `for (let s = 0; s < LOCKSTEP.steps; s++) { if (s === 0) __inputs.forEach((inp, j) => __w.setInput(j, inp)); __w.step(1 / 120); ${k === 0 ? 'if (s % 2) { __w.viewOff = { x: 13.37, y: -7.1 }; __w.render(__g, { simpleBg: true }); __w.hud(); __w.events.length = 0; }' : ''} }`); });
+    ctxs.forEach((c, k) => { c.__inputs = inputs; R(c, `for (let s = 0; s < LOCKSTEP.steps; s++) { if (s === 0) __inputs.forEach((inp, j) => __w.setInput(j, inp)); __w.step(1 / 120); ${k === 0 ? 'if (s % 2) { __w.viewOff = { x: 13.37, y: -7.1 }; __w.render(__g, { simpleBg: true }); __w.hud(); for (const e of __w.events.splice(0)) { __ev.push(e.type); if (e.type === "vsSend") __vsSends.push(e.kind); } }' : ''} }`); });
     const hs = ctxs.map((c) => R(c, '__w.stateHash()'));
     if (hs.some((h) => h !== hs[0])) {
       const d = ctxs.map((c) => R(c, 'JSON.stringify(__w.stateDump())'));
@@ -62,6 +84,11 @@ function runDirect(stage, n) {
       const diff = Object.keys(a).filter((k2) => JSON.stringify(a[k2]) !== JSON.stringify(b[k2])).map((k2) => `${k2}: ${JSON.stringify(a[k2]).slice(0, 300)} ≠ ${JSON.stringify(b[k2]).slice(0, 300)}`);
       return { stage, n, ok: false, frame, diff };
     }
+    // v0.11 §7：同一轮升级全队一起——有人在选，其他活着的人也都在仪式里（或等着）；有人还在选时没有人提前恢复
+    const tr = R(ctxs[0], `(function(){ const L = __w.players.filter((q) => !q.gone && q.alive); const act = L.filter((q) => q.ritual && q.ritual.st !== 'resume');
+      if (!act.length) return 0; const free = L.filter((q) => !q.ritual).length; const early = act.some((q) => q.ritual.st !== 'wait') && L.some((q) => q.ritual && q.ritual.st === 'resume'); return (free ? 1 : 0) | (early ? 2 : 0); })()`);
+    if (tr & 1) teamSolo++; if (tr & 2) teamEarly++;
+    for (const ev of R(ctxs[0], '__ev.splice(0).concat(__w.events.splice(0).map((e) => e.type))')) if (ev === 'down' || ev === 'revive') downs[ev]++;
     if (R(ctxs[0], '__w.done') ) break;
   }
   const res = R(ctxs[0], '__res && { win: __res.win, runT: Math.round(__res.runT), kills: __res.stats.kills }');
@@ -69,7 +96,13 @@ function runDirect(stage, n) {
   const rescued = R(ctxs[0], '__w.m.rescuedNow.join(",") + " upper:" + __w.m.upperRoute');
   const per = R(ctxs[0], `JSON.stringify(__w.players.map((q) => ({ build: q.picks.map((o) => o.kind[0] + ':' + o.id).join('>'), dust: Math.round(q.res.dust), offers: q.res.offers })))`);
   const ends = ctxs.map((c) => R(c, '__res && JSON.stringify([__res.stats.dust, __res.stats.crystals, __res.build.gun])'));
-  return { stage, n, ok: true, frames: frame, res, rescued, per: JSON.parse(per), myResults: ends };
+  if (VSM) { // 对抗：每端算出的排名 / 分数必须一样；统计送出的干扰、直攻击毁
+    const vs = ctxs.map((c) => R(c, '__res && __res.vs && JSON.stringify({ scores: __res.vs.scores, towers: __res.vs.towers, held: __res.vs.held, kos: __res.vs.kos, draw: __res.vs.draw, winner: __res.vs.winner })'));
+    const sends = R(ctxs[0], '__vsSends'), same = vs.every((x) => x && x === vs[0]);
+    return { stage: 'vs', n, ok: teamEarly === 0 && same && !!res, frames: frame, res, vs: vs[0] && JSON.parse(vs[0]), sends, team: { solo: teamSolo, early: teamEarly }, per: JSON.parse(per), myWins: ctxs.map((c) => R(c, '__res && __res.win')) };
+  }
+  // teamSolo：有人在选升级时另一架活着的飞机不在仪式里（应该很少：只在倒下的人被救起后补选时出现）；teamEarly：有人还在选，别人已经恢复（必须是 0）
+  return { stage, n, ok: teamEarly === 0, frames: frame, res, rescued, team: { solo: teamSolo, early: teamEarly }, downs, per: JSON.parse(per), myResults: ends };
 }
 
 async function runNet(stage, n) {
@@ -82,7 +115,7 @@ async function runNet(stage, n) {
   ctxs.forEach((c, k) => { c.__send = (obj) => deliver(k, obj); c.__roster = roster(n);
     c.__clock = () => now;
     R(c, `var __res = null; var __sess = new LockstepSession({ selfIndex: ${k}, n: ${n}, delay: ${DELAY}, isHost: ${k === 0}, clock: () => __clock(), send: (o) => __send(o) });
-      var __w = new World({ mode: 'run', W: 1280, stage: '${stage}', seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
+      var __w = new World({ mode: 'run', W: 1280, stage: '${VSM ? '1-1' : stage}', vs: ${VSM}, seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
   const hashes = ctxs.map(() => new Map());
   let maxFrame = 0, stalls = 0, ticks = 0; const stallBy = {};
   const TICK = 1000 / 30;

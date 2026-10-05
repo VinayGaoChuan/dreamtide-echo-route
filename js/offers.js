@@ -150,11 +150,11 @@ Object.assign(World.prototype, {
     this.offerN++; p.res.offers++;
     const hasUp = opts.some((o) => o && o.from > 0);
     this.dryOffers = hasUp || this.offerN < 3 ? 0 : this.dryOffers + 1;
-    // 危险隔离（单人）：敌弹化成星点、贴脸的敌人推开。多人时战场照常，选的人自己有护盾（仪式期间不会受伤）
-    if (!this.mp) { this.clearBullets(true); for (const e of this.enemies) if (e.alive && !e.isBoss && dist2(e.x, e.y, p.x, p.y) < 150 * 150) e.x = Math.max(e.x, p.x + 170); }
+    // 危险隔离：敌弹化成星点、贴脸的敌人推开（多人时全队同一轮一起开始，战场一起进入安全减速）
+    this.clearBullets(true); for (const e of this.enemies) if (e.alive && !e.isBoss && dist2(e.x, e.y, p.x, p.y) < 150 * 150) e.x = Math.max(e.x, p.x + 170);
     p.rx = p.x; p.ry = p.y;
     this.ritual.who = p.idx;
-    if (mine) { Sound.sfx('ritualTrigger', { ui: true }); if (!this.mp) Sound.focus(true); this.rumble(0.2, 0.4, 60); this.emit('ritual', { src: q.src, first, full: q.full }); }
+    if (mine) { Sound.sfx('ritualTrigger', { ui: true }); Sound.focus(true); this.rumble(0.2, 0.4, 60); this.emit('ritual', { src: q.src, first, full: q.full }); }
   },
   updateRitual(dt) {
     if (this.mode !== 'run') return;
@@ -201,6 +201,7 @@ Object.assign(World.prototype, {
         if (u >= 1) this.landRitual(R);
         break;
       }
+      case 'wait': break; // 联机：自己选好了，等在线的队友都选好（teamRitualSync 一起恢复）
       case 'resume':
         if (R.t >= T.resume) {
           this.ritual = null;
@@ -225,7 +226,7 @@ Object.assign(World.prototype, {
       R.spin = 0.4; if (mine) Sound.sfx('reveal', { r: R.qNow >= 2 ? 'SR' : R.qNow ? 'R' : 'N', ui: true });
     }
     if (st === 'choose') { p.rx = p.x; p.ry = p.y; }
-    if (st === 'resume') { p.inv = Math.max(p.inv, 0.8); if (mine && !this.mp) Sound.focus(false); }
+    if (st === 'resume') { p.inv = Math.max(p.inv, 0.8); if (mine) Sound.focus(false); }
   },
   qualityUp(R) {
     R.qNow++; R.opts = R.opts.map((o) => this.upgradeOpt(o));
@@ -239,7 +240,7 @@ Object.assign(World.prototype, {
   },
   chooseRitual(i, who) {
     const R = this.ritual, G = R.gates[i], p = this.player; R.by = p.idx;
-    R.pick = i; R.picked = G.opt;
+    R.pick = i; R.picked = G.opt; p.lastPick = { icon: G.info.icon, color: G.info.color };
     p.res.choiceTimes.push(R.chooseT);
     if (this.m.firstSkill === null) this.m.firstSkill = this.runT;
     const pre = this.buildSummary();
@@ -256,8 +257,16 @@ Object.assign(World.prototype, {
       this.emit('slotLand', { slot: SLOT_OF[G.opt.kind] || 'gun', kind: G.opt.kind, id: G.opt.id, lv: G.info.lv, name: G.info.name, desc: G.info.desc, color: G.info.color, tag: G.info.tag, replace: G.opt.replace || null, word: R.word, first: this.picks.length === 1 });
       Sound.sfx('slotLand', { ui: true });
     }
-    this.ritStep('resume');
+    // 联机：还有在线队友没选完，就先停在“等队友”（世界继续安全减速），都选好了一起恢复
+    const waiting = this.mp && this.players.some((q) => q !== this.player && !q.gone && q.ritual && q.ritual.st !== 'wait' && q.ritual.st !== 'resume');
+    this.ritStep(waiting ? 'wait' : 'resume');
   },
+  /* 大招键 = 选推荐（不会自动替玩家选）：能凑联动 > 升级已有的 > 第一个；单人时“目标流派”优先（联机不用本机的目标，保证各端一致） */
+  recIndex(R) {
+    const sc = (G) => (!this.mp && G.info.target ? 4 : 0) + (G.info.link ? 2 : 0) + (G.opt.from > 0 ? 1 : 0);
+    let best = 0; R.gates.forEach((G, i) => { if (sc(G) > sc(R.gates[best])) best = i; }); return best;
+  },
+  chooseRecommended() { const R = this.ritual; if (R && R.st === 'choose' && R.gates && this.player.alive) this.chooseRitual(this.recIndex(R), this.player); },
   slotTarget(o) {
     const k = SLOT_OF[o.kind] || 'gun', pos = this.slotPos ? this.slotPos(k) : null;
     return pos || { gun: { x: 64, y: 150 }, support: { x: 120, y: 150 }, bmod: { x: 176, y: 150 }, link: { x: 100, y: 196 }, res: { x: this.W - 90, y: LH - 90 } }[k];
@@ -333,17 +342,19 @@ Object.assign(World.prototype, {
     // 候选
     if (R.gates) R.gates.forEach((G, i) => {
       if (G.alpha <= 0.01) return;
-      if (R.st === 'fly' || R.st === 'resume') return;
+      if (R.st === 'fly' || R.st === 'resume' || R.st === 'wait') return;
       if (R.st === 'show' && i === R.pick) return;
       this.drawGate(g, G, R, i);
     });
     if (R.st === 'choose' && p.alive) {
       if (R.first) R.gates.forEach((G, i) => { if (G.near < 0.5) drawPointer(g, p.x, p.y, G.x, G.y, G.info.color, t + i); });
       g.save(); g.globalAlpha = 0.6 + Math.sin(t * 6) * 0.15; g.strokeStyle = '#dff2ff'; g.lineWidth = 2.5; g.setLineDash([5, 6]); g.beginPath(); g.arc(p.x, p.y, 38, 0, TAU); g.stroke(); g.setLineDash([]); g.restore();
-      if (!R.first) drawStepPill(g, this.W / 2, this.arena.bottom - 18, this.mp ? '飞进一个方案的圆圈 · 选的时候不会受伤' : '飞进一个方案的圆圈 · 战场慢放中，不会受伤', '#dff2ff', 1); // 固定在底部，不跟着飞机压住卡片
+      const late = this.mp && R.chooseT > 30 && this.players.some((q) => q !== p && !q.gone && q.ritual && q.ritual.st === 'wait');
+      if (!R.first || late) drawStepPill(g, this.W / 2, this.arena.bottom - 18, late ? '队友都选好了 · 飞进一个圆圈，或按大招选推荐' : '飞进一个方案的圆圈 · 大招键选推荐 · 不会受伤', late ? '#ffe38a' : '#dff2ff', 1); // 固定在底部，不跟着飞机压住卡片
     } else if (R.st !== 'resume' && p.alive) { // 稳住期间：清楚的护盾
       g.save(); g.strokeStyle = 'rgba(223,242,255,0.85)'; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, 36, 0, TAU); g.stroke(); glowAt(g, p.x, p.y, 60, 'rgba(200,235,255,0.6)', 0.4); g.restore();
     } else if (R.st === 'resume' && p.alive) { const a = 1 - R.t / T.resume; g.save(); g.globalAlpha = a; g.strokeStyle = '#dff2ff'; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, 36 + (1 - a) * 20, 0, TAU); g.stroke(); g.restore(); }
+    if (R.st === 'wait') { const who = this.players.filter((q) => q !== p && !q.gone && q.ritual && q.ritual.st !== 'wait' && q.ritual.st !== 'resume').map((q) => q.name || `${q.idx + 1}P`); drawStepPill(g, this.W / 2, this.arena.bottom - 18, `✓ 选好了 · 等 ${who.join('、') || '队友'}`, '#9ff2c8', 1); }
     if (R.st === 'show') this.drawCentral(g, R);
     if (R.st === 'fly') { const G = R.gates[R.pick]; glowAt(g, R.fx, R.fy, 46, hexA(G.info.color, 0.9), 0.9); drawIcon(g, G.info.icon, R.fx, R.fy, 40, G.info.color); }
   },
@@ -376,7 +387,7 @@ Object.assign(World.prototype, {
     g.strokeStyle = I.color; g.lineWidth = 3; g.setLineDash([8, 7]); g.lineDashOffset = -t * 30; g.beginPath(); g.arc(0, 0, GATE_R - 4, 0, TAU); g.stroke(); g.setLineDash([]);
     drawIcon(g, I.icon, 0, 0, 40, I.color);
     if (G.dwell > 0) { g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.arc(0, 0, GATE_R - 4, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(G.dwell / GATE_DWELL, 0, 1)); g.stroke(); }
-    if (R.st === 'choose') { g.textAlign = 'center'; g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.7)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : '飞进圆圈', 0, GATE_R + 16); }
+    if (R.st === 'choose') { g.textAlign = 'center'; g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.7)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : i === this.recIndex(R) ? '飞进圆圈 · 或按大招' : '飞进圆圈', 0, GATE_R + 16); }
     g.restore();
     g.restore();
   },

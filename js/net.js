@@ -290,10 +290,10 @@ const Lobby = {
     const rooms = new Map();
     for (const p of this.net.peers()) {
       const m = p.presence && p.presence.mp; if (!m || typeof m.code !== 'string') continue;
-      const r = rooms.get(m.code) || { code: m.code, members: [], host: null, started: false, stage: null };
+      const r = rooms.get(m.code) || { code: m.code, members: [], host: null, started: false, stage: null, mode: 'coop' };
       const ls = p.presence.ls;
       r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(ls && ls.g), rtt: typeof m.rtt === 'number' ? m.rtt : null });
-      if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; }
+      if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; r.mode = m.mode === 'vs' ? 'vs' : 'coop'; }
       rooms.set(m.code, r);
     }
     for (const r of rooms.values()) r.members.sort((a, b) => (b.host - a.host) || (a.peer < b.peer ? -1 : a.peer > b.peer ? 1 : 0));
@@ -306,13 +306,14 @@ const Lobby = {
   room() { return this.openRooms().find((x) => x.code === this.code) || null; },
   members() { const r = this.room(); return r ? r.members : []; },
   /* 房主开局：把名单（含每人的局外属性）写进自己的在场状态，大家看到就各自开始 */
-  start(stage, delay) {
+  start(stage, delay, mode) {
     if (!this.isHost) return false;
     const ms = this.members().slice(0, MP_MAX); if (ms.length < 2) return false;
     const roster = ms.map((m) => ({ peer: m.peer, name: m.name, plane: m.plane, stats: (m.prof && m.prof.s) || null, ultCap: (m.prof && m.prof.u) || 1, cos: (m.prof && m.prof.c) || {} }));
     const id = Math.random().toString(36).slice(2, 8), seed = (Math.random() * 4294967296) >>> 0;
     const now = this.net.serverNow ? this.net.serverNow() : null, at = now === null ? null : Math.round(now + 900); // 约 0.9 秒后大家在同一刻开局
-    this.me({ stage, start: { id, stage, seed, roster, at, delay: delay || this.autoDelay(ms), world: this.mergeWorld(ms) } }); // 家园改变的世界状态：合并房间里每个人的（写进开局单，各端一致）
+    const vs = mode === 'vs'; // 对抗（v0.11）：每人一条航道、三段计分；关卡数值按第一关
+    this.me({ stage, mode: vs ? 'vs' : 'coop', start: { id, stage: vs ? '1-1' : stage, mode: vs ? 'vs' : 'coop', seed, roster, at, delay: delay || this.autoDelay(ms), world: vs ? {} : this.mergeWorld(ms) } }); // 家园改变的世界状态：合并房间里每个人的（写进开局单，各端一致）
     this.changed(); // 房主自己马上开局（不用等服务器把自己的状态转回来）
     return true;
   },
