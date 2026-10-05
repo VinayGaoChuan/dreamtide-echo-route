@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: 语法检查
         run: for f in js/*.js tools/*.js; do node --check "$f" || exit 1; done
       - name: 三关无头通关模拟
@@ -29,5 +29,10 @@ jobs:
         run: node tools/mp-sim.js js 1-2 3 net 0.2 100 5 2@3000
       - name: 联机中转服务器
         run: node tools/relay-test.js
+      - name: 真联机（本地中转服务器 + 2 个无头客户端，真实 WebSocket 打 60 秒）
+        run: |
+          PORT=8091 node server/relay.js &
+          sleep 1
+          node tools/net-bot.js ws://localhost:8091/mp 2 1-1 60
       - name: 打包单文件
         run: python3 build.py dist/dreamtide.html

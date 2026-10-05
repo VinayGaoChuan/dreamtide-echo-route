@@ -181,15 +181,17 @@ class WsNet {
   localPerfOf(ms) { return ms - this.clockOff; }
   tick(now) {
     if (!this.open || !this.ws) return;
-    if (this.pending && now - this.sentAt >= 30) { this.ws.send(JSON.stringify({ t: 'p', d: this.pending })); this.pending = null; this.sentAt = now; }
+    this.sendPending(now);
     if (now - this.pingAt > (this.clock.length < 4 ? 400 : 1000)) { this.pingAt = now; this.ws.send(JSON.stringify({ t: 'ping', c: now })); } // 刚连上时多测几次
   }
   emit() { for (const fn of this.subs) fn(); }
   peers() { return [{ peer: this.selfId, isMe: true, presence: this.me, updatedAt: Date.now() }, ...[...this.others].map(([peer, p]) => ({ peer, isMe: false, presence: p.presence, updatedAt: p.updatedAt }))]; }
   presence(patch) {
     const m = Object.assign({}, this.me); for (const k in patch) { if (patch[k] === null) delete m[k]; else m[k] = patch[k]; } this.me = m;
-    this.pending = Object.assign(this.pending || {}, patch); return Promise.resolve();
+    this.pending = Object.assign(this.pending || {}, patch); this.sendPending(performance.now()); return Promise.resolve();
   }
+  /* 有新状态马上发（两次之间至少隔 16 毫秒，没赶上的由计时器补发）：操作帧早一点到，所有人的操作延迟就短一点 */
+  sendPending(now) { if (this.pending && this.open && this.ws && now - this.sentAt >= 16) { this.ws.send(JSON.stringify({ t: 'p', d: this.pending })); this.pending = null; this.sentAt = now; } }
   onChange(fn) { this.subs.push(fn); }
   connected() { return this.open; }
   close() { this.closed = true; if (this.off) this.off(); if (this.ws) try { this.ws.close(); } catch (e) { /* ignore */ } this.subs = []; }
@@ -226,6 +228,39 @@ class LocalNet {
   close() { if (this.off) this.off(); if (this.bc) { this.bc.postMessage({ from: this.selfId, bye: true }); this.bc.close(); } this.subs = []; }
 }
 
+/* ---------- 联机主循环的核心（网页 main.js 和无头联机测试 tools/net-bot.js 共用同一份） ----------
+   按真实时间推进；本机每 1/30 秒采一帧操作（提前量由自适应缓冲决定），凑齐所有人的这一帧才往下模拟；
+   每个操作帧 = 4 个模拟步，只在帧的第一步换上新操作；最后算出本机飞机的显示预测（只给画面用）。 */
+const MpDriver = {
+  tick(w, L, S, now, inputFn) {
+    const dt = Math.min(0.25, Math.max(0, (now - L.last) / 1000)); L.last = now;
+    const el = (now - L.t0) / 1000, FR = LOCKSTEP.hz, SP = LOCKSTEP.steps;
+    const lead = Lobby.leadFrames(now) || S.delay;
+    while (S.nextLocal <= Math.floor(el * FR) + lead) { if (!S.sample(inputFn(L))) break; Lobby.unsent = true; }
+    Lobby.pump(); const gap = now - Lobby.lastFlush; if ((Lobby.unsent && gap >= 16) || gap >= 50) Lobby.flush(now); // 采到新操作马上发；没有新操作时也定期发（回执 / 哈希）
+    const target = Math.floor(el * FR * SP), behind = target - L.steps;
+    let budget = (behind > FR * SP * 2 ? LOCKSTEP.catchUp * 3 : LOCKSTEP.catchUp) * SP, stalled = false;
+    while (L.steps < target && budget-- > 0 && !w.done) {
+      if (L.steps % SP === 0) { const ins = S.next(); if (!ins) { stalled = true; break; } for (let j = 0; j < ins.length; j++) w.setInput(j, ins[j]); }
+      w.step(1 / 120); L.steps++;
+      if (L.steps % SP === 0 && S.simFrame % LOCKSTEP.hashEvery === 0) S.simulated(w.stateHash());
+    }
+    L.waitT = stalled ? L.waitT + dt : 0;
+    if (stalled) L.stallTicks = (L.stallTicks || 0) + 1; L.ticks = (L.ticks || 0) + 1;
+    // 本机飞机的显示预测：已经发出、还没轮到模拟的操作先在画面上走完（只改画面，模拟里的位置不变）
+    const me = w.me; let ox = 0, oy = 0;
+    if (me && me.alive && w.state === 'play' && !(me.ritual && me.ritual.st !== 'choose' && me.ritual.st !== 'resume')) {
+      const spd = 400 * me.P.speed, cx = (v) => clamp(v, 34, w.W * 0.82), cy = (v) => clamp(v, w.arena.top + 14, w.arena.bottom - 14);
+      let x = me.x, y = me.y; const rem = (SP - (L.steps % SP)) % SP, cur = w.inputs[me.idx];
+      if (rem && cur) { const s = (spd * (cur.focus ? 0.5 : 1) * rem) / (FR * SP); x = cx(x + cur.mx * s); y = cy(y + cur.my * s); }
+      for (let f = S.simFrame; f < S.nextLocal; f++) { const raw = S.inputs[S.me][f]; if (!raw) continue; const I = NetCodec.decodeFrame(raw), s = (spd * (I.focus ? 0.5 : 1)) / FR; x = cx(x + I.mx * s + I.dx); y = cy(y + I.my * s + I.dy); }
+      ox = x - me.x; oy = y - me.y;
+    }
+    w.viewOff = { x: ox, y: oy };
+    return stalled;
+  },
+};
+
 /* ---------- 大厅 + 一局联机的驱动 ---------- */
 /* 每个人的在场状态 mp：{ code 房间号, host, name, plane, prof 局外属性, start 房主的开局单, ls 操作帧 }
    开局单里的名单顺序 = 玩家编号（房主第一个，其余按 peer 排），各端据此建出完全相同的世界。 */
@@ -235,7 +270,7 @@ function compactStats(st) { // 局外属性只带玩法用到的数，四舍五�
 }
 const Lobby = {
   net: null, code: null, isHost: false, roster: null, gameId: null, session: null, seenLs: new Map(), onUpdate: null, onStart: null,
-  linger: null, lastFlush: 0, sessionAt: 0, connectedNow: null,
+  linger: null, lastFlush: 0, unsent: false, sessionAt: 0, connectedNow: null,
   async connect() {
     if (this.net) return this.net;
     const ws = mpServerUrl(); // 优先自己的联机服务器
@@ -347,7 +382,7 @@ const Lobby = {
     return this.lead;
   },
   /* 发布本机的操作帧；一局结束后再继续补发几秒，慢一步的队友还要用我最后那几帧 */
-  flush(now) { const S = this.session || this.linger; if (!S) return; this.lastFlush = now; S.flush(); },
+  flush(now) { const S = this.session || this.linger; if (!S) return; this.lastFlush = now; this.unsent = false; S.flush(); },
   tick(now) {
     if (this.code && !this.session && this.net && typeof this.net.rtt === 'number' && now - (this.rttAt || 0) > 2000) { // 在房间里：把自己的延迟告诉房主，用来定缓冲
       this.rttAt = now; const cur = this.myMp().rtt; if (typeof cur !== 'number' || Math.abs(cur - this.net.rtt) > 8) this.me({ rtt: this.net.rtt });

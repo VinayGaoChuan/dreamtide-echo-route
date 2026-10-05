@@ -12,7 +12,7 @@ const http = require('http'), crypto = require('crypto'), fs = require('fs'), pa
 
 const PORT = +(process.argv[2] || process.env.PORT || 8080);
 const PUBLIC = path.resolve(process.argv[3] || process.env.PUBLIC_DIR || path.join(__dirname, 'public'));
-const LIMIT = { presence: 8192, frame: 65536, perIp: 8, perChannel: 64, msgPerSec: 90, tickMs: 33, pingMs: 5000, deadMs: 15000 };
+const LIMIT = { presence: 8192, frame: 65536, perIp: 8, perChannel: 64, msgPerSec: 90, pingMs: 5000, deadMs: 15000 };
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 /* ---------- HTTP：网页 + 健康检查 ---------- */
@@ -93,7 +93,7 @@ function close(conn, code) { if (conn.closed) return; const p = Buffer.alloc(2);
 function onMessage(conn, text) {
   const now = Date.now();
   if (now - conn.msgT > 1000) { conn.msgT = now; conn.msgN = 0; }
-  if (++conn.msgN > LIMIT.msgPerSec) return; // 太快的直接丢（客户端约 30 次 / 秒）
+  if (++conn.msgN > LIMIT.msgPerSec) return; // 太快的直接丢（客户端最多约 60 次 / 秒）
   let m; try { m = JSON.parse(text); } catch (e) { return; }
   if (!m || typeof m !== 'object') return;
   if (m.t === 'ping') { send(conn, { t: 'pong', c: m.c, s: Date.now() }); return; } // 带上服务器时间：客户端据此对时，大家同一刻开局
@@ -103,8 +103,9 @@ function onMessage(conn, text) {
     for (const k of Object.keys(m.d)) { if (m.d[k] === null) delete next[k]; else next[k] = m.d[k]; }
     const json = JSON.stringify(next);
     if (Buffer.byteLength(json) > LIMIT.presence) { send(conn, { t: 'err', code: 'too_large' }); return; }
+    const room = roomOf(P);
     P.presence = next; P.json = json; P.at = now; P.fj = fieldsJson(next); P.lfj = fieldsJson(liteView(next));
-    dirty.add(P.ch);
+    markDirty(P, room !== roomOf(P)); // 换了房间：他看别人的视图也全变了
   }
 }
 function hello(conn, m) {
@@ -115,7 +116,7 @@ function hello(conn, m) {
   if (C.size >= LIMIT.perChannel) { send(conn, { t: 'err', code: 'full' }); close(conn, 4001); return; }
   const P = { id, ch, conn, presence: old ? old.presence : {}, json: old ? old.json : '{}', at: Date.now(), sent: new Map() };
   P.fj = fieldsJson(P.presence); P.lfj = fieldsJson(liteView(P.presence));
-  conn.peer = P; C.set(id, P); dirty.add(ch);
+  conn.peer = P; C.set(id, P); markDirty(P, false);
   send(conn, { t: 'hi', you: id, build: pageBuild(), peers: [...C.values()].filter((q) => q !== P).map((q) => ({ peer: q.id, p: JSON.parse(viewJson(P, q)), at: q.at })) });
   for (const q of C.values()) if (q !== P) P.sent.set(q.id, Object.assign({}, viewFJ(P, q)));
   log('join', ch, id, conn.ip, `(${C.size})`);
@@ -141,25 +142,28 @@ function drop(conn) {
   log('leave', P.ch, P.id, `(${C.size})`);
 }
 
-/* 约 30 次 / 秒：把每个人看到的、有变化的状态推过去（只推最新的，中间的变化合并掉） */
-const dirty = new Set();
-setInterval(() => {
-  for (const ch of dirty) {
-    const C = channels.get(ch); if (!C) continue;
-    for (const rcv of C.values()) {
-      const out = [];
-      for (const q of C.values()) {
-        if (q === rcv) continue;
-        const want = viewFJ(rcv, q), had = rcv.sent.get(q.id) || {}, d = [];
-        for (const k of Object.keys(want)) if (had[k] !== want[k]) d.push(JSON.stringify(k) + ':' + want[k]);
-        for (const k of Object.keys(had)) if (!(k in want)) d.push(JSON.stringify(k) + ':null');
-        if (d.length) { rcv.sent.set(q.id, Object.assign({}, want)); out.push('{"peer":' + JSON.stringify(q.id) + ',"d":{' + d.join(',') + '}}'); }
-      }
-      if (out.length && !rcv.conn.closed && rcv.conn.socket.writable) rcv.conn.socket.write(frame(1, Buffer.from('{"t":"u","peers":[' + out.join(',') + ']}')));
-    }
-  }
-  dirty.clear();
-}, LIMIT.tickMs);
+/* 有变化就转发：收到谁的新状态，马上把变了的字段推给同频道的人（同一轮事件循环里到的几条合并成一次）。
+   以前固定每 33 毫秒批量推一次，操作帧平均要多等十几毫秒、最多 33 毫秒；帧同步里这段等待会直接变成所有人的操作延迟。 */
+const dirtyPeers = new Set(), dirtyViewers = new Set(); let flushQueued = false;
+function markDirty(P, viewer) { dirtyPeers.add(P); if (viewer) dirtyViewers.add(P); if (!flushQueued) { flushQueued = true; setImmediate(flushDirty); } }
+function flushDirty() {
+  flushQueued = false;
+  const outs = new Map(); // 接收者 -> 这次要发的若干条
+  const push = (rcv, q) => {
+    const want = viewFJ(rcv, q), had = rcv.sent.get(q.id) || {}, d = [];
+    for (const k of Object.keys(want)) if (had[k] !== want[k]) d.push(JSON.stringify(k) + ':' + want[k]);
+    for (const k of Object.keys(had)) if (!(k in want)) d.push(JSON.stringify(k) + ':null');
+    if (!d.length) return;
+    rcv.sent.set(q.id, Object.assign({}, want));
+    let o = outs.get(rcv); if (!o) outs.set(rcv, (o = new Map()));
+    o.set(q.id, '{"peer":' + JSON.stringify(q.id) + ',"d":{' + d.join(',') + '}}');
+  };
+  const live = (P) => { const C = channels.get(P.ch); return C && C.get(P.id) === P ? C : null; };
+  for (const q of dirtyPeers) { const C = live(q); if (C) for (const rcv of C.values()) if (rcv !== q) push(rcv, q); }
+  for (const rcv of dirtyViewers) { const C = live(rcv); if (C) for (const q of C.values()) if (q !== rcv) push(rcv, q); }
+  dirtyPeers.clear(); dirtyViewers.clear();
+  for (const [rcv, o] of outs) if (!rcv.conn.closed && rcv.conn.socket.writable) rcv.conn.socket.write(frame(1, Buffer.from('{"t":"u","peers":[' + [...o.values()].join(',') + ']}')));
+}
 /* 心跳：每 5 秒 ping 一次，15 秒没动静就断开（拔网线这类不会主动断的连接） */
 setInterval(() => {
   const now = Date.now();

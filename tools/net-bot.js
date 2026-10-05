@@ -1,0 +1,121 @@
+// 真机联机测试：几个无头客户端（每个是一套独立的 JS 环境，载入同一套游戏脚本 + net.js，跑的就是网页里同一份联机主循环 MpDriver）
+// 通过真实的 WebSocket 连联机服务器：建房 → 加入 → 开局 → 自动驾驶打一局，报告同步、卡顿、延迟和自适应缓冲。
+// 不经过浏览器，所以不会被“后台标签页降频”干扰，测的就是网络和服务器本身。
+// 用法：node tools/net-bot.js [服务器 ws 地址] [人数=2] [关卡=1-1] [最长秒数=300]
+//   例：node tools/net-bot.js ws://39.106.153.154:8080/mp 2 1-1 300
+// 退出码：没同步 / 卡顿过多 / 没跑起来 → 1
+const fs = require('fs'), vm = require('vm'), path = require('path');
+const URL_ = process.argv[2] || 'ws://39.106.153.154:8080/mp', N = +(process.argv[3] || 2), STAGE = process.argv[4] || '1-1', MAXS = +(process.argv[5] || 300);
+const dir = path.join(__dirname, '..', 'js');
+const FILES = ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain', 'home', 'net'];
+const noop = () => {};
+const fakeCtx = new Proxy({}, { get: (t, k) => (k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop: noop }) : k === 'measureText' ? () => ({ width: 10 }) : k in t ? t[k] : noop), set: (t, k, v) => { t[k] = v; return true; } });
+
+async function main() {
+  if (typeof WebSocket !== 'function') { console.log('✗ 需要 Node 22 以上（自带 WebSocket）'); process.exit(1); }
+  // 和服务器上的网页同一个版本频道：真人打开网页也能看到这些机器人的房间
+  const httpBase = URL_.replace(/^ws/, 'http').replace(/\/mp$/, '');
+  let build = 'dev'; try { build = (await (await fetch(httpBase + '/health')).json()).build || 'dev'; } catch (e) { console.log('读不到 /health，用 dev 频道'); }
+  const bots = [];
+  for (let k = 0; k < N; k++) {
+    const io = { tx: 0, rx: 0, txN: 0, rxN: 0 }; // 收发字节 / 条数（看带宽和服务器限流）
+    class CountingWS extends WebSocket {
+      constructor(u) { super(u); this.addEventListener('message', (ev) => { io.rx += String(ev.data).length; io.rxN++; }); }
+      send(d) { io.tx += String(d).length; io.txN++; super.send(d); }
+    }
+    const ctx = { console, Math, Date, JSON, performance, setTimeout, clearTimeout, setInterval, clearInterval, WebSocket: CountingWS, URL, Blob, __io: io,
+      window: { addEventListener: noop, matchMedia: () => ({ matches: false }), DREAMTIDE_BUILD: build }, document: { createElement: () => ({ width: 0, height: 0, getContext: () => fakeCtx }), addEventListener: noop, hidden: false },
+      navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop }, location: { search: '', protocol: 'http:', host: 'bot' } };
+    ctx.globalThis = ctx; vm.createContext(ctx);
+    for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
+    ctx.__url = URL_; ctx.__k = k; ctx.__build = build; ctx.__stage = STAGE;
+    vm.runInContext(`
+      var meta = freshMeta(); Home.ensure(meta); var settings = DEFAULT_SETTINGS(); settings.particles = 'low';
+      var B = { w: null, L: null, res: null, rescues: [], rtts: [], leads: [], started: false, stallMs: 0, maxWait: 0, prev: 0, slack: [], win: null };
+      /* 分段统计：每段里卡住了多少毫秒、最长一次等多久、队友的操作帧到达时离要用还剩多少毫秒（负数 = 来晚了，这一帧要等） */
+      function newWin() { B.win = { t: performance.now(), stallMs: 0, maxWait: 0, slack: [], rtt: [], lead: [], tx: __io.tx, rx: __io.rx, txN: __io.txN, rxN: __io.rxN }; }
+      Lobby.net = new WsNet(__url, 'dreamtide-' + MP_PROTO + '-' + __build); Lobby.net.onChange(() => Lobby.changed());
+      NetTicker.on((now) => Lobby.tick(now)); NetTicker.start();
+      function profile() { return { name: '机器人' + (__k + 1), plane: 'moon', prof: { s: compactStats(planeStats(null, 'moon')), u: 2, c: {}, w: Home.worldFor(meta), g: Home.goal(meta).title } }; }
+      /* 自动驾驶：和网页测试同一个思路，按本机显示预测的位置去对准（有网络缓冲时不会冲过头） */
+      function bot(w, i) {
+        const p = w.players[i]; if (!p || !p.alive) return { mx: 0, my: 0, burst: false };
+        const off = w.viewOff || { x: 0, y: 0 }, px = p.x + off.x, py = p.y + off.y, mid = (TOP + BOTTOM) / 2;
+        let tx = w.W * 0.22 + i * 30, ty = mid + (i - 0.5) * 60, best = null, bd = 1e9;
+        for (const e of w.enemies) { if (!e.alive || e.x < px + 30 || e.x > w.W) continue; const d = e.x - px + Math.abs(e.y - py) * 0.6 - (e.goal ? 260 : 0); if (d < bd) { bd = d; best = e; } }
+        if (best) ty = best.y + (i - 0.5) * 24;
+        if (w.boss && w.boss.plates) { const pl = w.boss.plates.find((q) => q.alive); if (pl) ty = w.boss.y + pl.dy; }
+        const gt = w.guideTarget(); if (gt && (i === 0 || i === w.beatIdx % w.players.length) && !(w.ritual && w.ritual.st === 'choose')) { tx = Math.min(gt.x - 6, w.W * 0.8); ty = gt.y; }
+        if (w.ritual && w.ritual.st === 'choose') { const g = w.ritual.gates[i % 2]; tx = g.x; ty = g.y; }
+        const gain = w.ritual && w.ritual.st === 'choose' ? 120 : 60;
+        return { mx: Math.sign(tx - px) * Math.min(1, Math.abs(tx - px) / gain), my: Math.sign(ty - py) * Math.min(1, Math.abs(ty - py) / (gain * 0.7)), burst: p.stock >= 1 && !w.ritual && !w.bursting, focus: false, dx: 0, dy: 0 };
+      }
+      Lobby.onStart = (st) => {
+        const idx = Lobby.beginSession(st); if (idx < 0) return false;
+        B.w = new World({ mode: 'run', W: 1280, stage: st.stage, seed: st.seed, me: idx, settings, world: st.world || {},
+          players: st.roster.map((r) => ({ id: r.peer, name: r.name, plane: r.plane, stats: r.stats || planeStats(null, r.plane), ultCap: r.ultCap || 1, cos: {} })),
+          cb: { onEnd: (r) => { B.res = r; Lobby.endGame(); }, onRescue: (id) => B.rescues.push(id) } });
+        const sync = st.at && Lobby.net.serverNow() !== null;
+        B.L = { t0: sync ? Lobby.net.localPerfOf(st.at) : performance.now(), steps: 0, last: performance.now(), waitT: 0, dx: 0, dy: 0 };
+        const S = Lobby.session, recv = S.receive.bind(S);
+        S.receive = (from, msg) => { const before = S.have.slice(); recv(from, msg); const now = performance.now();
+          for (let j = 0; j < S.n; j++) if (j !== S.me) for (let f = before[j]; f < S.have[j]; f++) { const sl = B.L.t0 + f * 1000 / LOCKSTEP.hz - now; B.slack.push(sl); if (B.win) B.win.slack.push(sl); } };
+        B.started = true; B.prev = performance.now(); newWin(); return true;
+      };
+      function tick() {
+        const now = performance.now();
+        if (B.w && !B.w.done && Lobby.session) {
+          const stalled = MpDriver.tick(B.w, B.L, Lobby.session, now, () => bot(B.w, Lobby.session.me)); B.w.events.length = 0;
+          if (stalled) { B.stallMs += now - B.prev; B.win.stallMs += now - B.prev; } B.maxWait = Math.max(B.maxWait, B.L.waitT); B.win.maxWait = Math.max(B.win.maxWait, B.L.waitT);
+          if (B.L.ticks % 40 === 0) { B.rtts.push(Lobby.net.rtt); B.leads.push(Lobby.lead); B.win.rtt.push(Lobby.net.rtt); B.win.lead.push(Lobby.lead); }
+        }
+        B.prev = now;
+      }
+      function q(a, p) { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); return Math.round(b[Math.min(b.length - 1, Math.floor(p * b.length))]); }
+      function winStats() { // 这一段的数，然后开新的一段
+        const W = B.win; if (!W) return null; const sec = (performance.now() - W.t) / 1000, avg = (a) => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null);
+        const o = { stall: Math.round(W.stallMs / sec / 10) + '%', maxWait: Math.round(W.maxWait * 1000), late: W.slack.filter((x) => x < 0).length + '/' + W.slack.length, slackP10: q(W.slack, 0.1), slackMin: q(W.slack, 0), rtt: avg(W.rtt) + '/' + (W.rtt.length ? Math.max(...W.rtt) : null), lead: avg(W.lead),
+          up: Math.round((__io.tx - W.tx) / sec) + 'B/' + Math.round((__io.txN - W.txN) / sec), down: Math.round((__io.rx - W.rx) / sec) + 'B/' + Math.round((__io.rxN - W.rxN) / sec) };
+        newWin(); return o;
+      }
+      function stats() {
+        const S = Lobby.session || Lobby.linger, w = B.w, L = B.L, avg = (a) => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null);
+        return { started: B.started, t0: L ? Math.round(L.t0) : null, clockOff: Lobby.net.clockOff === null ? null : Math.round(Lobby.net.clockOff), frame: S ? S.simFrame : null, stallMs: Math.round(B.stallMs), maxWait: Math.round(B.maxWait * 1000), late: B.slack.filter((x) => x < 0).length + '/' + B.slack.length, slackP10: q(B.slack, 0.1), behind: L && S ? Math.round((performance.now() - L.t0) / 1000 * 30) - S.simFrame : null,
+          stallPct: L && L.ticks ? +((L.stallTicks || 0) / L.ticks * 100).toFixed(1) : null, rttAvg: avg(B.rtts.filter((x) => x !== null)), rttMax: B.rtts.length ? Math.max(...B.rtts.filter((x) => x !== null)) : null,
+          lead: B.leads.length ? Math.min(...B.leads.filter((x) => x !== null)) + '~' + Math.max(...B.leads.filter((x) => x !== null)) : null,
+          beat: w ? w.beatIdx : null, done: !!(w && w.done), win: B.res ? B.res.win : null, desync: S ? S.desync : null, rescues: B.rescues.join(','), hash: S ? [...S.hashLog].slice(-1)[0] : null };
+      }`, ctx);
+    bots.push(ctx);
+  }
+  const R = (c, code) => vm.runInContext(code, c);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // 连上 → 机器人 1 建房 → 其他人加入 → 人齐了开局
+  for (let t = 0; t < 100 && !bots.every((c) => R(c, 'Lobby.net.connected() && Lobby.net.clockOff !== null')); t++) await sleep(100);
+  if (!bots.every((c) => R(c, 'Lobby.net.connected()'))) { console.log('✗ 连不上服务器', URL_); process.exit(1); }
+  R(bots[0], 'Lobby.create(profile())'); const code = R(bots[0], 'Lobby.code');
+  for (let t = 0; t < 100 && !R(bots[1], `Lobby.openRooms().some((r) => r.code === '${code}')`); t++) await sleep(100);
+  for (const c of bots.slice(1)) R(c, `Lobby.join('${code}', profile())`);
+  for (let t = 0; t < 100 && R(bots[0], 'Lobby.members().length') < N; t++) await sleep(100);
+  console.log(`房间 ${code}，${R(bots[0], 'Lobby.members().length')} 人，延迟 ${bots.map((c) => R(c, 'Lobby.net.rtt')).join(' / ')} 毫秒，开局…`);
+  R(bots[0], `Lobby.start('${STAGE}', 0)`);
+  const timer = setInterval(() => { for (const c of bots) R(c, 'tick()'); }, 8);
+  const t0 = Date.now(); let last = 0;
+  while (Date.now() - t0 < MAXS * 1000 && !bots.every((c) => R(c, 'B.w && B.w.done'))) {
+    await sleep(500);
+    if (Date.now() - last > 15000) { last = Date.now(); console.log(Math.round((Date.now() - t0) / 1000) + 's', bots.map((c, k) => `#${k + 1} ` + JSON.stringify(R(c, 'winStats()'))).join(' | ')); }
+  }
+  await sleep(1500); clearInterval(timer);
+  const st = bots.map((c) => R(c, 'stats()'));
+  st.forEach((s, k) => console.log(`机器人${k + 1}`, JSON.stringify(s)));
+  let failed = 0; const fail = (m) => { failed++; console.log('✗', m); };
+  if (!st.every((s) => s.started)) fail('有人没开局');
+  if (st.some((s) => s.desync)) fail('状态不一致（不同步）');
+  const finished = st.every((s) => s.done);
+  if (finished && new Set(st.map((s) => s.win)).size > 1) fail('各端结局不一样');
+  const playMs = (Date.now() - t0) * 1;
+  if (st.some((s) => s.stallMs > playMs * 0.1)) fail('卡顿太多（等待队友操作的时间超过 10%）');
+  console.log(failed ? `真机联机测试失败 ${failed} 项` : `真机联机测试通过${finished ? '' : `（${MAXS} 秒内没打完，按已打部分判定）`}`);
+  for (const c of bots) R(c, 'Lobby.leave(); Lobby.net.close()');
+  setTimeout(() => process.exit(failed ? 1 : 0), 300);
+}
+main().catch((e) => { console.error(e); process.exit(1); });

@@ -51,6 +51,7 @@ Q 版手绘风的横版自动射击 Roguelite（HTML / Canvas Demo，目标平�
 | `tools/mp-sim.js` | 联机同步测试：几个独立 JS 环境各跑一份同一局，逐帧比对状态 |
 | `server/relay.js` | 联机中转服务器（零依赖 Node）：同一个端口提供游戏网页和 WebSocket `/mp` |
 | `tools/relay-test.js` · `tools/deploy-server.js` | 中转服务器自测；一键部署到 Debian / Ubuntu 主机 |
+| `tools/net-bot.js` | 真联机测试：几个无头客户端经真实 WebSocket 连服务器打一局（和网页同一份联机主循环 `MpDriver`），报告同步、卡顿、延迟、操作帧到达余量、收发流量 |
 | `build.py` | 把 js 内联成单个 HTML |
 | `docs/` | 全部策划文档和美术规范；先看 [docs/README.md](docs/README.md)（阅读顺序、冲突时以哪份为准、哪些部分已不做） |
 
@@ -67,6 +68,7 @@ node tools/mp-sim.js js all 2 direct                       # 联机：2 人跑�
 node tools/mp-sim.js js 1-2 3 net 0.2 100 5                # 联机：3 人，20% 丢包、100 毫秒延迟、缓冲 5 帧
 node tools/mp-sim.js js 1-1 2 net 0.15 80 4 1@2500         # 联机：第 2 位玩家在第 2500 帧掉线
 node tools/relay-test.js                                   # 联机中转服务器：握手、转发、房间范围、断开
+node tools/net-bot.js ws://39.106.153.154:8080/mp 2 1-1 300  # 真联机：2 个无头客户端连线上服务器打一局（需要 Node 22+）
 python3 build.py dist/dreamtide.html                       # 打包单文件（dist/ 不入库）
 ```
 
@@ -121,6 +123,8 @@ GitHub Actions（`.github/workflows/check.yml`）会在每次推送到 main 和�
 | Steam（下一步） | 待做：Steam 大厅 + `ISteamNetworkingMessages`（Electron + steamworks.js） | 实现同一套在场状态接口即可，帧同步和游戏代码不用改 |
 
 标签页切到后台时浏览器会停掉画面刷新，联机由 Worker 计时器（`NetTicker`）继续采操作、跑模拟，队友不用等。
+
+操作延迟 = 网络往返 + 转发路上的等待。转发路上不攒包：采到新操作马上发（`MpDriver` → `Lobby.flush` → `WsNet.sendPending`，两次至少隔 16 毫秒），服务器收到就转发（同一轮事件循环里到的合并成一条），收到就喂给帧同步——本机测得操作从一端到另一端约 12 毫秒（之前固定节拍批量发送时约 100 毫秒）。
 
 **联机服务器**：`server/relay.js` 只转发在场状态、不跑游戏逻辑；同一房间的人收完整状态，房间外的人只收大厅摘要。部署：
 
