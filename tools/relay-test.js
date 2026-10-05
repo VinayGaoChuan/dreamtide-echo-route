@@ -12,14 +12,18 @@ function client(name) {
     const key = crypto.randomBytes(16).toString('base64');
     const req = http.request({ host: '127.0.0.1', port: PORT, path: '/mp', headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': key, 'Sec-WebSocket-Version': '13' } });
     req.on('upgrade', (res, sock) => {
-      const c = { name, sock, msgs: [], buf: Buffer.alloc(0) };
+      const c = { name, sock, msgs: [], buf: Buffer.alloc(0), state: {} }; // state：按服务器的完整 / 增量消息合并出来的每个人的在场状态
       c.send = (obj) => { const p = Buffer.from(JSON.stringify(obj)), mask = crypto.randomBytes(4), n = p.length;
         const head = n < 126 ? Buffer.from([0x81, 0x80 | n]) : Buffer.from([0x81, 0x80 | 126, n >> 8, n & 255]);
         const body = Buffer.from(p); for (let i = 0; i < n; i++) body[i] ^= mask[i & 3]; sock.write(Buffer.concat([head, mask, body])); };
       sock.on('data', (d) => { c.buf = Buffer.concat([c.buf, d]);
         while (c.buf.length >= 2) { let len = c.buf[1] & 0x7f, off = 2; if (len === 126) { len = c.buf.readUInt16BE(2); off = 4; } else if (len === 127) { len = Number(c.buf.readBigUInt64BE(2)); off = 10; }
           if (c.buf.length < off + len) break; const op = c.buf[0] & 0x0f, data = c.buf.subarray(off, off + len); c.buf = c.buf.subarray(off + len);
-          if (op === 1) c.msgs.push(JSON.parse(data.toString())); } });
+          if (op === 1) { const m = JSON.parse(data.toString()); c.msgs.push(m);
+            if (m.t === 'hi') for (const q of m.peers) c.state[q.peer] = q.p;
+            if (m.t === 'u') for (const q of m.peers) { if (q.p) c.state[q.peer] = q.p; else { const s = Object.assign({}, c.state[q.peer] || {}); for (const k in q.d) { if (q.d[k] === null) delete s[k]; else s[k] = q.d[k]; } c.state[q.peer] = s; } }
+            if (m.t === 'bye') delete c.state[m.peer]; } } });
+      c.until = async (pred, ms = 2000) => { const t = Date.now(); while (Date.now() - t < ms) { if (pred(c.state)) return true; await sleep(20); } return false; };
       c.wait = async (pred, ms = 2000) => { const t = Date.now(); while (Date.now() - t < ms) { const m = c.msgs.find(pred); if (m) return m; await sleep(20); } return null; };
       resolve(c);
     });
@@ -33,16 +37,18 @@ function client(name) {
   a.send({ t: 'hello', id: 'Waaaaaaaa1', ch: 'test' }); await a.wait((m) => m.t === 'hi');
   b.send({ t: 'hello', id: 'Wbbbbbbbb2', ch: 'test' });
   const hi = await b.wait((m) => m.t === 'hi'); check(hi && hi.you === 'Wbbbbbbbb2' && hi.peers.some((p) => p.peer === 'Waaaaaaaa1'), 'hello：拿到自己的身份和已在线的人');
-  // a 建房、带操作帧；b 还没进房 → 只能看到摘要
-  a.send({ t: 'p', d: { mp: { code: 'ROOM', host: true, name: '甲', plane: 'moon', ls: { r: [[0, 0, 'IIAgg']] }, start: null } } });
-  const lite = await b.wait((m) => m.t === 'u' && m.peers.some((p) => p.peer === 'Waaaaaaaa1' && p.p.mp && p.p.mp.code === 'ROOM'));
-  const la = lite && lite.peers.find((p) => p.peer === 'Waaaaaaaa1').p.mp; check(la && la.name === '甲' && la.ls === undefined, '房间外：只收到房间摘要，不带操作帧');
-  b.msgs.length = 0;
+  // a 建房、带操作帧（操作帧单独在 ls 字段）；b 还没进房 → 只能看到摘要
+  a.send({ t: 'p', d: { mp: { code: 'ROOM', host: true, name: '甲', plane: 'moon', prof: { s: { dmgK: 1 } }, start: null }, ls: { g: 'G1', r: [[0, 0, 'IIAgg']] } } });
+  const okLite = await b.until((s) => s.Waaaaaaaa1 && s.Waaaaaaaa1.mp && s.Waaaaaaaa1.mp.code === 'ROOM');
+  const la = b.state.Waaaaaaaa1 || {}; check(okLite && la.mp.name === '甲' && la.ls === undefined && la.mp.prof === undefined, '房间外：只收到房间摘要，不带操作帧和资料');
   b.send({ t: 'p', d: { mp: { code: 'ROOM', host: false, name: '乙', plane: 'cloud' } } });
-  const full = await b.wait((m) => m.t === 'u' && m.peers.some((p) => p.peer === 'Waaaaaaaa1' && p.p.mp && p.p.mp.ls));
-  check(!!full, '进房后：收到房主的完整状态（含操作帧）');
-  const seen = await a.wait((m) => m.t === 'u' && m.peers.some((p) => p.peer === 'Wbbbbbbbb2' && p.p.mp && p.p.mp.name === '乙'));
-  check(!!seen, '房主看到新成员');
+  check(await b.until((s) => s.Waaaaaaaa1 && s.Waaaaaaaa1.ls && s.Waaaaaaaa1.mp.prof), '进房后：收到房主的完整状态（含操作帧、资料）');
+  check(await a.until((s) => s.Wbbbbbbbb2 && s.Wbbbbbbbb2.mp && s.Wbbbbbbbb2.mp.name === '乙'), '房主看到新成员');
+  // 对局中只改操作帧：服务器只发 ls 这一个字段（资料 / 开局单不重发）
+  b.msgs.length = 0; a.send({ t: 'p', d: { ls: { g: 'G1', r: [[0, 0, 'IIAggIIAgg']] } } });
+  const upd = await b.wait((m) => m.t === 'u' && m.peers.some((p) => p.peer === 'Waaaaaaaa1'));
+  const ent = upd && upd.peers.find((p) => p.peer === 'Waaaaaaaa1');
+  check(!!(ent && ent.d && Object.keys(ent.d).join() === 'ls' && b.state.Waaaaaaaa1.mp.prof), '对局中的更新只带变化的字段（只有操作帧）');
   a.send({ t: 'ping', c: 42 }); check(!!(await a.wait((m) => m.t === 'pong' && m.c === 42)), 'ping / pong');
   a.send({ t: 'p', d: { big: 'x'.repeat(9000) } }); check(!!(await a.wait((m) => m.t === 'err' && m.code === 'too_large')), '超过 8 KiB 的状态被拒');
   a.sock.destroy();

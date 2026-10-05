@@ -54,7 +54,7 @@ function runDirect(stage, n) {
     // 每个玩家只在自己那一端算自己的操作，再“发给”所有人（经过 net.js 的量化编码，和真实联机一致）
     const inputs = ctxs.map((c, k) => R(c, `NetCodec.decodeFrame(NetCodec.encodeFrame(__bot(__w, ${k})))`));
     // 0 号端在模拟步之间画画面、读 HUD（真实游戏里渲染穿插在步与步之间）；其他端不画：画面代码不许动到玩法状态
-    ctxs.forEach((c, k) => { c.__inputs = inputs; R(c, `for (let s = 0; s < LOCKSTEP.steps; s++) { if (s === 0) __inputs.forEach((inp, j) => __w.setInput(j, inp)); __w.step(1 / 120); ${k === 0 ? 'if (s % 2) { __w.render(__g, { simpleBg: true }); __w.hud(); __w.events.length = 0; }' : ''} }`); });
+    ctxs.forEach((c, k) => { c.__inputs = inputs; R(c, `for (let s = 0; s < LOCKSTEP.steps; s++) { if (s === 0) __inputs.forEach((inp, j) => __w.setInput(j, inp)); __w.step(1 / 120); ${k === 0 ? 'if (s % 2) { __w.viewOff = { x: 13.37, y: -7.1 }; __w.render(__g, { simpleBg: true }); __w.hud(); __w.events.length = 0; }' : ''} }`); });
     const hs = ctxs.map((c) => R(c, '__w.stateHash()'));
     if (hs.some((h) => h !== hs[0])) {
       const d = ctxs.map((c) => R(c, 'JSON.stringify(__w.stateDump())'));

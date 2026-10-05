@@ -397,7 +397,7 @@ function showMultiplayer(back, joinCode) {
     const stale = net.stale && net.stale(), nb = $('#mp-reload', el); if (nb) nb.hidden = !stale;
     $('#mp-net', el).textContent = stale ? '游戏有新版本了：刷新页面才能和大家联机' : net.kind === 'ws' ? (net.connected() ? `已连上联机服务器${net.rtt !== null ? ` · 延迟 ${net.rtt} 毫秒` : ''}` : '正在连接联机服务器…')
       : net.kind === 'room' ? '通过 Claude 房间连接：打开同一个游戏链接的人都能看到你的房间。' : '本机测试模式：在这个浏览器里再开一个窗口打开游戏，就能互相看到。';
-    const k = JSON.stringify([Lobby.code, Lobby.isHost, stage, delay, room && room.members.map((x) => [x.peer, x.name, x.plane, x.playing]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.members[0].name])]);
+    const k = JSON.stringify([Lobby.code, Lobby.isHost, stage, delay, room && room.members.map((x) => [x.peer, x.name, x.plane, x.playing, x.prof && x.prof.g, x.prof && x.prof.w && x.prof.w.target, x.prof && x.prof.w && x.prof.w.upper]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.members[0].name])]);
     if (k === sig) return; sig = k;
     if (!Lobby.code) {
       body.innerHTML = `<h3>房间</h3>

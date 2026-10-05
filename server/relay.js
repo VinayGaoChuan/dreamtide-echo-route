@@ -5,6 +5,7 @@
    · 同一个端口：HTTP 提供游戏网页（public/index.html，打包好的单文件），/mp 是 WebSocket；网页和连接同源，不需要证书。
    · 频道：客户端 hello 里带 ch（游戏版本），不同版本互不干扰。
    · 省流量：同一房间（mp.code 相同）的人收完整状态；其他人只收房间摘要（房间号、名字、机型、是否开局），用于大厅列表。
+     只发变了的字段：对每个接收者记住上次发给他的每个字段，下一次只发变化（对局中基本只有操作帧 ls 在变，资料 / 开局单不再重发）。
    · 保护：每人状态 ≤ 8 KiB、每秒消息数、每个 IP 连接数、每频道人数都有上限；15 秒没有心跳就断开。
    用法：node relay.js [端口=8080] [网页目录=./public] */
 const http = require('http'), crypto = require('crypto'), fs = require('fs'), path = require('path');
@@ -102,8 +103,7 @@ function onMessage(conn, text) {
     for (const k of Object.keys(m.d)) { if (m.d[k] === null) delete next[k]; else next[k] = m.d[k]; }
     const json = JSON.stringify(next);
     if (Buffer.byteLength(json) > LIMIT.presence) { send(conn, { t: 'err', code: 'too_large' }); return; }
-    P.presence = next; P.json = json; P.ver++; P.at = now;
-    const lite = JSON.stringify(liteView(next)); if (lite !== P.liteJson) { P.liteJson = lite; P.liteVer++; }
+    P.presence = next; P.json = json; P.at = now; P.fj = fieldsJson(next); P.lfj = fieldsJson(liteView(next));
     dirty.add(P.ch);
   }
 }
@@ -113,29 +113,30 @@ function hello(conn, m) {
   const old = C.get(id);
   if (old) { old.conn.peer = null; close(old.conn, 4000); } // 同一个标签页重连：顶掉旧连接，身份不变
   if (C.size >= LIMIT.perChannel) { send(conn, { t: 'err', code: 'full' }); close(conn, 4001); return; }
-  const P = { id, ch, conn, presence: old ? old.presence : {}, json: old ? old.json : '{}', ver: 1, liteJson: '', liteVer: 1, at: Date.now(), seen: new Map() };
-  P.liteJson = JSON.stringify(liteView(P.presence));
+  const P = { id, ch, conn, presence: old ? old.presence : {}, json: old ? old.json : '{}', at: Date.now(), sent: new Map() };
+  P.fj = fieldsJson(P.presence); P.lfj = fieldsJson(liteView(P.presence));
   conn.peer = P; C.set(id, P); dirty.add(ch);
-  send(conn, { t: 'hi', you: id, build: pageBuild(), peers: [...C.values()].filter((q) => q !== P).map((q) => view(P, q)) });
-  for (const q of C.values()) if (q !== P) P.seen.set(q.id, key(P, q));
+  send(conn, { t: 'hi', you: id, build: pageBuild(), peers: [...C.values()].filter((q) => q !== P).map((q) => ({ peer: q.id, p: JSON.parse(viewJson(P, q)), at: q.at })) });
+  for (const q of C.values()) if (q !== P) P.sent.set(q.id, Object.assign({}, viewFJ(P, q)));
   log('join', ch, id, conn.ip, `(${C.size})`);
 }
 const roomOf = (p) => (p.presence.mp && typeof p.presence.mp.code === 'string' ? p.presence.mp.code : null);
 const sameRoom = (a, b) => { const r = roomOf(a); return !!r && r === roomOf(b); };
-/* 房间外的人只需要大厅列表要用的字段 */
+/* 房间外的人只需要大厅列表要用的字段（不带操作帧和资料） */
 function liteView(pres) {
-  const mp = pres.mp; if (!mp || typeof mp !== 'object') return Object.assign({}, pres);
-  return Object.assign({}, pres, { mp: { code: mp.code, host: mp.host, name: mp.name, plane: mp.plane, stage: mp.stage, start: mp.start ? { id: mp.start.id } : null } });
+  const mp = pres.mp; if (!mp || typeof mp !== 'object') return {};
+  return { mp: { code: mp.code, host: mp.host, name: mp.name, plane: mp.plane, stage: mp.stage, start: mp.start ? { id: mp.start.id } : null } };
 }
-function view(rcv, q) { return { peer: q.id, p: sameRoom(rcv, q) ? q.presence : JSON.parse(q.liteJson), at: q.at }; }
-function key(rcv, q) { return sameRoom(rcv, q) ? 'f' + q.ver : 'l' + q.liteVer; }
+function fieldsJson(obj) { const o = {}; for (const k of Object.keys(obj)) o[k] = JSON.stringify(obj[k]); return o; }
+function viewFJ(rcv, q) { return sameRoom(rcv, q) ? q.fj : q.lfj; }
+function viewJson(rcv, q) { const f = viewFJ(rcv, q); return '{' + Object.keys(f).map((k) => JSON.stringify(k) + ':' + f[k]).join(',') + '}'; }
 function drop(conn) {
   if (conn.closed) return; conn.closed = true; conns.delete(conn);
   try { conn.socket.destroy(); } catch (e) { /* ignore */ }
   const P = conn.peer; if (!P) return;
   const C = channels.get(P.ch); if (!C || C.get(P.id) !== P) return;
   C.delete(P.id);
-  for (const q of C.values()) { q.seen.delete(P.id); send(q.conn, { t: 'bye', peer: P.id }); }
+  for (const q of C.values()) { q.sent.delete(P.id); send(q.conn, { t: 'bye', peer: P.id }); }
   if (!C.size) channels.delete(P.ch);
   log('leave', P.ch, P.id, `(${C.size})`);
 }
@@ -147,8 +148,14 @@ setInterval(() => {
     const C = channels.get(ch); if (!C) continue;
     for (const rcv of C.values()) {
       const out = [];
-      for (const q of C.values()) { if (q === rcv) continue; const k = key(rcv, q); if (rcv.seen.get(q.id) !== k) { rcv.seen.set(q.id, k); out.push(view(rcv, q)); } }
-      if (out.length) send(rcv.conn, { t: 'u', peers: out });
+      for (const q of C.values()) {
+        if (q === rcv) continue;
+        const want = viewFJ(rcv, q), had = rcv.sent.get(q.id) || {}, d = [];
+        for (const k of Object.keys(want)) if (had[k] !== want[k]) d.push(JSON.stringify(k) + ':' + want[k]);
+        for (const k of Object.keys(had)) if (!(k in want)) d.push(JSON.stringify(k) + ':null');
+        if (d.length) { rcv.sent.set(q.id, Object.assign({}, want)); out.push('{"peer":' + JSON.stringify(q.id) + ',"d":{' + d.join(',') + '}}'); }
+      }
+      if (out.length && !rcv.conn.closed && rcv.conn.socket.writable) rcv.conn.socket.write(frame(1, Buffer.from('{"t":"u","peers":[' + out.join(',') + ']}')));
     }
   }
   dirty.clear();

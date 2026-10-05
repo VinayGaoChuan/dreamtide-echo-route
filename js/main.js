@@ -110,8 +110,8 @@
     const dt = Math.min(0.25, Math.max(0, (now - L.last) / 1000)); L.last = now;
     const el = (now - L.t0) / 1000, FR = LOCKSTEP.hz, SP = LOCKSTEP.steps;
     // 1) 本机操作：第 k 帧在 (k - delay) / 30 秒时采样，delay 帧之后才生效
-    const active = Input.gameActive && !G.paused && !document.hidden;
-    while (S.nextLocal <= Math.floor(el * FR) + S.delay) {
+    const active = Input.gameActive && !G.paused && !document.hidden, lead = Lobby.leadFrames(now) || S.delay;
+    while (S.nextLocal <= Math.floor(el * FR) + lead) {
       const qx = clamp(Math.round(L.dx), -31, 31), qy = clamp(Math.round(L.dy), -31, 31); L.dx -= qx; L.dy -= qy;
       const inp = active ? { mx: Input.out.mx, my: Input.out.my, focus: Input.out.focus, burst: Input.consume('burst'), dx: qx, dy: qy } : NEUTRAL_INPUT;
       if (!S.sample(inp)) break;
@@ -127,6 +127,16 @@
       if (L.steps % SP === 0 && S.simFrame % LOCKSTEP.hashEvery === 0) S.simulated(w.stateHash());
     }
     L.waitT = stalled ? L.waitT + dt : 0;
+    // 本机飞机的显示预测：已经发出、还没轮到模拟的操作先在画面上走完，手感不受网络缓冲拖累（只改画面，模拟里的位置不变）
+    const me = w.me; let ox = 0, oy = 0;
+    if (me && me.alive && w.state === 'play' && !(me.ritual && me.ritual.st !== 'choose' && me.ritual.st !== 'resume')) {
+      const spd = 400 * me.P.speed, cx = (v) => clamp(v, 34, w.W * 0.82), cy = (v) => clamp(v, w.arena.top + 14, w.arena.bottom - 14);
+      let x = me.x, y = me.y; const rem = (SP - (L.steps % SP)) % SP, cur = w.inputs[me.idx];
+      if (rem && cur) { const s = (spd * (cur.focus ? 0.5 : 1) * rem) / (FR * SP); x = cx(x + cur.mx * s); y = cy(y + cur.my * s); }
+      for (let f = S.simFrame; f < S.nextLocal; f++) { const raw = S.inputs[S.me][f]; if (!raw) continue; const I = NetCodec.decodeFrame(raw), s = (spd * (I.focus ? 0.5 : 1)) / FR; x = cx(x + I.mx * s + I.dx); y = cy(y + I.my * s + I.dy); }
+      ox = x - me.x; oy = y - me.y;
+    }
+    w.viewOff = { x: ox, y: oy };
     if (S.desync && !L.desyncShown) { L.desyncShown = true; console.warn('[联机] 状态不一致', S.desync); toast('联机画面和队友对不上了：这局结果可能不同，结束后请重开', '#ffb2a8', null, 5000); }
   }
   NetTicker.on((now) => { if (G.mpLoop) { try { mpTick(now); drainWorldEvents(); } catch (e) { console.error('[联机] 计时', e); } } });

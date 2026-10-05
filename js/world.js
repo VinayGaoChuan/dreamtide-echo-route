@@ -1292,7 +1292,9 @@ class World {
   drawPlayers(g) {
     const keep = this.player;
     for (const q of this.players) if (!q.gone && q !== this.me) { this.player = q; this.drawPlayer(g, false); }
-    this.player = this.me; this.drawPlayer(g, true); this.player = keep;
+    const me = this.me, off = this.viewOff, sx = me.x, sy = me.y; // 联机：本机飞机画在预测位置（画完原样还回去，不动模拟）
+    if (off && (off.x || off.y)) { me.x = sx + off.x; me.y = sy + off.y; }
+    this.player = me; try { this.drawPlayer(g, true); } finally { this.player = keep; me.x = sx; me.y = sy; } // 画面出错也一定还原
   }
   drawPlayer(g, isMe = true) {
     const p = this.player, t = this.t, C = this.trailColors;

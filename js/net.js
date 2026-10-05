@@ -7,7 +7,7 @@
    · 断线：房主（名单里最靠前、还在线的那位）等其他人收齐掉线者的操作后，宣布“从第 F 帧起移除”；所有端在同一帧移除那架飞机。 */
 
 const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, runAhead: 30, catchUp: 4 };
-const MP_PROTO = 1; // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
+const MP_PROTO = 2; // 2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
 
 /* ---------- 操作编码：一帧 5 个字符 ---------- */
 const NetCodec = {
@@ -138,7 +138,7 @@ class RoomNet {
   presence(patch) { return this.room.presence(patch).catch(() => {}); }
   onChange(fn) { this.subs.push(fn); }
   connected() { return this.room.connected(); }
-  close() { try { this.room.presence({ mp: null }); } catch (e) { /* ignore */ } if (this.unsub) this.unsub(); this.subs = []; }
+  close() { try { this.room.presence({ mp: null, ls: null }); } catch (e) { /* ignore */ } if (this.unsub) this.unsub(); this.subs = []; }
 }
 /* 自己的联机服务器（server/relay.js）：WebSocket 连接，服务器约 30 次 / 秒推送别人的最新在场状态；断线自动重连，身份不变 */
 class WsNet {
@@ -161,12 +161,18 @@ class WsNet {
   redial() { if (this.closed) return; this.retry++; setTimeout(() => this.dial(), Math.min(5000, 300 * this.retry)); }
   onMsg(text) {
     let m; try { m = JSON.parse(text); } catch (e) { return; }
-    const put = (q) => this.others.set(q.peer, { presence: Object.freeze(q.p || {}), updatedAt: Date.now() });
+    const put = (q) => { // 完整状态（p）或只有变化的字段（d，null 表示删掉）
+      if (q.p) { this.others.set(q.peer, { presence: Object.freeze(q.p), updatedAt: Date.now() }); return; }
+      const cur = this.others.get(q.peer), pres = Object.assign({}, cur ? cur.presence : {});
+      for (const k in q.d || {}) { if (q.d[k] === null) delete pres[k]; else pres[k] = q.d[k]; }
+      this.others.set(q.peer, { presence: Object.freeze(pres), updatedAt: Date.now() });
+    };
     if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.serverBuild = m.build || null; this.others.clear(); (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'u') { (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'bye') { this.others.delete(m.peer); this.emit(); }
     else if (m.t === 'pong') {
       const now = performance.now(), rtt = now - m.c; this.rtt = Math.round(rtt);
+      this.rtts = (this.rtts || []).concat(rtt).slice(-6); this.rttHi = Math.round(Math.max(...this.rtts)); // 最近几次里最慢的：留出抖动的余量
       if (m.s) { this.clock.push({ rtt, off: m.s + rtt / 2 - now }); if (this.clock.length > 8) this.clock.shift(); this.clockOff = this.clock.reduce((a, b) => (b.rtt < a.rtt ? b : a)).off; }
     }
   }
@@ -176,7 +182,7 @@ class WsNet {
   tick(now) {
     if (!this.open || !this.ws) return;
     if (this.pending && now - this.sentAt >= 30) { this.ws.send(JSON.stringify({ t: 'p', d: this.pending })); this.pending = null; this.sentAt = now; }
-    if (now - this.pingAt > (this.clock.length < 4 ? 400 : 2000)) { this.pingAt = now; this.ws.send(JSON.stringify({ t: 'ping', c: now })); } // 刚连上时多测几次
+    if (now - this.pingAt > (this.clock.length < 4 ? 400 : 1000)) { this.pingAt = now; this.ws.send(JSON.stringify({ t: 'ping', c: now })); } // 刚连上时多测几次
   }
   emit() { for (const fn of this.subs) fn(); }
   peers() { return [{ peer: this.selfId, isMe: true, presence: this.me, updatedAt: Date.now() }, ...[...this.others].map(([peer, p]) => ({ peer, isMe: false, presence: p.presence, updatedAt: p.updatedAt }))]; }
@@ -250,7 +256,8 @@ const Lobby = {
     for (const p of this.net.peers()) {
       const m = p.presence && p.presence.mp; if (!m || typeof m.code !== 'string') continue;
       const r = rooms.get(m.code) || { code: m.code, members: [], host: null, started: false, stage: null };
-      r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(m.ls && m.ls.g), rtt: typeof m.rtt === 'number' ? m.rtt : null });
+      const ls = p.presence.ls;
+      r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(ls && ls.g), rtt: typeof m.rtt === 'number' ? m.rtt : null });
       if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; }
       rooms.set(m.code, r);
     }
@@ -258,9 +265,9 @@ const Lobby = {
     return [...rooms.values()].filter((r) => r.host);
   },
   me(patch) { if (!this.net) return; this.net.presence({ mp: Object.assign({}, this.myMp(), patch) }); },
-  create(profile) { this.code = Math.random().toString(36).slice(2, 6).toUpperCase(); this.isHost = true; this.me(Object.assign({ code: this.code, host: true, start: null, ls: null }, profile)); },
-  join(code, profile) { this.code = code; this.isHost = false; this.me(Object.assign({ code, host: false, start: null, ls: null }, profile)); },
-  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null }); this.code = null; this.isHost = false; this.gameId = null; },
+  create(profile) { this.code = Math.random().toString(36).slice(2, 6).toUpperCase(); this.isHost = true; this.me(Object.assign({ code: this.code, host: true, start: null }, profile)); this.net.presence({ ls: null }); },
+  join(code, profile) { this.code = code; this.isHost = false; this.me(Object.assign({ code, host: false, start: null }, profile)); this.net.presence({ ls: null }); },
+  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null, ls: null }); this.code = null; this.isHost = false; this.gameId = null; },
   room() { return this.openRooms().find((x) => x.code === this.code) || null; },
   members() { const r = this.room(); return r ? r.members : []; },
   /* 房主开局：把名单（含每人的局外属性）写进自己的在场状态，大家看到就各自开始 */
@@ -302,9 +309,10 @@ const Lobby = {
     if (idx < 0) return -1;
     this.roster = st.roster; this.seenLs = new Map(); this.gameId = st.id; this.linger = null; this.sessionAt = Date.now();
     // 操作帧的预算：4 KiB 减去在场状态里其他字段（房主还带着开局单）
-    const other = JSON.stringify(Object.assign({}, this.myMp(), { ls: null })).length;
-    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, 3800 - other - 200),
-      send: (msg) => this.me({ ls: Object.assign({ g: st.id }, msg) }) });
+    const other = JSON.stringify({ mp: this.myMp() }).length;
+    this.peerRtt = []; this.lead = null; this.leadAt = 0;
+    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, 3800 - other - 220),
+      send: (msg) => this.net.presence({ ls: Object.assign({ g: st.id, rt: this.myRtt() }, msg) }) }); // 操作帧单独一个字段：服务器只转发变化，资料不重发
     return idx;
   },
   /* 把别人在场状态里的操作帧喂给会话（同一份状态对象不重复处理；只认这一局的） */
@@ -317,13 +325,26 @@ const Lobby = {
       if (p.isMe) continue;
       const j = this.roster.findIndex((x) => x.peer === p.peer); if (j < 0) continue;
       const m = p.presence && p.presence.mp; if (!m || m.code !== this.code) continue;
-      const mine = m.ls && m.ls.g === this.gameId;
+      const ls = p.presence.ls, mine = ls && ls.g === this.gameId;
       if (mine || early) connected[j] = true;
-      if (mine && this.seenLs.get(j) !== m.ls) { this.seenLs.set(j, m.ls); S.receive(j, m.ls); }
+      if (mine && this.seenLs.get(j) !== ls) { this.seenLs.set(j, ls); S.receive(j, ls); if (typeof ls.rt === 'number') this.peerRtt[j] = ls.rt; }
     }
     S.isHost = connected.findIndex((c, j) => c && S.drops[j] === undefined) === S.me; // 房主走了，名单里下一位接手
     S.hostCheckDrops(connected);
     this.connectedNow = connected;
+  },
+  myRtt() { const n = this.net; return n ? Math.round(n.rttHi || n.rtt || 0) : 0; },
+  /* 本机操作提前多少帧发出（自适应缓冲）：按“我的延迟 + 最慢队友的延迟”实时估算操作经服务器到对方要多久。
+     变慢马上加长，变快每 2 秒才缩短一帧，避免来回抖；只改操作发出的早晚，不改操作内容，所以不影响同步。 */
+  leadFrames(now) {
+    const S = this.session; if (!S) return 0;
+    if (!this.net || this.net.kind !== 'ws') return S.delay;
+    let other = 0; for (let j = 0; j < S.n; j++) if (j !== S.me && S.drops[j] === undefined && this.connectedNow && this.connectedNow[j]) other = Math.max(other, this.peerRtt[j] || 0);
+    const want = clamp(Math.ceil(((this.myRtt() + other) / 2 + 70) / (1000 / LOCKSTEP.hz)) + 1, 3, 20);
+    if (this.lead === null || want > this.lead) this.lead = Math.max(want, this.lead === null ? S.delay : this.lead);
+    else if (want < this.lead && now - this.leadAt > 2000) { this.lead--; this.leadAt = now; }
+    if (want >= this.lead) this.leadAt = now;
+    return this.lead;
   },
   /* 发布本机的操作帧；一局结束后再继续补发几秒，慢一步的队友还要用我最后那几帧 */
   flush(now) { const S = this.session || this.linger; if (!S) return; this.lastFlush = now; S.flush(); },
