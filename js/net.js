@@ -270,9 +270,19 @@ const Lobby = {
     const roster = ms.map((m) => ({ peer: m.peer, name: m.name, plane: m.plane, stats: (m.prof && m.prof.s) || null, ultCap: (m.prof && m.prof.u) || 1, cos: (m.prof && m.prof.c) || {} }));
     const id = Math.random().toString(36).slice(2, 8), seed = (Math.random() * 4294967296) >>> 0;
     const now = this.net.serverNow ? this.net.serverNow() : null, at = now === null ? null : Math.round(now + 900); // 约 0.9 秒后大家在同一刻开局
-    this.me({ stage, start: { id, stage, seed, roster, at, delay: delay || this.autoDelay(ms), world: typeof Home !== 'undefined' && G.meta ? Home.worldFor(G.meta) : {} } }); // 家园改变的世界状态用房主的（各端一致）
+    this.me({ stage, start: { id, stage, seed, roster, at, delay: delay || this.autoDelay(ms), world: this.mergeWorld(ms) } }); // 家园改变的世界状态：合并房间里每个人的（写进开局单，各端一致）
     this.changed(); // 房主自己马上开局（不用等服务器把自己的状态转回来）
     return true;
+  },
+  /* 联机补全 v0.10：地图上的世界状态由全房间一起决定——
+     谁修好了风道，大家都能走上层云桥；每个人当前要救的伙伴都会出现（需要的人多的先来，救完一位下一位跟着来）；NPC 职责带来的好处全队共享。 */
+  mergeWorld(ms) {
+    const ws = ms.map((x) => (x.prof && x.prof.w) || {}), cnt = {};
+    for (const w of ws) if (w.target) cnt[w.target] = (cnt[w.target] || 0) + 1;
+    const upper = ws.some((w) => w.upper);
+    const targets = Object.keys(cnt).filter((t) => NPCS[t] && (t !== 'merchant' || upper)).sort((a, b) => cnt[b] - cnt[a] || NPC_ORDER.indexOf(a) - NPC_ORDER.indexOf(b));
+    const rescued = NPC_ORDER.filter((id) => ws.length && ws.every((w) => Array.isArray(w.rescued) && w.rescued.includes(id)));
+    return { upper, targets, target: targets[0] || null, rescued, clue: ws.some((w) => w.clue), beacon: ws.some((w) => w.beacon), scout: ws.some((w) => w.scout) };
   },
   /* 自动缓冲：操作从一人经服务器到另一人 ≈ 两人往返延迟的一半之和 + 服务器 / 客户端合并发送的时间；取最慢的两个人 */
   autoDelay(ms) {

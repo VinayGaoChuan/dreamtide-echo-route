@@ -278,13 +278,14 @@ function showHub() {
     <div class="hub-start home-start">
       <div class="row wrap" style="justify-content:center"><span class="pname">${P.name}</span><span class="chip gold">大招 · ${P.burst.name} · 最多存 ${cap} 次</span></div>
       ${stageChips(sel)}
-      <button class="btn primary big" id="hub-go" type="button" autofocus>${icon('i-hangar')} 出击 · ${sel} ${S.name}</button>
+      <div class="row" style="justify-content:center"><button class="btn primary big" id="hub-go" type="button" autofocus>${icon('i-hangar')} 出击 · ${sel} ${S.name}</button><button class="btn big cyan" id="hub-mp2" type="button">${icon('i-team')} ${Lobby.code ? `房间 ${esc(Lobby.code)}` : '联机'}</button></div>
       ${m.shared.level < S.rec ? `<span class="dim-text" style="font-size:var(--fs-xs)">建议共享等级 ${S.rec}（只是提示，不锁关）</span>` : ''}
     </div>
     <div class="panel home-panel" id="home-panel" ${UI.panel ? '' : 'hidden'}>${UI.panel ? homePanelHtml(UI.panel) : ''}</div>`, { bg: 'home', label: '家园' });
   paintPlaneCanvases(el);
   const reopen = (panel) => { UI.panel = panel; showHub(); };
-  $('#hub-go', el).onclick = () => { Sound.sfx('select'); UI.panel = null; UI.place = null; startRun(sel); };
+  $('#hub-go', el).onclick = () => { Sound.sfx('select'); UI.panel = null; UI.place = null; if (Lobby.code) { Lobby.leave(); toast('单人出击：已离开联机房间', '#ffe38a'); } startRun(sel); };
+  $('#hub-mp2', el).onclick = () => { Sound.sfx('select'); UI.panel = null; UI.place = null; showMultiplayer(showHub); };
   $$('[data-stage]', el).forEach((b) => b.onclick = () => { if (!stageUnlocked(b.dataset.stage)) { Sound.sfx('denied'); toast('先通关上一关', '#ffb2a8'); return; } Sound.sfx('ui'); m.progress.selected = b.dataset.stage; persist(); showHub(); });
   $('#stage-ch2', el).onclick = () => { Sound.sfx('denied'); toast('第 2 章还在制作中', '#ffe38a'); };
   const gb = $('#hub-gacha', el); if (gb) gb.onclick = () => { Sound.sfx('ui'); showGacha(showHub); };
@@ -361,7 +362,8 @@ function lureRows(L) {
    网页版的转发：Claude Artifact 的房间（打开同一个链接的人互相可见）；不在 Claude 里打开时退回到“同一浏览器多窗口”，用来测试。 */
 function mpProfile() {
   const m = G.meta, id = m.current;
-  return { name: (m.nick || '').trim() || '玩家', plane: id, prof: { s: compactStats(planeStats(m, id)), u: ultCapNow(), c: { exp: m.cosmetics.exp, trail: m.cosmetics.trail } } };
+  Home.ensure(m); const g = Home.goal(m);
+  return { name: (m.nick || '').trim() || '玩家', plane: id, prof: { s: compactStats(planeStats(m, id)), u: ultCapNow(), c: { exp: m.cosmetics.exp, trail: m.cosmetics.trail }, w: Home.worldFor(m), g: g.title.slice(0, 16) } };
 }
 /* 邀请链接：?join=房间号，打开后直接进那个房间 */
 function inviteCode() { try { const c = new URLSearchParams(location.search).get('join'); return c && /^[A-Z0-9]{3,8}$/i.test(c) ? c.toUpperCase() : null; } catch (e) { return null; } }
@@ -369,7 +371,7 @@ function inviteLink(code) { return `${location.origin}${location.pathname}?join=
 function showMultiplayer(back, joinCode) {
   const m = G.meta; if (!m.nick) m.nick = '玩家' + Math.floor(100 + Math.random() * 900);
   hideHud(); G.world = null; Input.gameActive = false; stopPreview();
-  const leaveAndBack = () => { Lobby.leave(); Lobby.onUpdate = null; back(); };
+  const leaveAndBack = () => { Lobby.onUpdate = null; back(); }; // 回家园时留在房间里：可以先去交项目，房主开局会把你拉进来；“离开房间”才真的离开
   const el = showScreen('mp', `${backBtn()}
     <div class="screen-title"><h2>联机</h2><p>2–4 人同屏合作 · 升级和掉落各拿各的 · 倒下的队友飞过去就能救起</p></div>
     <div class="mp-wrap">
@@ -409,7 +411,8 @@ function showMultiplayer(back, joinCode) {
     const chips = STAGE_ORDER.map((id) => { const ok = stageUnlocked(id); return `<button class="stage-chip ${id === stage ? 'sel' : ''} ${ok ? '' : 'locked'}" data-mst="${id}" type="button" ${ok ? '' : 'aria-disabled="true"'}><b>${id}</b><span>${STAGES[id].name}</span>${ok ? '' : icon('i-lock')}</button>`; }).join('');
     const dOpts = [[0, '自动'], [3, '短'], [6, '中'], [10, '长']], dNow = delay; // 0 = 按大家的延迟自动定
     body.innerHTML = `<h3>房间 <b class="mp-code">${esc(Lobby.code)}</b> <small class="dim-text">${n}/${MP_MAX} 人</small></h3>
-      <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : ''}<br><small class="dim-text">${PLANES[x.plane].name}</small></span></div>`).join('')}</div>
+      <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : ''}<br><small class="dim-text">${PLANES[x.plane].name}${x.prof && x.prof.g ? ` · ${esc(x.prof.g)}` : ''}</small></span></div>`).join('')}</div>
+      ${(() => { const w = Lobby.mergeWorld(ms); const bits = []; if (w.upper) bits.push('上层云桥开着'); if (w.targets.length) bits.push(`这局会遇到：${w.targets.map((t) => NPCS[t].name).join('、')}`); return bits.length ? `<p class="dim-text mp-world">${esc(bits.join(' · '))}</p>` : ''; })()}
       ${host ? `<div class="label">关卡</div><div class="stage-row">${chips}</div>
         <div class="row wrap"><span class="label">网络缓冲</span><div class="seg" role="group">${dOpts.map(([v, t]) => `<button type="button" data-md="${v}" class="${v === dNow ? 'on' : ''}">${t}</button>`).join('')}</div><span class="dim-text">卡顿就调长，操作会晚一点生效</span></div>
         <div class="row wrap"><button class="btn primary big" id="mp-start" type="button" ${n >= 2 ? '' : 'disabled'}>${icon('i-hangar')} 开始 · ${stage} ${STAGES[stage].name}</button>${n < 2 ? '<span class="dim-text">至少 2 人才能开始</span>' : ''}</div>`

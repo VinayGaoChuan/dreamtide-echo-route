@@ -22,7 +22,7 @@ function makeCtx(k) {
   const ctx = { console, Math: M, Date, JSON, performance: { now: () => ctx.__now }, __now: 0, setTimeout, clearTimeout, setInterval: () => 0,
     window: { addEventListener: noop, matchMedia: () => ({ matches: false }) }, document: { createElement: () => ({ width: 0, height: 0, getContext: () => fakeCtx, toDataURL: () => 'data:,' }), addEventListener: noop },
     navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop } };
-  ctx.__g = fakeCtx; ctx.globalThis = ctx; vm.createContext(ctx);
+  ctx.__g = fakeCtx; ctx.__world = JSON.parse(JSON.stringify(WORLD)); ctx.globalThis = ctx; vm.createContext(ctx);
   for (const f of FILES) { const p = path.join(dir, f + '.js'); if (fs.existsSync(p)) vm.runInContext(fs.readFileSync(p, 'utf8'), ctx, { filename: f + '.js' }); }
   vm.runInContext(`
     var __settings = DEFAULT_SETTINGS(); __settings.particles = ${k % 2 ? "'low'" : "'full'"};
@@ -41,12 +41,14 @@ function makeCtx(k) {
   return ctx;
 }
 const R = (ctx, code) => vm.runInContext(code, ctx);
+// 联机补全 v0.10：房间合并后的世界状态（多个要救的伙伴、上层云桥）也必须各端一致
+const WORLD = { upper: true, targets: ['bunny', 'grandpa', 'merchant'], target: 'bunny', rescued: [], clue: true, beacon: false, scout: true };
 function roster(n) { return Array.from({ length: n }, (_, i) => ({ id: 'p' + i, name: `${i + 1}P`, plane: ['moon', 'candy', 'whale', 'clock'][i % 4], stats: null, ultCap: 2 })); }
 
 function runDirect(stage, n) {
   const seed = 12345 + stage.charCodeAt(2) * 7;
   const ctxs = Array.from({ length: n }, (_, k) => makeCtx(k));
-  ctxs.forEach((c, k) => { c.__roster = roster(n); R(c, `var __res = null; var __w = new World({ mode: 'run', W: 1280, stage: '${stage}', seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, cb: { onEnd: (r) => { __res = r; } } });`); });
+  ctxs.forEach((c, k) => { c.__roster = roster(n); R(c, `var __res = null; var __w = new World({ mode: 'run', W: 1280, stage: '${stage}', seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
   let frame = 0;
   for (; frame < 30 * 900; frame++) {
     // 每个玩家只在自己那一端算自己的操作，再“发给”所有人（经过 net.js 的量化编码，和真实联机一致）
@@ -64,9 +66,10 @@ function runDirect(stage, n) {
   }
   const res = R(ctxs[0], '__res && { win: __res.win, runT: Math.round(__res.runT), kills: __res.stats.kills }');
   // 每架飞机自己的 Build 和星砂（各端看到的必须一样；不同飞机之间应该各不相同）
+  const rescued = R(ctxs[0], '__w.m.rescuedNow.join(",") + " upper:" + __w.m.upperRoute');
   const per = R(ctxs[0], `JSON.stringify(__w.players.map((q) => ({ build: q.picks.map((o) => o.kind[0] + ':' + o.id).join('>'), dust: Math.round(q.res.dust), offers: q.res.offers })))`);
   const ends = ctxs.map((c) => R(c, '__res && JSON.stringify([__res.stats.dust, __res.stats.crystals, __res.build.gun])'));
-  return { stage, n, ok: true, frames: frame, res, per: JSON.parse(per), myResults: ends };
+  return { stage, n, ok: true, frames: frame, res, rescued, per: JSON.parse(per), myResults: ends };
 }
 
 async function runNet(stage, n) {
@@ -79,7 +82,7 @@ async function runNet(stage, n) {
   ctxs.forEach((c, k) => { c.__send = (obj) => deliver(k, obj); c.__roster = roster(n);
     c.__clock = () => now;
     R(c, `var __res = null; var __sess = new LockstepSession({ selfIndex: ${k}, n: ${n}, delay: ${DELAY}, isHost: ${k === 0}, clock: () => __clock(), send: (o) => __send(o) });
-      var __w = new World({ mode: 'run', W: 1280, stage: '${stage}', seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, cb: { onEnd: (r) => { __res = r; } } });`); });
+      var __w = new World({ mode: 'run', W: 1280, stage: '${stage}', seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
   const hashes = ctxs.map(() => new Map());
   let maxFrame = 0, stalls = 0, ticks = 0; const stallBy = {};
   const TICK = 1000 / 30;

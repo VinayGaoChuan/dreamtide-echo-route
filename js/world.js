@@ -41,7 +41,8 @@ class World {
     this.first = !!o.first && !this.mp; this.tutorial = !!o.tutorial && !this.mp; this.targetName = o.target || null; // 这一局追的流派（和大厅“下一局目标”一致）
     this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id;
     // 家园改变战场（v0.10）：上层风圈是否已修好、这次要救谁、NPC 职责带来的变化。多人时用房主的，各端一致
-    this.wf = Object.assign({ upper: false, target: null, rescued: [], clue: false, beacon: false, scout: false }, o.world || {});
+    this.wf = Object.assign({ upper: false, target: null, targets: null, rescued: [], clue: false, beacon: false, scout: false }, o.world || {});
+    if (!Array.isArray(this.wf.targets)) this.wf.targets = this.wf.target ? [this.wf.target] : []; // 联机：房间里每个人当前要救的伙伴都在这里
     this.goalText = o.goalText || null; // HUD 只追踪家园的当前目标（纯显示）
     this.players = roster.map((r, i) => this.makePlayer(r, i));
     this.meIdx = o.me || 0; this.me = this.players[this.meIdx]; this.player = this.players[0];

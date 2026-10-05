@@ -29,7 +29,7 @@ Object.assign(World.prototype, {
     this.seg = { tier: i + STAGE_ORDER.indexOf(this.stageId), explosive: false };
     this.goal = { B, id: B.id, kind: B.kind, title: B.goal, t: 0, n: 0, total: B.n || 0, targets: [], wave: 0, waves: 0, state: 'active', portrait: B.kind === 'surprise' ? B.surprise : PORTRAIT_OF[B.kind] || 'jelly', sub: null };
     this.D.st = 'goal'; this.D.t = 0; this.D.mapAt = B.map ? B.mapAt || 6 : -1;
-    if (B.map === 'npc' && this.wf.clue && this.wf.target && this.wf.target !== 'merchant') this.D.mapAt = Math.min(this.D.mapAt, 1); // 小梦兔整理了线索：要救的伙伴更早出现
+    if (B.map === 'npc' && this.wf.clue && this.nextTarget()) this.D.mapAt = Math.min(this.D.mapAt, 1); // 小梦兔整理了线索：要救的伙伴更早出现
     this.m.segsDone = i;
     const G = this.goal;
     switch (B.kind) {

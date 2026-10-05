@@ -5,7 +5,7 @@ const fs = require('fs'), vm = require('vm'), path = require('path');
 const dir = path.join(__dirname, '..', 'js');
 const ctx = { console, Math, Date, JSON, window: {}, document: { createElement: () => ({ getContext: () => ({}) }) }, localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } };
 ctx.globalThis = ctx; vm.createContext(ctx);
-for (const f of ['util', 'data', 'home']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
+for (const f of ['util', 'data', 'home', 'net']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
 const R = (code) => vm.runInContext(code, ctx);
 let failed = 0; const check = (ok, what) => { console.log(`${ok ? '✓' : '✗'} ${what}`); if (!ok) failed++; };
 const nonNeg = () => R('m.home.res.wood >= 0 && m.home.res.goods >= 0 && m.stardust >= 0');
@@ -56,6 +56,14 @@ check(R('m.home.plots.rescue') === R('p1') && R('m.home.plots.workshop') === R('
 R('var old = freshMeta(); old.progress.rescued = { bunny: 1, merchant: 1 }; delete old.home; Home.ensure(old); old.home.res.wood = -5; Home.ensure(old);');
 check(R('old.home.built.rescue === 1 && old.home.built.shop === 1 && !old.home.built.workshop') && R('old.home.res.wood') === 0, '老存档：已救的伙伴住进来、开放对应建筑；负数资源读档时归零');
 check(R('Home.goal(old).key') === 'grandpa', '老存档的当前目标从缺的那一步接上（救云朵爷爷）');
+
+// 联机补全：房间里各人的家园进度合并成一局的世界状态
+R(`var A = freshMeta(); Home.ensure(A); var B = freshMeta(); Home.ensure(B); Home.rescue(B, 'bunny'); Home.rescue(B, 'grandpa'); B.home.res.wood = 12; Home.deliverProject(B, 'windRoad');
+   var W = Lobby.mergeWorld([{ prof: { w: Home.worldFor(A) } }, { prof: { w: Home.worldFor(B) } }]);`);
+check(R('W.upper') === true && R('JSON.stringify(W.targets)') === '["bunny","merchant"]', '联机：有人修好风道全队走上层云桥；每个人要救的伙伴都在这局里（小梦兔、糖果商人）');
+check(R('W.rescued.length') === 0, '联机：只有全员都救过的伙伴才算“救过”（不会把别人还没救的从吊舱里拿掉）');
+R(`var W2 = Lobby.mergeWorld([{ prof: { w: Home.worldFor(A) } }, { prof: { w: Home.worldFor(A) } }, { prof: { w: Home.worldFor(m) } }]);`);
+check(R('W2.targets[0]') === 'bunny', '联机：需要的人多的伙伴先出现');
 
 console.log(failed ? `家园规则测试失败 ${failed} 项` : '家园规则测试通过');
 process.exitCode = failed ? 1 : 0;
