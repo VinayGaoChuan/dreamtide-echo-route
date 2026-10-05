@@ -5,11 +5,13 @@
 //   例：node tools/net-bot.js ws://39.106.153.154:8080/mp 2 1-1 300
 //       node tools/net-bot.js ws://39.106.153.154:8080/mp 2 vs 400                 # 对抗（自由竞争）
 //       node tools/net-bot.js ws://39.106.153.154:8080/mp 3 1-1 300 --host-leave=60 # 房主第 60 秒断开：其余的人必须继续打完（v0.11 §13）
+//       node tools/net-bot.js ws://localhost:8091/mp 2 1-1 300 --dark=1@40~30        # 第 2 个客户端第 40 秒起断网 30 秒（收发全丢）：必须先被判断线中、回来后恢复（v0.11 §8）
 // 退出码：没同步 / 卡顿过多 / 没跑起来 → 1
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const ARGS = process.argv.slice(2).filter((a) => !a.startsWith('--')), FLAG = (k) => { const f = process.argv.find((a) => a.startsWith('--' + k + '=')); return f ? f.split('=')[1] : null; };
 const URL_ = ARGS[0] || 'ws://39.106.153.154:8080/mp', N = +(ARGS[1] || 2), MODE = ARGS[2] === 'vs' ? 'vs' : 'coop', STAGE = MODE === 'vs' ? '1-1' : ARGS[2] || '1-1', MAXS = +(ARGS[3] || 300);
 const HOST_LEAVE = FLAG('host-leave') ? +FLAG('host-leave') : null;
+const DARK = FLAG('dark') ? (([k, r]) => { const [t, d] = r.split('~').map(Number); return { k: +k, at: t, dur: d }; })(FLAG('dark').split('@')) : null;
 const dir = path.join(__dirname, '..', 'js');
 const FILES = ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain', 'vs', 'home', 'net'];
 const noop = () => {};
@@ -23,9 +25,9 @@ async function main() {
   const bots = [];
   for (let k = 0; k < N; k++) {
     const io = { tx: 0, rx: 0, txN: 0, rxN: 0 }; // 收发字节 / 条数（看带宽和服务器限流）
-    class CountingWS extends WebSocket {
-      constructor(u) { super(u); this.addEventListener('message', (ev) => { io.rx += String(ev.data).length; io.rxN++; }); }
-      send(d) { io.tx += String(d).length; io.txN++; super.send(d); }
+    class CountingWS extends WebSocket { // 断网模拟：io.dark 时收发全丢（连接本身不关，和线路断掉一样）
+      constructor(u) { super(u); this.addEventListener('message', (ev) => { if (io.dark) { ev.stopImmediatePropagation(); return; } io.rx += String(ev.data).length; io.rxN++; }); }
+      send(d) { if (io.dark) return; io.tx += String(d).length; io.txN++; super.send(d); }
     }
     const ctx = { console, Math, Date, JSON, performance, setTimeout, clearTimeout, setInterval, clearInterval, WebSocket: CountingWS, URL, Blob, __io: io,
       window: { addEventListener: noop, matchMedia: () => ({ matches: false }), DREAMTIDE_BUILD: build }, document: { createElement: () => ({ width: 0, height: 0, getContext: () => fakeCtx }), addEventListener: noop, hidden: false },
@@ -64,16 +66,18 @@ async function main() {
         if (best) ty = best.y + (i - 0.5) * 24;
         if (w.boss && w.boss.plates) { const pl = w.boss.plates.find((q) => q.alive); if (pl) ty = w.boss.y + pl.dy; }
         const gt = w.guideTarget(); if (gt && (i === 0 || i === w.beatIdx % w.players.length) && !(w.ritual && w.ritual.st === 'choose')) { tx = Math.min(gt.x - 6, w.W * 0.8); ty = gt.y; }
-        const mate = w.players.find((q) => q !== p && !q.alive && !q.gone); if (mate && !w.ritual) { tx = mate.x; ty = mate.y; } // 队友倒下：飞进救援圈
+        const tow = w.mapObjs.find((o) => o.state === 'tow' && o.by === i); if (tow && !(w.ritual && w.ritual.st === 'choose')) { const g2 = w.mapGoalPos(tow); if (g2) { tx = Math.min(g2.x - 6, w.W * 0.8); ty = g2.y; } } // 自己拖着的东西自己送到
+      const mate = w.players.find((q) => q !== p && !q.alive && !q.gone); if (mate && !w.ritual) { tx = mate.x; ty = mate.y; } // 队友倒下：飞进救援圈
       if (w.ritual && w.ritual.st === 'choose') { const g = w.ritual.gates[i % 2]; tx = g.x; ty = g.y; }
         const gain = w.ritual && w.ritual.st === 'choose' ? 120 : 60;
         return { mx: Math.sign(tx - px) * Math.min(1, Math.abs(tx - px) / gain), my: Math.sign(ty - py) * Math.min(1, Math.abs(ty - py) / (gain * 0.7)), burst: p.stock >= 1 && !w.ritual && !w.bursting, focus: false, dx: 0, dy: 0 };
       }
       Lobby.onStart = (st) => {
         const idx = Lobby.beginSession(st); if (idx < 0) return false;
-        B.w = new World({ mode: 'run', W: 1280, stage: st.stage, seed: st.seed, me: idx, settings, world: st.world || {}, vs: st.mode === 'vs',
+        const mk = () => new World({ mode: 'run', W: 1280, stage: st.stage, seed: st.seed, me: idx, settings, world: st.world || {}, vs: st.mode === 'vs',
           players: st.roster.map((r) => ({ id: r.peer, name: r.name, plane: r.plane, stats: r.stats || planeStats(null, r.plane), ultCap: r.ultCap || 1, cos: {} })),
-          cb: { onEnd: (r) => { B.res = r; Lobby.endGame(); }, onRescue: (id) => B.rescues.push(id) } });
+          cb: { onEnd: (r) => { B.res = r; Lobby.endGame(); }, onRescue: (id) => { if (!B.rescues.includes(id)) B.rescues.push(id); } } });
+        B.w = mk(); Lobby.onReplay = () => { if (B.w.done) return false; B.w = mk(); B.replays = (B.replays || 0) + 1; return true; };
         const sync = st.at && Lobby.net.serverNow() !== null;
         B.L = { t0: sync ? Lobby.net.localPerfOf(st.at) : performance.now(), steps: 0, last: performance.now(), waitT: 0, dx: 0, dy: 0 };
         const S = Lobby.session, recv = S.receive.bind(S);
@@ -103,7 +107,7 @@ async function main() {
           stallPct: L && L.ticks ? +((L.stallTicks || 0) / L.ticks * 100).toFixed(1) : null, rttAvg: avg(B.rtts.filter((x) => x !== null)), rttMax: B.rtts.length ? Math.max(...B.rtts.filter((x) => x !== null)) : null,
           lead: B.leads.length ? Math.min(...B.leads.filter((x) => x !== null)) + '~' + Math.max(...B.leads.filter((x) => x !== null)) : null,
           beat: w ? w.beatIdx : null, done: !!(w && w.done), win: B.res ? B.res.win : null, desync: S ? S.desync : null, rescues: B.rescues.join(','), hash: S ? [...S.hashLog].slice(-1)[0] : null,
-          vs: B.res && B.res.vs ? B.res.vs.scores.join('/') : w && w.vs ? w.vs.score.map(Math.floor).join('/') : null, gone: w ? w.players.map((q) => q.gone ? 1 : 0).join('') : null, host: S ? S.isHost : null, left: !!B.left };
+          stuck: Lobby.net.stuck || 0, replays: B.replays || 0, aways: S ? S.aways.map((L) => L.map((r) => r[0] + '-' + (r[1] === Infinity ? '?' : r[1])).join(',')).join('|') : null, kicked: S ? S.kicked !== undefined : null, vs: B.res && B.res.vs ? B.res.vs.scores.join('/') : w && w.vs ? w.vs.score.map(Math.floor).join('/') : null, gone: w ? w.players.map((q) => q.gone ? 1 : 0).join('') : null, host: S ? S.isHost : null, left: !!B.left };
       }`, ctx);
     bots.push(ctx);
   }
@@ -122,6 +126,7 @@ async function main() {
   const timer = setInterval(() => { for (const c of live) R(c, 'tick()'); }, 8);
   const t0 = Date.now(); let last = 0;
   while (Date.now() - t0 < MAXS * 1000 && !live.every((c) => R(c, 'B.w && B.w.done'))) {
+    if (DARK) { const c = bots[DARK.k], el = (Date.now() - t0) / 1000, on = el >= DARK.at && el < DARK.at + DARK.dur; if (c.__io.dark !== on) { c.__io.dark = on; console.log(`${Math.round(el)}s 机器人${DARK.k + 1} ${on ? '断网' : '网络恢复'}`); } }
     if (HOST_LEAVE !== null && live.includes(bots[0]) && Date.now() - t0 > HOST_LEAVE * 1000) { // 房主直接断线（不走“离开房间”按钮）
       live.splice(live.indexOf(bots[0]), 1); R(bots[0], 'B.left = true; Lobby.net.close()'); console.log(`${Math.round((Date.now() - t0) / 1000)}s 房主断开`);
     }
@@ -137,13 +142,20 @@ async function main() {
   const rest = st.filter((s) => !s.left), finished = rest.every((s) => s.done);
   if (finished && MODE !== 'vs' && new Set(rest.map((s) => s.win)).size > 1) fail('各端结局不一样');
   if (finished && MODE === 'vs' && new Set(rest.map((s) => s.vs)).size > 1) fail('各端的对抗分数不一样');
+  if (DARK) { // 断网的那位：必须没被移出、被判过断线中且已恢复、和大家一样打完（或还在一起打）
+    const d = st[DARK.k];
+    if (d.kicked) fail('断网的人被移出了这一局（应该保留席位）');
+    if (DARK.dur * 1000 > 15000 + 2000 && !(d.aways || '').split('|')[DARK.k]) fail('断网超过服务器超时却没有被判“断线中”');
+    if ((d.aways || '').includes('?')) fail('断线中一直没有恢复');
+    if (!finished && Math.abs(d.frame - st.find((x, k) => k !== DARK.k).frame) > 60) fail('断网的人回来后没有追上');
+  }
   if (HOST_LEAVE !== null) { // 房主离开：其余的人继续（不被踢回菜单），名单里下一位接手房主，各端都把房主标成“离开”
-    if (!rest.every((s) => s.gone && s.gone[0] === '1')) fail('房主离开后没有在各端被移出这一局');
+    if (!rest.every((s) => (s.gone && s.gone[0] === '1') || (s.aways || '').split('|')[0])) fail('房主断开后没有在各端被判断线中 / 移出这一局'); // 意外断开先保留席位 60 秒，之后移出
     if (!rest.some((s) => s.host)) fail('房主离开后没有人接手');
     if (!rest.every((s) => s.frame > HOST_LEAVE * 30 + 300)) fail('房主离开后其余的人没有继续推进');
   }
   const playMs = (Date.now() - t0) * 1;
-  if (st.some((s) => s.stallMs > playMs * 0.1)) fail('卡顿太多（等待队友操作的时间超过 10%）');
+  if (st.some((s, k) => !(DARK && k === DARK.k) && s.stallMs > playMs * 0.1)) fail('卡顿太多（等待队友操作的时间超过 10%）'); // 断网那位自己离线的时间不算
   console.log(failed ? `真机联机测试失败 ${failed} 项` : `真机联机测试通过${finished ? '' : `（${MAXS} 秒内没打完，按已打部分判定）`}`);
   for (const c of bots) R(c, 'if (!B.left) { Lobby.leave(); Lobby.net.close(); }');
   setTimeout(() => process.exit(failed ? 1 : 0), 300);

@@ -80,7 +80,7 @@ Object.assign(World.prototype, {
   vsFill(dt) {
     const V = this.vs, rate = VS.fill[Math.min(V.stage, VS.fill.length - 1)];
     for (let k = 0; k < V.n; k++) {
-      const q = this.players[k], L = V.lanes[k]; if (q.gone) continue;
+      const q = this.players[k], L = V.lanes[k]; if (q.gone || q.away) continue; // 断线中的航道暂停刷怪
       let active = 0; for (const e of this.enemies) if (e.alive && e.lane === k && e.x < this.W + 60) active++;
       if (active >= VS.laneCap) continue;
       L.budget = Math.min(L.budget + rate * dt * (L.wave ? 0.4 : 1), 12);
@@ -92,7 +92,7 @@ Object.assign(World.prototype, {
   vsTowers(st) {
     const V = this.vs;
     for (let k = 0; k < V.n; k++) {
-      if (this.players[k].gone) continue;
+      if (this.players[k].gone || this.players[k].away) continue;
       const y = this.vsMid(k), T = { stage: st, lane: k, x: this.W * 0.8, y, st: 'guard', t: 0, guards: [] }, gap = Math.min(55, V.h * 0.28);
       this.vsSpawnIn(k, () => { for (const dy of [-gap, 0, gap]) { const e = this.addArmor({ x: this.W + 60 + Math.abs(dy), tx: this.W * 0.72 + Math.abs(dy) * 0.5, ty: y + dy, bob: 10, fireT: srand(2.2, 3.4) }); e.maxHp = e.hp = e.hp * (1 + st * 0.35); e.vsGuard = true; T.guards.push(e.id); } });
       V.tower.push(T);
@@ -136,7 +136,7 @@ Object.assign(World.prototype, {
   /* 送给谁：除自己以外分数最高的（同分取编号小的）——领先的人受到的干扰最多，落后的人有追分机会 */
   vsTarget(from) {
     const V = this.vs; let best = -1;
-    for (let k = 0; k < V.n; k++) { if (k === from || this.players[k].gone) continue; if (best < 0 || V.score[k] > V.score[best]) best = k; }
+    for (let k = 0; k < V.n; k++) { if (k === from || this.players[k].gone || this.players[k].away) continue; if (best < 0 || V.score[k] > V.score[best]) best = k; }
     return best;
   },
   vsSend(from, kind) {
@@ -199,7 +199,7 @@ Object.assign(World.prototype, {
   vsPvpShot(s) {
     const V = this.vs; if (!V.clash || !this.vsInBand(s.y)) return;
     for (const q of this.players) {
-      if (q.idx === s.owner || !q.alive || q.gone || q.inv > 0 || !this.vsInBand(q.y)) continue;
+      if (q.idx === s.owner || !q.alive || q.gone || q.away || q.inv > 0 || !this.vsInBand(q.y)) continue;
       if (q.ritual && q.ritual.st !== 'resume') continue;
       if (dist2(q.x, q.y, s.x, s.y) > (q.r + s.r + 6) * (q.r + s.r + 6)) continue;
       s.on = false;

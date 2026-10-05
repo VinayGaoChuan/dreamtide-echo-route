@@ -4,24 +4,26 @@
    · 传输：每端持续发布一份“在场状态”（最新的覆盖旧的，丢了下一份会补上），里面带着所有玩家最近收到的操作帧（互相转发，谁掉线了别人也能补齐）、
      自己收到了哪些帧、以及每秒一次的状态哈希。谁都可以发在场状态，不需要额外权限。
    · 转发层可换：自己的联机服务器（WebSocket，server/relay.js）/ Claude Artifact 房间（room 能力）/ 同一浏览器多窗口（BroadcastChannel，本地测试）/ 以后的 Steam 网络（同一套接口）。
-   · 断线：房主（名单里最靠前、还在线的那位）等其他人收齐掉线者的操作后，宣布“从第 F 帧起移除”；所有端在同一帧移除那架飞机。 */
+   · 断线（v0.11 §8 保留席位）：房主（名单里最靠前、还在线的那位）宣布“从第 F 帧起这位断线中”——所有端从同一帧起把他的操作当成“断线占位”
+     （飞机原地不动、不开火、不受伤、不拖住全队升级），其他人继续打。60 秒内他回来：先按大家认定的操作记录追上（必要时从开局重算一遍），
+     再发“准备好了”，房主宣布“从第 R 帧起恢复”；超过 60 秒才宣布“从第 G 帧起移除”。所有决定都写进在场状态、谁都转发，房主走了也不丢。 */
 
-const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, runAhead: 30, catchUp: 4 };
-const MP_PROTO = 2; // 2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
+const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, silentAfter: 2500, runAhead: 30, catchUp: 4, seat: 60000, backLead: 45, dropLead: 90 };
+const MP_PROTO = 3; // 3：断线保留席位（断线区间 w / 恢复请求 ry / 断线占位操作）；2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
 
 /* ---------- 操作编码：一帧 5 个字符 ---------- */
 const NetCodec = {
   A: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_',
   q(v) { return clamp(Math.round((v || 0) * 8), -8, 8) + 8; }, // 左右 / 上下各 17 档
   encodeFrame(inp) {
-    const A = this.A, fl = (inp.burst ? 1 : 0) | (inp.focus ? 2 : 0) | (inp.gone ? 4 : 0);
+    const A = this.A, fl = (inp.burst ? 1 : 0) | (inp.focus ? 2 : 0) | (inp.gone ? 4 : 0) | (inp.away ? 8 : 0);
     return A[this.q(inp.mx)] + A[this.q(inp.my)] + A[fl] + A[clamp(Math.round(inp.dx || 0), -31, 31) + 32] + A[clamp(Math.round(inp.dy || 0), -31, 31) + 32];
   },
   decodeFrame(s) {
     const i = (c) => this.A.indexOf(c), fl = i(s[2]);
-    return { mx: (i(s[0]) - 8) / 8, my: (i(s[1]) - 8) / 8, burst: !!(fl & 1), focus: !!(fl & 2), gone: !!(fl & 4), dx: i(s[3]) - 32, dy: i(s[4]) - 32 };
+    return { mx: (i(s[0]) - 8) / 8, my: (i(s[1]) - 8) / 8, burst: !!(fl & 1), focus: !!(fl & 2), gone: !!(fl & 4), away: !!(fl & 8), dx: i(s[3]) - 32, dy: i(s[4]) - 32 };
   },
-  NEUTRAL: 'IIAgg', GONE: 'IIEgg',
+  NEUTRAL: 'IIAgg', GONE: 'IIEgg', AWAY: 'IIIgg',
 };
 
 /* ---------- 帧同步会话（与传输无关；send 由外面接到在场状态上） ---------- */
@@ -35,6 +37,8 @@ class LockstepSession {
     this.heard = Array(this.n).fill(0); this.left = Array(this.n).fill(false);
     this.nextLocal = this.delay; this.simFrame = 0; this.drops = {}; this.lastHash = 0; this.hashLog = new Map(); this.desync = null; this.stallT = 0;
     this.trimmed = 0; this.budget = o.budget || 3000; // budget：一份在场状态里留给操作帧的字符数（平台上限 4 KiB）
+    this.aways = Array.from({ length: this.n }, () => []); // 每个玩家的断线区间 [F, R)，R 未定时是 Infinity
+    this.awayAt = Array(this.n).fill(0); this.backReq = Array(this.n).fill(undefined); this.ready = null; // ready：本机断线回来后“从第几帧起可以恢复”
     this.isHost = !!o.isHost; this.clock = o.clock || (() => Date.now());
   }
   /* 本机这一帧的操作：按真实时间每帧采一次（模拟卡住时也继续攒，最多领先 runAhead 帧，避免两边互相等成车队） */
@@ -46,17 +50,19 @@ class LockstepSession {
   }
   advanceHave(j) { const L = this.inputs[j]; let h = this.have[j]; while (L[h] !== undefined) h++; this.have[j] = h; }
   dropAt(j) { return this.drops[j] !== undefined ? this.drops[j] : Infinity; }
-  ready(f) { for (let j = 0; j < this.n; j++) if (f < this.dropAt(j) && this.inputs[j][f] === undefined) return false; return true; }
+  isAway(j, f) { for (const r of this.aways[j]) if (f >= r[0] && f < r[1]) return true; return false; }
+  openAway(j) { const L = this.aways[j]; return L.length && L[L.length - 1][1] === Infinity ? L[L.length - 1] : null; }
+  isReady(f) { for (let j = 0; j < this.n; j++) if (f < this.dropAt(j) && !this.isAway(j, f) && this.inputs[j][f] === undefined) return false; return true; }
   /* 下一帧所有人的操作（凑不齐就返回 null，等） */
   next() {
     const f = this.simFrame;
-    if (!this.ready(f)) return null;
+    if (!this.isReady(f)) return null;
     const out = [];
-    for (let j = 0; j < this.n; j++) out.push(NetCodec.decodeFrame(f >= this.dropAt(j) ? NetCodec.GONE : this.inputs[j][f]));
+    for (let j = 0; j < this.n; j++) out.push(NetCodec.decodeFrame(f >= this.dropAt(j) ? NetCodec.GONE : this.isAway(j, f) ? NetCodec.AWAY : this.inputs[j][f]));
     this.simFrame++;
     return out;
   }
-  waitingFor() { const f = this.simFrame, L = []; for (let j = 0; j < this.n; j++) if (f < this.dropAt(j) && this.inputs[j][f] === undefined) L.push(j); return L; }
+  waitingFor() { const f = this.simFrame, L = []; for (let j = 0; j < this.n; j++) if (f < this.dropAt(j) && !this.isAway(j, f) && this.inputs[j][f] === undefined) L.push(j); return L; }
   simulated(hash) {
     this.lastHash = hash; const f = this.simFrame;
     if (f % LOCKSTEP.hashEvery === 0) { this.hashLog.set(f, hash); if (this.hashLog.size > 40) this.hashLog.delete(this.hashLog.keys().next().value); }
@@ -75,15 +81,43 @@ class LockstepSession {
     if (Array.isArray(msg.a) && msg.a.length === this.n) this.peerAck[from] = msg.a.slice();
     if (Array.isArray(msg.h) && this.hashLog.has(msg.h[0]) && this.hashLog.get(msg.h[0]) !== msg.h[1] && !this.desync) this.desync = { frame: msg.h[0], mine: this.hashLog.get(msg.h[0]), theirs: msg.h[1], from };
     if (Array.isArray(msg.d)) for (const [j, F] of msg.d) { if (j === this.me) { if (this.kicked === undefined) this.kicked = F; } else if (this.drops[j] === undefined) this.drops[j] = F; } // 别人把我判成掉线了：本机这局也结束
+    if (Array.isArray(msg.w)) for (const w of msg.w) this.noteAway(w);
+    if (typeof msg.ry === 'number' && this.openAway(from)) this.backReq[from] = msg.ry; // 断线的人回来了：从这一帧起可以恢复
   }
-  /* 发布：所有人里还有谁缺哪些帧，就把那段帧带上（每人最多 window 帧） */
+  /* 断线区间：[j, F, R|null]。区间只会新增，R 只会从“未定”变成确定的帧（各端最终一致） */
+  noteAway(w) {
+    if (!Array.isArray(w) || w.length !== 3) return;
+    const [j, F, R] = w; if (!(j >= 0 && j < this.n) || !(F >= 0)) return;
+    const L = this.aways[j]; let r = L.find((x) => x[0] === F);
+    if (!r) { r = [F, Infinity]; L.push(r); L.sort((a, b) => a[0] - b[0]); if (j === this.me && R === null) this.meAway(r); }
+    if (typeof R === 'number' && r[1] === Infinity) { r[1] = R; if (j === this.me) this.meBack(r); }
+  }
+  /* 本机被判断线：要是本机已经按自己的操作算过了第 F 帧以后（和大家认定的“断线占位”不一样），就得从开局按认定的记录重算 */
+  meAway(r) { this.awayMe = r; this.ready = null; if (this.simFrame > r[0]) this.needReplay = true; }
+  /* 房主宣布本机从第 R 帧起恢复：之前没发出去的帧都是“断线占位”，从 R 开始用真实操作 */
+  meBack(r) {
+    const L = this.inputs[this.me];
+    for (let f = r[0]; f < r[1]; f++) L[f] = NetCodec.AWAY;
+    if (this.nextLocal < r[1]) this.nextLocal = r[1];
+    this.advanceHave(this.me); this.awayMe = null; this.ready = null;
+  }
+  /* 发布：所有人里还有谁缺哪些帧，就把那段帧带上（每段最多 window 帧）。
+     跟得上的人按他们里收得最少的那位补一段；落后很多的人（断线刚回来、正在追帧）单独补一段，不拖住其他人；
+     好一阵没消息的人（断线中）不参与——否则他停住的收件进度会把补发起点钉死，新帧永远发不出去，所有人一起卡住 */
   flush(extra) {
-    const seg = [];
+    const seg = [], now = this.clock();
     for (let j = 0; j < this.n; j++) {
-      let start = this.have[j];
-      for (let k = 0; k < this.n; k++) { if (k === this.me || this.drops[k] !== undefined) continue; const a = this.peerAck[k]; start = Math.min(start, a ? a[j] : 0); }
-      start = Math.max(start, this.trimmed); // 从对方最早缺的那帧开始补（已清掉的旧帧所有人都早就收到了）
-      if (start < this.have[j]) seg.push([j, start, Math.min(this.have[j], start + LOCKSTEP.window)]);
+      let head = Infinity, lag = Infinity;
+      for (let k = 0; k < this.n; k++) {
+        if (k === this.me || this.drops[k] !== undefined) continue;
+        if (this.heard[k] && now - this.heard[k] > LOCKSTEP.silentAfter) continue;
+        const a = this.peerAck[k] ? this.peerAck[k][j] : 0;
+        if (this.have[j] - a <= LOCKSTEP.window) head = Math.min(head, a); else lag = Math.min(lag, a);
+      }
+      if (head === Infinity && lag === Infinity) continue;
+      if (head === Infinity) { head = lag; lag = Infinity; }
+      if (head < this.have[j]) seg.push([j, head, Math.min(this.have[j], head + LOCKSTEP.window)]);
+      if (lag < head) seg.push([j, lag, Math.min(head, lag + LOCKSTEP.window)]);
     }
     // 预算不够（4 人 + 网络很差）时每段少带几帧：先补最早缺的，下一份再补后面的
     let per = LOCKSTEP.window; const cost = () => seg.reduce((c, x) => c + Math.min(x[2] - x[1], per) * 5 + 16, 0);
@@ -92,26 +126,38 @@ class LockstepSession {
     const last = [...this.hashLog.keys()].pop();
     const msg = Object.assign({ r, a: this.have.slice(), h: last !== undefined ? [last, this.hashLog.get(last)] : null }, extra || {});
     if (Object.keys(this.drops).length) msg.d = Object.entries(this.drops).map(([j, F]) => [+j, F]); // 已定下的移除大家都转发，房主走了也不会丢
+    const w = []; this.aways.forEach((L, j) => { for (const r of L) w.push([j, r[0], r[1] === Infinity ? null : r[1]]); }); if (w.length) msg.w = w; // 断线区间同样大家转发
+    if (this.ready !== null && this.awayMe) msg.ry = this.ready;
     this.send(msg);
     this.trimOld();
   }
-  trimOld() { // 远早于当前帧的旧操作所有人都已经用过了，清掉省内存
-    const keep = this.simFrame - LOCKSTEP.window * 3;
-    if (keep - this.trimmed < 64) return;
-    for (const L of this.inputs) for (let f = this.trimmed; f < keep; f++) if (L[f] !== undefined) L[f] = '';
-    this.trimmed = keep;
-  }
-  /* 房主：有人断线 → 等其他人把他的操作都收齐，再定下“从第几帧起移除” */
-  hostCheckDrops(connected) {
+  trimOld() {} // 操作记录整局保留（每帧几个字符，十分钟也就几百 KB）：断线回来的人要按完整记录从开局重算
+  /* 谁来做判定：名单里第一个在线、没被移除、也不在“断线中”的人（断线回来的人要等别人宣布恢复，不能自己判自己） */
+  hostIndex(connected) { return connected.findIndex((c, j) => c && this.drops[j] === undefined && !this.openAway(j)); }
+  /* 房主：有人断线 → 过了宽限先判“断线中”（从大家都还没收到他操作的那一帧起，席位保留）；
+     他回来并追上后发来“准备好了”→ 宣布从第 R 帧起恢复；席位保留到时还没回来 → 留出提前量宣布从第 G 帧起移除 */
+  hostCheckDrops(connected, quit) {
     if (!this.isHost) return;
     const now = this.clock();
     for (let j = 0; j < this.n; j++) {
-      if (j === this.me || this.drops[j] !== undefined || connected[j]) continue;
+      if (j === this.me || this.drops[j] !== undefined) continue;
+      const open = this.openAway(j);
+      if (connected[j]) {
+        if (open && this.backReq[j] !== undefined) { open[1] = Math.max(this.backReq[j], this.simFrame + LOCKSTEP.backLead, open[0]); this.backReq[j] = undefined; }
+        continue;
+      }
       if (!this.left[j]) { this.left[j] = now; continue; }
       if (now - this.left[j] < LOCKSTEP.dropGrace) continue;
-      let F = this.have[j];
-      for (let k = 0; k < this.n; k++) if (k !== j && connected[k] && this.peerAck[k]) F = Math.max(F, this.peerAck[k][j]);
-      this.drops[j] = F;
+      if (!open) {
+        let F = this.have[j];
+        for (let k = 0; k < this.n; k++) if (k !== j && connected[k] && this.peerAck[k]) F = Math.max(F, this.peerAck[k][j]);
+        if (quit && quit[j]) this.drops[j] = F; // 主动退出：直接移除
+        else { this.aways[j].push([F, Infinity]); this.awayAt[j] = now; } // 意外断开：判断线中，席位保留
+      } else if (quit && quit[j]) this.drops[j] = Math.max(open[0], this.simFrame + LOCKSTEP.dropLead); // 断线中又主动退出
+      else {
+        if (!this.awayAt[j]) this.awayAt[j] = now; // 刚接手房主：从现在开始计席位时间
+        if (now - this.awayAt[j] > LOCKSTEP.seat) this.drops[j] = Math.max(open[0], this.simFrame + LOCKSTEP.dropLead);
+      }
     }
   }
 }
@@ -141,6 +187,7 @@ class RoomNet {
   close() { try { this.room.presence({ mp: null, ls: null }); } catch (e) { /* ignore */ } if (this.unsub) this.unsub(); this.subs = []; }
 }
 /* 自己的联机服务器（server/relay.js）：WebSocket 连接，服务器约 30 次 / 秒推送别人的最新在场状态；断线自动重连，身份不变 */
+const WS_STUCK_MS = 3500;
 class WsNet {
   constructor(url, ch) {
     this.kind = 'ws'; this.url = url; this.ch = ch; this.subs = []; this.others = new Map(); this.me = {}; this.pending = null;
@@ -153,9 +200,9 @@ class WsNet {
     if (this.closed) return;
     let ws; try { ws = new WebSocket(this.url); } catch (e) { this.redial(); return; }
     this.ws = ws;
-    ws.onopen = () => { this.open = true; this.retry = 0; ws.send(JSON.stringify({ t: 'hello', id: this.selfId, ch: this.ch })); this.pingAt = 0; if (Object.keys(this.me).length) this.pending = Object.assign({}, this.me); this.emit(); };
+    ws.onopen = () => { this.open = true; this.synced = false; this.retry = 0; this.lastPong = this.openAt = performance.now(); ws.send(JSON.stringify({ t: 'hello', id: this.selfId, ch: this.ch })); this.pingAt = 0; if (Object.keys(this.me).length) this.pending = Object.assign({}, this.me); this.emit(); };
     ws.onmessage = (ev) => this.onMsg(ev.data);
-    ws.onclose = () => { const was = this.open; this.open = false; this.ws = null; if (was) { this.others.clear(); this.emit(); } this.redial(); };
+    ws.onclose = () => { if (this.ws !== ws) return; const was = this.open; this.open = false; this.synced = false; this.ws = null; if (was) { this.others.clear(); this.emit(); } this.redial(); };
     ws.onerror = () => {};
   }
   redial() { if (this.closed) return; this.retry++; setTimeout(() => this.dial(), Math.min(5000, 300 * this.retry)); }
@@ -167,11 +214,11 @@ class WsNet {
       for (const k in q.d || {}) { if (q.d[k] === null) delete pres[k]; else pres[k] = q.d[k]; }
       this.others.set(q.peer, { presence: Object.freeze(pres), updatedAt: Date.now() });
     };
-    if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.serverBuild = m.build || null; this.others.clear(); (m.peers || []).forEach(put); this.emit(); }
+    if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.serverBuild = m.build || null; this.others.clear(); (m.peers || []).forEach(put); this.synced = true; this.emit(); }
     else if (m.t === 'u') { (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'bye') { this.others.delete(m.peer); this.emit(); }
     else if (m.t === 'pong') {
-      const now = performance.now(), rtt = now - m.c; this.rtt = Math.round(rtt);
+      const now = performance.now(), rtt = now - m.c; this.rtt = Math.round(rtt); this.lastPong = now;
       this.rtts = (this.rtts || []).concat(rtt).slice(-6); this.rttHi = Math.round(Math.max(...this.rtts)); // 最近几次里最慢的：留出抖动的余量
       if (m.s) { this.clock.push({ rtt, off: m.s + rtt / 2 - now }); if (this.clock.length > 8) this.clock.shift(); this.clockOff = this.clock.reduce((a, b) => (b.rtt < a.rtt ? b : a)).off; }
     }
@@ -181,6 +228,10 @@ class WsNet {
   localPerfOf(ms) { return ms - this.clockOff; }
   tick(now) {
     if (!this.open || !this.ws) return;
+    // 连接卡死检测：每秒一次心跳，3.5 秒收不到回包，多半是 TCP 卡在越等越久的重传里（线路丢包时常见；只断一个方向时别人的消息还能收到，所以只看心跳回包）。
+    // 直接换一条新连接（身份不变，服务器无缝顶替旧连接，队友那边看不到掉线），不等旧连接自己恢复
+    // 连上了却一直没收到名单（握手丢了），也当卡死
+    if (now - (this.lastPong || now) > WS_STUCK_MS || (!this.synced && now - (this.openAt || now) > WS_STUCK_MS)) { const ws = this.ws; this.stuck = (this.stuck || 0) + 1; this.ws = null; this.open = false; this.synced = false; try { ws.close(); } catch (e) { /* ignore */ } this.others.clear(); this.emit(); this.retry = 0; this.dial(); return; }
     this.sendPending(now);
     if (now - this.pingAt > (this.clock.length < 4 ? 400 : 1000)) { this.pingAt = now; this.ws.send(JSON.stringify({ t: 'ping', c: now })); } // 刚连上时多测几次
   }
@@ -193,7 +244,7 @@ class WsNet {
   /* 有新状态马上发（两次之间至少隔 16 毫秒，没赶上的由计时器补发）：操作帧早一点到，所有人的操作延迟就短一点 */
   sendPending(now) { if (this.pending && this.open && this.ws && now - this.sentAt >= 16) { this.ws.send(JSON.stringify({ t: 'p', d: this.pending })); this.pending = null; this.sentAt = now; } }
   onChange(fn) { this.subs.push(fn); }
-  connected() { return this.open; }
+  connected() { return this.open && !!this.synced; } // 收到服务器的完整名单（hi）才算连上：重连途中手里没有别人的在线信息，不能据此判谁掉线（否则会“脑裂”）
   close() { this.closed = true; if (this.off) this.off(); if (this.ws) try { this.ws.close(); } catch (e) { /* ignore */ } this.subs = []; }
 }
 /* 联机服务器地址：网页由服务器提供时，服务器会写入 window.DREAMTIDE_WS（同源 /mp）；测试时也可以用 ?mp=ws://主机:端口/mp 指定 */
@@ -235,16 +286,25 @@ const MpDriver = {
   tick(w, L, S, now, inputFn) {
     const dt = Math.min(0.25, Math.max(0, (now - L.last) / 1000)); L.last = now;
     const el = (now - L.t0) / 1000, FR = LOCKSTEP.hz, SP = LOCKSTEP.steps;
+    // 断线回来、本机按自己的操作多算过几帧：换一个全新的世界，按大家认定的操作记录从开局重算（下一次 tick 开始；外面负责建新世界）
+    if (S.needReplay) { S.needReplay = false; if (Lobby.onReplay && Lobby.onReplay()) { L.steps = 0; S.simFrame = 0; S.hashLog.clear(); S.desync = null; S.replaying = true; return false; } }
     const lead = Lobby.leadFrames(now) || S.delay;
     while (S.nextLocal <= Math.floor(el * FR) + lead) { if (!S.sample(inputFn(L))) break; Lobby.unsent = true; }
     Lobby.pump(); const gap = now - Lobby.lastFlush; if ((Lobby.unsent && gap >= 16) || gap >= 50) Lobby.flush(now); // 采到新操作马上发；没有新操作时也定期发（回执 / 哈希）
     const target = Math.floor(el * FR * SP), behind = target - L.steps;
     let budget = (behind > FR * SP * 2 ? LOCKSTEP.catchUp * 3 : LOCKSTEP.catchUp) * SP, stalled = false;
+    const until = S.replaying ? performance.now() + 14 : 0; // 重算追帧：每次最多占 14 毫秒，不卡住画面
+    if (S.replaying) { budget = 1e9; Sound.quiet = true; }
     while (L.steps < target && budget-- > 0 && !w.done) {
       if (L.steps % SP === 0) { const ins = S.next(); if (!ins) { stalled = true; break; } for (let j = 0; j < ins.length; j++) w.setInput(j, ins[j]); }
       w.step(1 / 120); L.steps++;
       if (L.steps % SP === 0 && S.simFrame % LOCKSTEP.hashEvery === 0) S.simulated(w.stateHash());
+      if (S.replaying) { w.events.length = 0; if (performance.now() > until) break; }
     }
+    if (S.replaying && (target - L.steps < SP * 6 || stalled || w.done)) { S.replaying = false; Sound.quiet = false; }
+    S.replayPct = S.replaying ? Math.min(99, Math.floor((L.steps / Math.max(1, target)) * 100)) : 0;
+    // 断线回来：追上了就告诉大家“从这一帧起可以恢复”，房主据此宣布恢复帧
+    if (S.awayMe && !S.replaying && !S.needReplay && target - L.steps < SP * 8) S.ready = Math.max(S.nextLocal, S.simFrame + S.delay);
     L.waitT = stalled ? L.waitT + dt : 0;
     if (stalled) L.stallTicks = (L.stallTicks || 0) + 1; L.ticks = (L.ticks || 0) + 1;
     // 本机飞机的显示预测：已经发出、还没轮到模拟的操作先在画面上走完（只改画面，模拟里的位置不变）
@@ -355,18 +415,18 @@ const Lobby = {
   pump() {
     const S = this.session || this.linger; if (!S || !this.net) return;
     if (!this.net.connected()) return; // 自己掉线时别人看起来都“不在了”：这时不能判谁掉线，等重连
-    const connected = Array(this.roster.length).fill(false); connected[S.me] = true;
+    const connected = Array(this.roster.length).fill(false), quit = Array(this.roster.length).fill(false); connected[S.me] = true;
     const early = Date.now() - this.sessionAt < 8000; // 开局头几秒，慢一步进来的人还没发出这局的操作，先算在线
     for (const p of this.net.peers()) {
       if (p.isMe) continue;
       const j = this.roster.findIndex((x) => x.peer === p.peer); if (j < 0) continue;
-      const m = p.presence && p.presence.mp; if (!m || m.code !== this.code) continue;
+      const m = p.presence && p.presence.mp; if (!m || m.code !== this.code) { quit[j] = true; continue; } // 人还在线、却已经不在这个房间：主动退出了（不保留席位）
       const ls = p.presence.ls, mine = ls && ls.g === this.gameId;
       if (mine || early) connected[j] = true;
       if (mine && this.seenLs.get(j) !== ls) { this.seenLs.set(j, ls); S.receive(j, ls); if (typeof ls.rt === 'number') this.peerRtt[j] = ls.rt; }
     }
-    S.isHost = connected.findIndex((c, j) => c && S.drops[j] === undefined) === S.me; // 房主走了，名单里下一位接手
-    S.hostCheckDrops(connected);
+    S.isHost = S.hostIndex(connected) === S.me; // 房主走了（或断线中），名单里下一位在线的接手
+    S.hostCheckDrops(connected, quit);
     this.connectedNow = connected;
   },
   myRtt() { const n = this.net; return n ? Math.round(n.rttHi || n.rtt || 0) : 0; },

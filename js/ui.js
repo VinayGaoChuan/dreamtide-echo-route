@@ -483,7 +483,7 @@ function startRun(stageId, mp) {
   G.bg = 'world'; G.paused = false; G.mapHint = null; G.hintId = null;
   G.tutorial = { on: !mp && !m.tutorialDone }; // 联机不显示单人的开局教学清单
   G.homeArrive = null; G.runRescued = []; Home.ensure(m);
-  G.world = new World({
+  const mkWorld = () => new World({
     mode: 'run', W: mp ? 1280 : G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first, vs: vsRun,
     seed: mp ? mp.st.seed : undefined, me: mp ? mp.idx : 0,
     world: mp ? mp.st.world || {} : Home.worldFor(m), goalText: vsRun ? null : Home.runGoalText(m), // 家园改变战场：多人时用房主的世界状态，各端一致
@@ -498,6 +498,9 @@ function startRun(stageId, mp) {
       onMap: (kind, sub) => { m.codex.map[kind] = 1; if (kind === 'npc') m.codex.npcs[sub] = 1; if (kind === 'giant') m.codex.giants[sub] = 1; },
     },
   });
+  G.world = mkWorld();
+  // 联机断线回来要“从开局重算”时：用完全相同的参数再建一个世界（MpDriver 接着按操作记录追帧）
+  Lobby.onReplay = mp ? () => { const old = G.world; if (!old || !G.mpRun || old.done) return false; const nw = mkWorld(); nw.slotPos = old.slotPos; G.world = nw; return true; } : null;
   Sound.setMode('combat'); Sound.setCardMods([]); Sound.focus(false);
   Input.gameActive = true; Input.clearPresses();
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -1236,8 +1239,8 @@ function updateHud(force) {
   setText(R.wood, 'wood', String(h.wood || 0));
   if (L.hg !== h.homeGoal) { L.hg = h.homeGoal; R.hgoal.hidden = !h.homeGoal; R.hgoal.textContent = h.homeGoal || ''; } // HUD 只追踪家园的当前目标
   if (R.team && h.team) { // 联机：队友状态（生命 / 倒下倒计时 / 已离开）
-    const tk = h.team.map((q) => `${q.hp}/${q.maxHp}/${q.alive}/${q.down}/${q.gone}`).join('|');
-    if (L.team !== tk) { L.team = tk; R.team.innerHTML = h.team.filter((q) => !q.me).map((q) => `<div class="${q.gone ? 'gone' : !q.alive ? 'down' : ''}"><i style="background:${q.color}"></i><b>${esc(q.name)}</b>${q.gone ? '已离开' : !q.alive ? '倒下 · 飞进圈里救' : `<span class="hp">${'♥'.repeat(Math.max(0, q.hp))}</span>`}</div>`).join(''); }
+    const tk = h.team.map((q) => `${q.hp}/${q.maxHp}/${q.alive}/${q.down}/${q.gone}/${q.away}`).join('|');
+    if (L.team !== tk) { L.team = tk; R.team.innerHTML = h.team.filter((q) => !q.me).map((q) => `<div class="${q.gone ? 'gone' : !q.alive ? 'down' : ''}"><i style="background:${q.color}"></i><b>${esc(q.name)}</b>${q.gone ? '已离开' : q.away ? '断线中…' : !q.alive ? '倒下 · 飞进圈里救' : `<span class="hp">${'♥'.repeat(Math.max(0, q.hp))}</span>`}</div>`).join(''); }
   }
   setText(R.stream, 'stream', h.stream || '');
   // 三个槽：主炮改造链（只显示最高阶造型 + 各改造等级）/ 支援 / 大招改造

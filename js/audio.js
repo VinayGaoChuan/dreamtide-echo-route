@@ -405,8 +405,9 @@ const Sound = (() => {
     giantWake: () => { tone({ f: 70, f2: 110, dur: 1.6, vol: 0.3, type: 'sine', a: 0.4 }); tone({ f: 140, f2: 220, dur: 1.4, vol: 0.12, type: 'triangle', a: 0.5 }); const t = ctx.currentTime; [57, 64, 69].forEach((m, i) => bell(t + 0.5 + i * 0.18, m, 0.2, bus)); },
   };
 
+  let quiet = false; // 联机断线回来“从开局重算追帧”时静音：重算只为了得到状态，不再放一遍声音
   function sfx(name, o = {}) {
-    if (!ctx || ctx.state !== 'running' || cfg.muted) return;
+    if (!ctx || ctx.state !== 'running' || cfg.muted || quiet) return;
     const now = performance.now(), gap = o.gap !== undefined ? o.gap : 28;
     if (throttle[name] && now - throttle[name] < gap) return;
     // 分层与上限：破甲 / 终结 / 受击优先，短时间内压掉碎声；同屏声部最多 10 个碎声
@@ -422,5 +423,5 @@ const Sound = (() => {
   }
   function focus(on) { if (focusOn === !!on) return; focusOn = !!on; applyVolumes(); }
 
-  return { init, configure, setMode, setBoost, setBpm, setCardMods, sfx, focus, get ready() { return !!ctx; }, get mode() { return mode; } };
+  return { init, configure, setMode, setBoost, setBpm, setCardMods, sfx, focus, get ready() { return !!ctx; }, get mode() { return mode; }, get quiet() { return quiet; }, set quiet(v) { quiet = !!v; } };
 })();

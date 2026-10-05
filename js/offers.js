@@ -134,7 +134,7 @@ Object.assign(World.prototype, {
     for (const q of who) if (q) q.ritualQueue.push({ src, full: !!o.full, q: o.q || 0, x: o.x, y: o.y, device: o.device || 'machine', opts: q === this.player ? o.opts : null, rare: !!o.rare, by: q.idx, obj: o.obj || null, tok, promise: o.promise || null });
   },
   queueOffer(src, o = {}) { this.queueRitual(src, o); }, // 兼容旧调用
-  canRitual() { return this.mode === 'run' && this.state === 'play' && !this.bursting && !(this.surprise && this.surprise.busy) && this.phase === 'fight' && this.player.alive; },
+  canRitual() { return this.mode === 'run' && this.state === 'play' && !this.bursting && !(this.surprise && this.surprise.busy) && this.phase === 'fight' && this.player.alive && !this.player.away; },
   ritualFocus() { const R = this.worldRitual(); return !!(R && R.st !== 'resume'); }, // 全场慢放：只有单人
   myRitualFocus() { const R = this.me.ritual; return !!(R && R.st !== 'resume'); },
   startRitual(q) {
@@ -258,7 +258,7 @@ Object.assign(World.prototype, {
       Sound.sfx('slotLand', { ui: true });
     }
     // 联机：还有在线队友没选完，就先停在“等队友”（世界继续安全减速），都选好了一起恢复
-    const waiting = this.mp && this.players.some((q) => q !== this.player && !q.gone && q.ritual && q.ritual.st !== 'wait' && q.ritual.st !== 'resume');
+    const waiting = this.mp && this.players.some((q) => q !== this.player && !q.gone && !q.away && q.ritual && q.ritual.st !== 'wait' && q.ritual.st !== 'resume');
     this.ritStep(waiting ? 'wait' : 'resume');
   },
   /* 大招键 = 选推荐（不会自动替玩家选）：能凑联动 > 升级已有的 > 第一个；单人时“目标流派”优先（联机不用本机的目标，保证各端一致） */

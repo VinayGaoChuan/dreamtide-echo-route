@@ -93,6 +93,7 @@ Object.assign(World.prototype, {
   updateMap(dt) {
     if (this.mode !== 'run') return;
     this.mapCalm = false; this.mapDwell = false;
+    for (const o of this.mapObjs) { if (o.by !== undefined) { const b = this.players[o.by]; if (!b || b.gone || b.away) o.by = undefined; } } // 拖着矿核 / 吊舱的人断线或离开：转成大家都能接手（v0.11 §8）
     for (const o of this.mapObjs) if (this.state === 'play') this.withPlayer(this.mapActor(o), () => this.updateMapObj(o, dt)); // 谁在操作这个装置，“当前飞机”就是谁
     this.mapObjs = this.mapObjs.filter((o) => !o.gone);
     this.updateOrbs(dt);

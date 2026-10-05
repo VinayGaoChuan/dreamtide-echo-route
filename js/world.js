@@ -109,13 +109,13 @@ class World {
   worldRitual() {
     if (!this.mp) return this.players[0].ritual;
     let any = null;
-    for (const q of this.players) { if (q.gone || !q.ritual) continue; if (q.ritual.st !== 'resume') return q.ritual; any = any || q.ritual; }
+    for (const q of this.players) { if (q.gone || q.away || !q.ritual) continue; if (q.ritual.st !== 'resume') return q.ritual; any = any || q.ritual; } // 断线中的人不拖住全队
     return any;
   }
-  worldRitualBusy() { return this.mp ? this.players.some((q) => !q.gone && (q.ritual || (q.alive && q.ritualQueue.length))) : !!(this.players[0].ritual || this.players[0].ritualQueue.length); }
+  worldRitualBusy() { return this.mp ? this.players.some((q) => !q.gone && !q.away && (q.ritual || (q.alive && q.ritualQueue.length))) : !!(this.players[0].ritual || this.players[0].ritualQueue.length); }
   /* 选好的飞机停在“等队友”；在线的都选好了，一起恢复（倒下 / 离开的人不拖住全队） */
   teamRitualSync() {
-    const act = this.players.filter((q) => !q.gone && q.ritual);
+    const act = this.players.filter((q) => !q.gone && !q.away && q.ritual);
     if (!act.some((q) => q.ritual.st === 'wait') || !act.every((q) => q.ritual.st === 'wait' || q.ritual.st === 'resume')) return;
     for (const q of act) if (q.ritual.st === 'wait') this.withPlayer(q, () => this.ritStep('resume'));
   }
@@ -125,7 +125,7 @@ class World {
     const f = new Float64Array(1), u = new Uint32Array(f.buffer); let h = 0x811c9dc5;
     const mix = (v) => { f[0] = +v || 0; h = Math.imul(h ^ u[0], 16777619); h = Math.imul(h ^ u[1], 16777619); };
     mix(this.t); mix(this.runT); mix(this.rng.s); mix(this.rng.n); mix(this.m.kills); mix(this.beatIdx || 0); mix(this.eid);
-    for (const q of this.players) { mix(q.x); mix(q.y); mix(q.hp); mix(q.stock); mix(q.burst); mix(q.alive ? 1 : 0); mix(q.res.dust); mix(q.picks.length); mix(q.ritual ? 1 : 0); }
+    for (const q of this.players) { mix(q.x); mix(q.y); mix(q.hp); mix(q.stock); mix(q.burst); mix(q.alive ? 1 : 0); mix(q.res.dust); mix(q.picks.length); mix(q.ritual ? 1 : 0); mix(q.away ? 1 : 0); }
     for (const e of this.enemies) { mix(e.id); mix(e.x); mix(e.y); mix(e.hp); }
     if (this.vs) { for (const v of this.vs.score) mix(v); mix(this.vs.t); }
     let nb = 0; this.bullets.each((b) => { nb++; mix(b.x); mix(b.y); }); mix(nb);
@@ -144,13 +144,13 @@ class World {
   /* 人数系数：主目标 / 精英 / Boss 按人数加厚，普通杂兵不变（一发一个的手感不丢） */
   teamK(per) { return 1 + per * Math.max(0, this.np - 1); }
   /* 模拟里默认的“当前飞机”：第一架还活着的（各端一致）；渲染 / HUD 用 this.me */
-  anchor() { return this.players.find((q) => q.alive && !q.gone) || this.players.find((q) => !q.gone) || this.players[0]; }
-  alivePlayers() { return this.players.filter((q) => q.alive && !q.gone); }
+  anchor() { return this.players.find((q) => q.alive && !q.gone && !q.away) || this.players.find((q) => q.alive && !q.gone) || this.players.find((q) => !q.gone) || this.players[0]; }
+  alivePlayers() { return this.players.filter((q) => q.alive && !q.gone && !q.away); } // 在线、能行动的（断线中的不算：救不了人，也不会被打）
   eachPlayer(fn) { const keep = this.player; for (const q of this.players) { if (q.gone) continue; this.player = q; fn(q); } this.player = keep; }
   withPlayer(q, fn) { const keep = this.player; this.player = q || keep; try { return fn(); } finally { this.player = keep; } }
-  nearestPlayer(x, y) { let best = null, bd = 1e18; for (const q of this.players) { if (!q.alive || q.gone) continue; const d = dist2(x, y, q.x, q.y); if (d < bd) { bd = d; best = q; } } return best || this.anchor(); }
+  nearestPlayer(x, y) { let best = null, bd = 1e18; for (const q of this.players) { if (!q.alive || q.gone || q.away) continue; const d = dist2(x, y, q.x, q.y); if (d < bd) { bd = d; best = q; } } return best || this.anchor(); }
   pickTarget() { const L = this.alivePlayers(); return L.length ? spick(L) : this.anchor(); }
-  setInput(i, inp) { const I = this.inputs[i]; if (!I) return; if (inp.gone) { this.dropPlayer(i); return; } I.mx = inp.mx || 0; I.my = inp.my || 0; I.focus = !!inp.focus; I.burst = I.burst || !!inp.burst; I.dx = inp.dx || 0; I.dy = inp.dy || 0; }
+  setInput(i, inp) { const I = this.inputs[i]; if (!I) return; if (inp.gone) { this.dropPlayer(i); return; } this.setAway(i, !!inp.away); I.mx = inp.mx || 0; I.my = inp.my || 0; I.focus = !!inp.focus; I.burst = I.burst || !!inp.burst; I.dx = inp.dx || 0; I.dy = inp.dy || 0; }
   emit(type, data) { this.events.push(Object.assign({}, data || {}, { type })); } // 事件名永远不被数据里的同名字段覆盖
   later(t, fn) { this.timers.push({ t, fn }); }
   highlight() { this.m.highlights++; }
@@ -233,6 +233,7 @@ class World {
     p.inv = Math.max(0, p.inv - dt); p.hurtT = Math.max(0, p.hurtT - dt * 3); p.cloudCd = Math.max(0, p.cloudCd - dt); p.candy = Math.max(0, p.candy - dt);
     p.blinkT -= dt; if (p.blinkT <= 0) { p.blink = 1; p.blinkT = 2 + Math.random() * 3; } p.blink = Math.max(0, p.blink - dt * 8); // 眨眼只是表现
     if (!p.alive) { this.downTick(p, dt); I.burst = false; return; }
+    if (p.away) { p.inv = Math.max(p.inv, 0.2); p.vx = p.vy = 0; I.burst = false; I.dx = I.dy = 0; return; } // 断线占位：原地不动、不开火
     let mx = 0, my = 0, dx = I.dx || 0, dy = I.dy || 0;
     const lock = this.ritual && this.ritual.st !== 'choose' && this.ritual.st !== 'resume'; // 仪式里飞机稳住，只有选择阶段能动
     if (this.mode === 'run' && this.state === 'play' && !lock) { mx = I.mx; my = I.my; }
@@ -303,7 +304,7 @@ class World {
   }
   hurtPlayer(n, src, who) {
     const p = who || this.player;
-    if (!p.alive || p.inv > 0 || this.state !== 'play' || this.mode === 'preview') return;
+    if (!p.alive || p.away || p.inv > 0 || this.state !== 'play' || this.mode === 'preview') return;
     const inRit = !!(p.ritual && p.ritual.st !== 'resume');
     if (!inRit && p === this.me) { const c = hurtCat(src); this.m.hurt = this.m.hurt || {}; this.m.hurt[c] = (this.m.hurt[c] || 0) + 1; this.m.lastHurt = c; } // 受伤来源：结算复盘用（本机这架）
     if (inRit) return; // 升级仪式期间不会受伤
@@ -338,7 +339,15 @@ class World {
       this.emit('revive', { idx: p.idx, by: near.idx });
     }
   }
-  /* 多人：有人断线 —— 从约定好的那一帧起移除这架飞机 */
+  /* 多人：断线中（v0.11 §8 保留席位）——从约定好的那一帧起这架飞机原地占位：不动、不开火、不受伤、敌人不瞄它，不拖住全队升级；回来后接着玩 */
+  setAway(i, on) {
+    const p = this.players[i]; if (!p || p.gone || !!p.away === on) return;
+    p.away = on;
+    if (on) { p.wingmen = []; this.text(`${p.name || '队友'} 断线中…`, p.x, p.y - 40, '#ffb2a8', 16, 4); this.emit('away', { idx: i }); }
+    else { p.inv = Math.max(p.inv, 2); this.syncWingmenOf(p); this.text(`${p.name || '队友'} 回来了`, p.x, p.y - 40, '#9ff2c8', 16, 4); this.emit('back', { idx: i }); }
+  }
+  syncWingmenOf(p) { this.withPlayer(p, () => this.syncWingmen()); }
+  /* 多人：有人断线太久 / 退出 —— 从约定好的那一帧起移除这架飞机 */
   dropPlayer(i) {
     const p = this.players[i]; if (!p || p.gone) return;
     p.gone = true; p.alive = false; p.wingmen = []; p.ritual = null; p.ritualQueue = []; // 离开的人不再参与升级确认，其他人照常继续
@@ -1246,7 +1255,7 @@ class World {
   hud() {
     const p = this.me, B = this.hudBuild || this.buildSummary(); // 槽位按“已经飞进槽里”的状态显示；生命 / 大招看本机这架
     const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: p.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual && p.alive, down: !p.alive && !p.gone, save: !p.alive && !p.gone ? clamp((p.saveT || 0) / RESCUE.dwell, 0, 1) : 0,
-      team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, down: !q.alive && !q.gone, me: q === p, color: q.color })) : null,
+      team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, away: !!q.away, down: !q.alive && !q.gone, me: q === p, color: q.color })) : null,
       gun: Object.assign({}, B.gun), support: B.support ? Object.assign({}, B.support) : null, bmod: B.bmod ? Object.assign({}, B.bmod) : null, recent: (B.recent || []).slice(),
       syns: B.links.slice(), stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(p.res.dust), wood: Math.floor(p.res.wood), homeGoal: this.goalText, companions: (this.companions || []).map((c) => c.id),
       moved: p.moved, stage: this.stageId, phase: this.phase, candy: p.candy, ritual: this.myRitualFocus(),
@@ -1324,7 +1333,11 @@ class World {
   }
   drawPlayer(g, isMe = true) {
     const p = this.player, t = this.t, C = this.trailColors;
-    if (this.np > 1) { // 多人：队友半透明 + 名字，倒下的显示复活倒计时
+    if (this.np > 1 && p.away && !p.gone) { // 断线占位：半透明 + 标签
+      g.save(); g.globalAlpha = 0.3; drawPlane(g, p.planeId, p.x, p.y, 0.8, t, {}); g.restore();
+      drawStepPill(g, p.x, p.y - 44, isMe ? '网络恢复中…' : `${p.name || '队友'} · 断线中`, '#ffb2a8', 0.85); return;
+    }
+    if (this.np > 1) { // 多人：队友半透明 + 名字，倒下的显示救援圈
       if (!p.alive && !p.gone) {
         g.save(); g.globalAlpha = 0.35; drawPlane(g, p.planeId, p.x, p.y, 0.8, t, { hurt: true }); g.restore();
         g.fillStyle = 'rgba(159,242,200,0.07)'; g.beginPath(); g.arc(p.x, p.y, RESCUE.r, 0, TAU); g.fill();

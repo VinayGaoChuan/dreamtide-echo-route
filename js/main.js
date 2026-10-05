@@ -117,7 +117,10 @@
   }
   NetTicker.on((now) => { if (G.mpLoop) { try { mpTick(now); drainWorldEvents(); } catch (e) { console.error('[联机] 计时', e); } } });
   function mpWaitText() {
-    const L = G.mpLoop, S = Lobby.session; if (!L || !S || L.waitT < 0.35) return '';
+    const L = G.mpLoop, S = Lobby.session; if (!L || !S) return '';
+    if (S.replaying) return `正在追上队友… ${S.replayPct || 0}%`;
+    if (S.awayMe) return '网络断开过，正在恢复…';
+    if (L.waitT < 0.35) return '';
     const who = S.waitingFor().map((j) => (Lobby.roster[j] && Lobby.roster[j].name) || `${j + 1}P`);
     return who.length ? `等待 ${who.join('、')} 的操作…` : '';
   }

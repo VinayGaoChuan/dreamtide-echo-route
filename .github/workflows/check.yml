@@ -27,6 +27,11 @@ jobs:
         run: node tools/mp-sim.js js all 2 direct
       - name: 联机网络（3 人、20% 丢包、中途掉线）
         run: node tools/mp-sim.js js 1-2 3 net 0.2 100 5 2@3000
+      - name: 联机断网（v0.11 §8：断网 30 秒先判断线中、回来追帧恢复；房主断网同样；超过 60 秒才移除）
+        run: |
+          NETSEED=3 node tools/mp-sim.js js 1-2 3 net 0.1 100 5 '1@2000~900'
+          NETSEED=5 node tools/mp-sim.js js 1-2 3 net 0.1 100 5 '0@2000~900'
+          NETSEED=7 node tools/mp-sim.js js vs 2 net 0.1 100 5 '1@3000~600'
       - name: 联机对抗（2 人打满三段、3 人网络丢包，逐帧比对分数和结局）
         run: |
           node tools/mp-sim.js js vs 2 direct
