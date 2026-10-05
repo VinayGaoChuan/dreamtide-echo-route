@@ -114,7 +114,10 @@ function hello(conn, m) {
   const old = C.get(id);
   if (old) { old.conn.peer = null; close(old.conn, 4000); } // 同一个标签页重连：顶掉旧连接，身份不变
   if (C.size >= LIMIT.perChannel) { send(conn, { t: 'err', code: 'full' }); close(conn, 4001); return; }
-  const P = { id, ch, conn, presence: old ? old.presence : {}, json: old ? old.json : '{}', at: Date.now(), sent: new Map() };
+  // 重连的客户端在 hello 里带着自己的状态（p）：先用它，回给他的名单马上就是房间里的完整状态（不会先收到一份大厅摘要）
+  let pres = old ? old.presence : {}, pj = old ? old.json : '{}';
+  if (m.p && typeof m.p === 'object' && !Array.isArray(m.p)) { const j = JSON.stringify(m.p); if (Buffer.byteLength(j) <= LIMIT.presence) { pres = m.p; pj = j; } }
+  const P = { id, ch, conn, presence: pres, json: pj, at: Date.now(), sent: new Map() };
   P.fj = fieldsJson(P.presence); P.lfj = fieldsJson(liteView(P.presence));
   conn.peer = P; C.set(id, P); markDirty(P, false);
   send(conn, { t: 'hi', you: id, build: pageBuild(), peers: [...C.values()].filter((q) => q !== P).map((q) => ({ peer: q.id, p: JSON.parse(viewJson(P, q)), at: q.at })) });

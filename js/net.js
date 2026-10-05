@@ -200,7 +200,7 @@ class WsNet {
     if (this.closed) return;
     let ws; try { ws = new WebSocket(this.url); } catch (e) { this.redial(); return; }
     this.ws = ws;
-    ws.onopen = () => { this.open = true; this.synced = false; this.retry = 0; this.lastPong = this.openAt = performance.now(); ws.send(JSON.stringify({ t: 'hello', id: this.selfId, ch: this.ch })); this.pingAt = 0; if (Object.keys(this.me).length) this.pending = Object.assign({}, this.me); this.emit(); };
+    ws.onopen = () => { this.open = true; this.synced = false; this.retry = 0; this.lastPong = this.openAt = performance.now(); ws.send(JSON.stringify(Object.assign({ t: 'hello', id: this.selfId, ch: this.ch }, Object.keys(this.me).length ? { p: this.me } : {}))); this.pingAt = 0; if (Object.keys(this.me).length) this.pending = Object.assign({}, this.me); this.emit(); }; // 重连时握手直接带上自己的状态：服务器回的名单马上就是房间里的完整状态
     ws.onmessage = (ev) => this.onMsg(ev.data);
     ws.onclose = () => { if (this.ws !== ws) return; const was = this.open; this.open = false; this.synced = false; this.ws = null; if (was) { this.others.clear(); this.emit(); } this.redial(); };
     ws.onerror = () => {};
@@ -214,7 +214,7 @@ class WsNet {
       for (const k in q.d || {}) { if (q.d[k] === null) delete pres[k]; else pres[k] = q.d[k]; }
       this.others.set(q.peer, { presence: Object.freeze(pres), updatedAt: Date.now() });
     };
-    if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.serverBuild = m.build || null; this.others.clear(); (m.peers || []).forEach(put); this.synced = true; this.emit(); }
+    if (m.t === 'hi') { this.selfId = m.you || this.selfId; this.serverBuild = m.build || null; this.others.clear(); (m.peers || []).forEach(put); this.synced = true; this.syncedAt = performance.now(); this.emit(); }
     else if (m.t === 'u') { (m.peers || []).forEach(put); this.emit(); }
     else if (m.t === 'bye') { this.others.delete(m.peer); this.emit(); }
     else if (m.t === 'pong') {
@@ -426,10 +426,18 @@ const Lobby = {
       if (mine && this.seenLs.get(j) !== ls) { this.seenLs.set(j, ls); S.receive(j, ls); if (typeof ls.rt === 'number') this.peerRtt[j] = ls.rt; }
     }
     S.isHost = S.hostIndex(connected) === S.me; // 房主走了（或断线中），名单里下一位在线的接手
-    S.hostCheckDrops(connected, quit);
+    if (!this.net.syncedAt || performance.now() - this.net.syncedAt > 3000) S.hostCheckDrops(connected, quit); // 刚（重新）连上的几秒不判别人掉线：等名单和操作帧都到齐
     this.connectedNow = connected;
   },
   myRtt() { const n = this.net; return n ? Math.round(n.rttHi || n.rtt || 0) : 0; },
+  /* 队友那边这一局已经结束了（例如我断线期间他们打完或失败）：我自己确实连着，却 15 秒没收到任何队友的新操作，本机又卡着等 → 本机也结束。
+     自己断网时不算（那是在等重连，席位还保留着） */
+  orphaned() {
+    const S = this.session; if (!S || !this.net || !this.net.connected() || Date.now() - this.sessionAt < 20000) return false;
+    if (this.net.syncedAt && performance.now() - this.net.syncedAt < 10000) return false; // 刚重连上：先等队友的操作帧到
+    let last = 0; for (let j = 0; j < S.n; j++) if (j !== S.me && S.drops[j] === undefined) last = Math.max(last, S.heard[j] || 0);
+    return S.waitingFor().length > 0 && Date.now() - last > 15000;
+  },
   /* 本机操作提前多少帧发出（自适应缓冲）：按“我的延迟 + 最慢队友的延迟”实时估算操作经服务器到对方要多久。
      变慢马上加长，变快每 2 秒才缩短一帧，避免来回抖；只改操作发出的早晚，不改操作内容，所以不影响同步。 */
   leadFrames(now) {

@@ -107,6 +107,10 @@
       toast('网络断开太久，已经退出这一局', '#ffb2a8', null, 4000);
       w.done = true; const r = w.result(false); r.abandoned = true; Lobby.leave(); onRunEnd(r); return;
     }
+    if (Lobby.orphaned()) { // 队友那边这一局已经结束了，本机等不到后面的操作
+      toast('队友那边这一局已经结束了', '#ffe38a', null, 4000);
+      w.done = true; const r = w.result(false); r.abandoned = true; onRunEnd(r); return;
+    }
     // 本机操作：拖动累计量化成每帧 ±31 像素；暂停 / 菜单 / 后台时发中性操作
     const active = Input.gameActive && !G.paused && !document.hidden;
     MpDriver.tick(w, L, S, now, () => {

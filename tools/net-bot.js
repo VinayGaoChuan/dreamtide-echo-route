@@ -87,6 +87,7 @@ async function main() {
       };
       function tick() {
         const now = performance.now();
+        if (B.w && !B.w.done && Lobby.session && Lobby.orphaned()) { const S = Lobby.session; console.log('[orphan]', __k, JSON.stringify({ t: Math.round(performance.now()), synced: Lobby.net.synced, open: Lobby.net.open, heard: S.heard.map((h) => h ? Date.now() - h : null), wait: S.waitingFor(), sim: S.simFrame, aways: S.aways, sessionAge: Date.now() - Lobby.sessionAt, peers: Lobby.net.peers().length })); B.orphan = true; B.w.done = true; Lobby.endGame(); } // 队友那边已经结束
         if (B.w && !B.w.done && Lobby.session) {
           const stalled = MpDriver.tick(B.w, B.L, Lobby.session, now, () => bot(B.w, Lobby.session.me)); B.w.events.length = 0;
           if (stalled) { B.stallMs += now - B.prev; B.win.stallMs += now - B.prev; } B.maxWait = Math.max(B.maxWait, B.L.waitT); B.win.maxWait = Math.max(B.win.maxWait, B.L.waitT);
@@ -107,7 +108,7 @@ async function main() {
           stallPct: L && L.ticks ? +((L.stallTicks || 0) / L.ticks * 100).toFixed(1) : null, rttAvg: avg(B.rtts.filter((x) => x !== null)), rttMax: B.rtts.length ? Math.max(...B.rtts.filter((x) => x !== null)) : null,
           lead: B.leads.length ? Math.min(...B.leads.filter((x) => x !== null)) + '~' + Math.max(...B.leads.filter((x) => x !== null)) : null,
           beat: w ? w.beatIdx : null, done: !!(w && w.done), win: B.res ? B.res.win : null, desync: S ? S.desync : null, rescues: B.rescues.join(','), hash: S ? [...S.hashLog].slice(-1)[0] : null,
-          stuck: Lobby.net.stuck || 0, replays: B.replays || 0, aways: S ? S.aways.map((L) => L.map((r) => r[0] + '-' + (r[1] === Infinity ? '?' : r[1])).join(',')).join('|') : null, kicked: S ? S.kicked !== undefined : null, vs: B.res && B.res.vs ? B.res.vs.scores.join('/') : w && w.vs ? w.vs.score.map(Math.floor).join('/') : null, gone: w ? w.players.map((q) => q.gone ? 1 : 0).join('') : null, host: S ? S.isHost : null, left: !!B.left };
+          stuck: Lobby.net.stuck || 0, orphan: !!B.orphan, replays: B.replays || 0, aways: S ? S.aways.map((L) => L.map((r) => r[0] + '-' + (r[1] === Infinity ? '?' : r[1])).join(',')).join('|') : null, kicked: S ? S.kicked !== undefined : null, vs: B.res && B.res.vs ? B.res.vs.scores.join('/') : w && w.vs ? w.vs.score.map(Math.floor).join('/') : null, gone: w ? w.players.map((q) => q.gone ? 1 : 0).join('') : null, host: S ? S.isHost : null, left: !!B.left };
       }`, ctx);
     bots.push(ctx);
   }
@@ -146,8 +147,12 @@ async function main() {
     const d = st[DARK.k];
     if (d.kicked) fail('断网的人被移出了这一局（应该保留席位）');
     if (DARK.dur * 1000 > 15000 + 2000 && !(d.aways || '').split('|')[DARK.k]) fail('断网超过服务器超时却没有被判“断线中”');
-    if ((d.aways || '').includes('?')) fail('断线中一直没有恢复');
-    if (!finished && Math.abs(d.frame - st.find((x, k) => k !== DARK.k).frame) > 60) fail('断网的人回来后没有追上');
+    const othersEnded = st.some((x, k) => k !== DARK.k && x.done) && d.orphan; // 断网期间队友那边这局已经结束（例如一个人被打倒）：回来后体面结束，不算协议问题
+    if (othersEnded) console.log('（断网期间队友那边这局先结束了；断网的人回来后收到“这一局已经结束”）');
+    else {
+      if ((d.aways || '').includes('?')) fail('断线中一直没有恢复');
+      if (!finished && Math.abs(d.frame - st.find((x, k) => k !== DARK.k).frame) > 60) fail('断网的人回来后没有追上');
+    }
   }
   if (HOST_LEAVE !== null) { // 房主离开：其余的人继续（不被踢回菜单），名单里下一位接手房主，各端都把房主标成“离开”
     if (!rest.every((s) => (s.gone && s.gone[0] === '1') || (s.aways || '').split('|')[0])) fail('房主断开后没有在各端被判断线中 / 移出这一局'); // 意外断开先保留席位 60 秒，之后移出
