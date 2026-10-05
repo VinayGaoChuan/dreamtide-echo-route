@@ -129,7 +129,7 @@ const sameRoom = (a, b) => { const r = roomOf(a); return !!r && r === roomOf(b);
 /* 房间外的人只需要大厅列表要用的字段（不带操作帧和资料） */
 function liteView(pres) {
   const mp = pres.mp; if (!mp || typeof mp !== 'object') return {};
-  return { mp: { code: mp.code, host: mp.host, name: mp.name, plane: mp.plane, stage: mp.stage, mode: mp.mode, start: mp.start ? { id: mp.start.id } : null } };
+  return { mp: { code: mp.code, host: mp.host, name: mp.name, plane: mp.plane, stage: mp.stage, mode: mp.mode, stat: mp.stat, start: mp.start ? { id: mp.start.id, peers: Array.isArray(mp.start.peers) ? mp.start.peers.slice(0, 4) : [] } : null } }; // peers：刷新回来的人认得出“这是我那一局”
 }
 function fieldsJson(obj) { const o = {}; for (const k of Object.keys(obj)) o[k] = JSON.stringify(obj[k]); return o; }
 function viewFJ(rcv, q) { return sameRoom(rcv, q) ? q.fj : q.lfj; }

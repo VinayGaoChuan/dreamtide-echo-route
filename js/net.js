@@ -8,8 +8,11 @@
      （飞机原地不动、不开火、不受伤、不拖住全队升级），其他人继续打。60 秒内他回来：先按大家认定的操作记录追上（必要时从开局重算一遍），
      再发“准备好了”，房主宣布“从第 R 帧起恢复”；超过 60 秒才宣布“从第 G 帧起移除”。所有决定都写进在场状态、谁都转发，房主走了也不丢。 */
 
-const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, silentAfter: 2500, runAhead: 30, catchUp: 4, seat: 60000, backLead: 45, dropLead: 90 };
-const MP_PROTO = 3; // 3：断线保留席位（断线区间 w / 恢复请求 ry / 断线占位操作）；2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
+const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAfter: 5000, dropGrace: 1500, silentAfter: 2500, runAhead: 30, catchUp: 4, seat: 60000, backLead: 45, dropLead: 90, lagWindow: 240 };
+const SS_ID = 'dreamtide.mp.id', SS_ROOM = 'dreamtide.mp.room'; // 本标签页的联机身份和所在房间（刷新后回到原对局）
+function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
+function ssSet(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* 隐私模式等：只是不能刷新回来 */ } }
+const MP_PROTO = 4; // 4：刷新回到原对局（rj）、准备确认；3：断线保留席位（断线区间 w / 恢复请求 ry / 断线占位操作）；2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
 
 /* ---------- 操作编码：一帧 5 个字符 ---------- */
 const NetCodec = {
@@ -39,10 +42,12 @@ class LockstepSession {
     this.trimmed = 0; this.budget = o.budget || 3000; // budget：一份在场状态里留给操作帧的字符数（平台上限 4 KiB）
     this.aways = Array.from({ length: this.n }, () => []); // 每个玩家的断线区间 [F, R)，R 未定时是 Infinity
     this.awayAt = Array(this.n).fill(0); this.backReq = Array(this.n).fill(undefined); this.ready = null; // ready：本机断线回来后“从第几帧起可以恢复”
+    this.rejoining = !!o.rejoin; this.rejoinReq = Array(this.n).fill(false); // 刷新页面回来：先不发新操作，等大家把我判成断线中、追上后再恢复
     this.isHost = !!o.isHost; this.clock = o.clock || (() => Date.now());
   }
   /* 本机这一帧的操作：按真实时间每帧采一次（模拟卡住时也继续攒，最多领先 runAhead 帧，避免两边互相等成车队） */
   sample(inp) {
+    if (this.rejoining) return false; // 刷新回来：旧的操作由队友补发回来，新操作要等宣布恢复的那一帧
     if (this.nextLocal > this.simFrame + this.delay + LOCKSTEP.runAhead) return false;
     this.inputs[this.me][this.nextLocal++] = NetCodec.encodeFrame(inp);
     this.advanceHave(this.me);
@@ -83,6 +88,7 @@ class LockstepSession {
     if (Array.isArray(msg.d)) for (const [j, F] of msg.d) { if (j === this.me) { if (this.kicked === undefined) this.kicked = F; } else if (this.drops[j] === undefined) this.drops[j] = F; } // 别人把我判成掉线了：本机这局也结束
     if (Array.isArray(msg.w)) for (const w of msg.w) this.noteAway(w);
     if (typeof msg.ry === 'number' && this.openAway(from)) this.backReq[from] = msg.ry; // 断线的人回来了：从这一帧起可以恢复
+    if (msg.rj && !this.openAway(from)) this.rejoinReq[from] = true; // 刷新页面回来的人：请判定的人先把他判成断线中
   }
   /* 断线区间：[j, F, R|null]。区间只会新增，R 只会从“未定”变成确定的帧（各端最终一致） */
   noteAway(w) {
@@ -99,7 +105,7 @@ class LockstepSession {
     const L = this.inputs[this.me];
     for (let f = r[0]; f < r[1]; f++) L[f] = NetCodec.AWAY;
     if (this.nextLocal < r[1]) this.nextLocal = r[1];
-    this.advanceHave(this.me); this.awayMe = null; this.ready = null;
+    this.advanceHave(this.me); this.awayMe = null; this.ready = null; this.rejoining = false;
   }
   /* 发布：所有人里还有谁缺哪些帧，就把那段帧带上（每段最多 window 帧）。
      跟得上的人按他们里收得最少的那位补一段；落后很多的人（断线刚回来、正在追帧）单独补一段，不拖住其他人；
@@ -117,7 +123,7 @@ class LockstepSession {
       if (head === Infinity && lag === Infinity) continue;
       if (head === Infinity) { head = lag; lag = Infinity; }
       if (head < this.have[j]) seg.push([j, head, Math.min(this.have[j], head + LOCKSTEP.window)]);
-      if (lag < head) seg.push([j, lag, Math.min(head, lag + LOCKSTEP.window)]);
+      if (lag < head) seg.push([j, lag, Math.min(head, lag + LOCKSTEP.lagWindow)]); // 落后很多的人（刷新 / 断线回来）一次多补一些，追得快
     }
     // 预算不够（4 人 + 网络很差）时每段少带几帧：先补最早缺的，下一份再补后面的
     let per = LOCKSTEP.window; const cost = () => seg.reduce((c, x) => c + Math.min(x[2] - x[1], per) * 5 + 16, 0);
@@ -128,12 +134,13 @@ class LockstepSession {
     if (Object.keys(this.drops).length) msg.d = Object.entries(this.drops).map(([j, F]) => [+j, F]); // 已定下的移除大家都转发，房主走了也不会丢
     const w = []; this.aways.forEach((L, j) => { for (const r of L) w.push([j, r[0], r[1] === Infinity ? null : r[1]]); }); if (w.length) msg.w = w; // 断线区间同样大家转发
     if (this.ready !== null && this.awayMe) msg.ry = this.ready;
+    if (this.rejoining) msg.rj = 1;
     this.send(msg);
     this.trimOld();
   }
   trimOld() {} // 操作记录整局保留（每帧几个字符，十分钟也就几百 KB）：断线回来的人要按完整记录从开局重算
   /* 谁来做判定：名单里第一个在线、没被移除、也不在“断线中”的人（断线回来的人要等别人宣布恢复，不能自己判自己） */
-  hostIndex(connected) { return connected.findIndex((c, j) => c && this.drops[j] === undefined && !this.openAway(j)); }
+  hostIndex(connected) { return connected.findIndex((c, j) => c && this.drops[j] === undefined && !this.openAway(j) && !(j === this.me ? this.rejoining : this.rejoinReq[j])); }
   /* 房主：有人断线 → 过了宽限先判“断线中”（从大家都还没收到他操作的那一帧起，席位保留）；
      他回来并追上后发来“准备好了”→ 宣布从第 R 帧起恢复；席位保留到时还没回来 → 留出提前量宣布从第 G 帧起移除 */
   hostCheckDrops(connected, quit) {
@@ -143,7 +150,11 @@ class LockstepSession {
       if (j === this.me || this.drops[j] !== undefined) continue;
       const open = this.openAway(j);
       if (connected[j]) {
-        if (open && this.backReq[j] !== undefined) { open[1] = Math.max(this.backReq[j], this.simFrame + LOCKSTEP.backLead, open[0]); this.backReq[j] = undefined; }
+        if (!open && this.rejoinReq[j]) { // 刷新回来、还没被判断线：从大家都没收到他操作的那一帧起判成断线中，等他追上
+          let F = this.have[j];
+          for (let k = 0; k < this.n; k++) if (k !== j && connected[k] && this.peerAck[k]) F = Math.max(F, this.peerAck[k][j]);
+          this.aways[j].push([F, Infinity]); this.awayAt[j] = now; this.rejoinReq[j] = false;
+        } else if (open && this.backReq[j] !== undefined) { open[1] = Math.max(this.backReq[j], this.simFrame + LOCKSTEP.backLead, open[0]); this.backReq[j] = undefined; this.rejoinReq[j] = false; }
         continue;
       }
       if (!this.left[j]) { this.left[j] = now; continue; }
@@ -191,7 +202,8 @@ const WS_STUCK_MS = 3500;
 class WsNet {
   constructor(url, ch) {
     this.kind = 'ws'; this.url = url; this.ch = ch; this.subs = []; this.others = new Map(); this.me = {}; this.pending = null;
-    this.selfId = 'W' + Math.random().toString(36).slice(2, 12); this.open = false; this.closed = false; this.retry = 0; this.rtt = null; this.sentAt = 0; this.pingAt = 0;
+    this.selfId = ssGet(SS_ID) || 'W' + Math.random().toString(36).slice(2, 12); ssSet(SS_ID, this.selfId); // 同一个标签页刷新后身份不变
+    this.open = false; this.closed = false; this.retry = 0; this.rtt = null; this.sentAt = 0; this.pingAt = 0;
     this.clock = []; this.clockOff = null; // 对时：最近几次 ping 里延迟最小的那次最准
     this.off = NetTicker.on((now) => this.tick(now));
     this.dial();
@@ -301,7 +313,7 @@ const MpDriver = {
       if (L.steps % SP === 0 && S.simFrame % LOCKSTEP.hashEvery === 0) S.simulated(w.stateHash());
       if (S.replaying) { w.events.length = 0; if (performance.now() > until) break; }
     }
-    if (S.replaying && (target - L.steps < SP * 6 || stalled || w.done)) { S.replaying = false; Sound.quiet = false; }
+    if (S.replaying && (target - L.steps < SP * 6 || w.done || (stalled && !S.rejoining && !S.awayMe))) { S.replaying = false; Sound.quiet = false; } // 刷新 / 断线回来时操作记录是一批批补到的：中途缺帧接着等，追上才算完
     S.replayPct = S.replaying ? Math.min(99, Math.floor((L.steps / Math.max(1, target)) * 100)) : 0;
     // 断线回来：追上了就告诉大家“从这一帧起可以恢复”，房主据此宣布恢复帧
     if (S.awayMe && !S.replaying && !S.needReplay && target - L.steps < SP * 8) S.ready = Math.max(S.nextLocal, S.simFrame + S.delay);
@@ -352,28 +364,36 @@ const Lobby = {
       const m = p.presence && p.presence.mp; if (!m || typeof m.code !== 'string') continue;
       const r = rooms.get(m.code) || { code: m.code, members: [], host: null, started: false, stage: null, mode: 'coop' };
       const ls = p.presence.ls;
-      r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(ls && ls.g), rtt: typeof m.rtt === 'number' ? m.rtt : null });
-      if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; r.mode = m.mode === 'vs' ? 'vs' : 'coop'; }
+      r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(ls && ls.g), rtt: typeof m.rtt === 'number' ? m.rtt : null, rdy: m.rdy || null });
+      if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; r.mode = m.mode === 'vs' ? 'vs' : 'coop'; r.stat = m.stat === 'fair' ? 'fair' : 'real'; r.cfg = m.cfg || null; r.cd = m.cd || null; r.startId = m.start ? m.start.id : null; r.players = m.start && Array.isArray(m.start.peers) ? m.start.peers : m.start && Array.isArray(m.start.roster) ? m.start.roster.map((x) => x.peer) : []; }
       rooms.set(m.code, r);
     }
     for (const r of rooms.values()) r.members.sort((a, b) => (b.host - a.host) || (a.peer < b.peer ? -1 : a.peer > b.peer ? 1 : 0));
     return [...rooms.values()].filter((r) => r.host);
   },
-  me(patch) { if (!this.net) return; this.net.presence({ mp: Object.assign({}, this.myMp(), patch) }); },
+  me(patch) { if (!this.net) return; this.net.presence({ mp: Object.assign({}, this.myMp(), patch) }); this.saveRoom(); },
   create(profile) { this.code = Math.random().toString(36).slice(2, 6).toUpperCase(); this.isHost = true; this.me(Object.assign({ code: this.code, host: true, start: null }, profile)); this.net.presence({ ls: null }); },
-  join(code, profile) { this.code = code; this.isHost = false; this.me(Object.assign({ code, host: false, start: null }, profile)); this.net.presence({ ls: null }); },
-  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null, ls: null }); this.code = null; this.isHost = false; this.gameId = null; },
+  join(code, profile) { this.code = code; this.isHost = false; this.me(Object.assign({ code, host: false, start: null, rdy: null }, profile)); this.net.presence({ ls: null }); },
+  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null, ls: null }); this.code = null; this.isHost = false; this.gameId = null; this.saveRoom(); },
+  /* 刷新回到原对局：本标签页记住房间号、自己的在场状态（房主还带着开局单）和正在打的局号 */
+  saveRoom() { ssSet(SS_ROOM, this.code ? JSON.stringify({ code: this.code, isHost: this.isHost, mp: this.myMp(), gameId: this.session ? this.gameId : null, at: Date.now() }) : null); },
+  savedRoom() { try { const d = JSON.parse(ssGet(SS_ROOM) || 'null'); return d && d.code && Date.now() - d.at < 20 * 60000 ? d : null; } catch (e) { return null; } },
+  resume(d) {
+    this.code = d.code; this.isHost = !!d.isHost; this.resumeGame = d.gameId || null; this.net.presence({ mp: Object.assign({}, d.mp), ls: null }); this.saveRoom();
+    this.resumeWait = true; setTimeout(() => { this.resumeWait = false; this.changed(); }, 6000); // 刚刷新回来：房间成员的状态还在路上，先别判“房主离开了”
+  },
   room() { return this.openRooms().find((x) => x.code === this.code) || null; },
   members() { const r = this.room(); return r ? r.members : []; },
   /* 房主开局：把名单（含每人的局外属性）写进自己的在场状态，大家看到就各自开始 */
-  start(stage, delay, mode) {
+  start(stage, delay, mode, stat) {
     if (!this.isHost) return false;
     const ms = this.members().slice(0, MP_MAX); if (ms.length < 2) return false;
-    const roster = ms.map((m) => ({ peer: m.peer, name: m.name, plane: m.plane, stats: (m.prof && m.prof.s) || null, ultCap: (m.prof && m.prof.u) || 1, cos: (m.prof && m.prof.c) || {} }));
+    const fair = mode === 'vs' && stat === 'fair'; // 统一属性：所有人按 1 级基础属性、大招容量 1（关掉局外成长差距）
+    const roster = ms.map((m) => ({ peer: m.peer, name: m.name, plane: m.plane, stats: fair ? compactStats(planeStats(null, m.plane)) : (m.prof && m.prof.s) || null, ultCap: fair ? 1 : (m.prof && m.prof.u) || 1, cos: (m.prof && m.prof.c) || {} }));
     const id = Math.random().toString(36).slice(2, 8), seed = (Math.random() * 4294967296) >>> 0;
     const now = this.net.serverNow ? this.net.serverNow() : null, at = now === null ? null : Math.round(now + 900); // 约 0.9 秒后大家在同一刻开局
     const vs = mode === 'vs'; // 对抗（v0.11）：每人一条航道、三段计分；关卡数值按第一关
-    this.me({ stage, mode: vs ? 'vs' : 'coop', start: { id, stage: vs ? '1-1' : stage, mode: vs ? 'vs' : 'coop', seed, roster, at, delay: delay || this.autoDelay(ms), world: vs ? {} : this.mergeWorld(ms) } }); // 家园改变的世界状态：合并房间里每个人的（写进开局单，各端一致）
+    this.me({ stage, mode: vs ? 'vs' : 'coop', cd: null, start: { id, stage: vs ? '1-1' : stage, mode: vs ? 'vs' : 'coop', stat: fair ? 'fair' : 'real', peers: roster.map((r) => r.peer), seed, roster, at, delay: delay || this.autoDelay(ms), world: vs ? {} : this.mergeWorld(ms) } }); // 家园改变的世界状态：合并房间里每个人的（写进开局单，各端一致）
     this.changed(); // 房主自己马上开局（不用等服务器把自己的状态转回来）
     return true;
   },
@@ -396,6 +416,7 @@ const Lobby = {
   hostStart() { const r = this.room(); if (!r) return null; const host = this.net.peers().find((p) => p.peer === r.host); return (host && host.presence.mp && host.presence.mp.start) || null; },
   changed() {
     const st = this.code ? this.hostStart() : null;
+    if (st && st.id === this.resumeGame && st.at && this.net.serverNow && this.net.serverNow() === null) { clearTimeout(this.clockWait); this.clockWait = setTimeout(() => this.changed(), 300); return; } // 刷新回来：先和服务器对好时钟，才知道“现在是第几帧”
     if (st && st.id !== this.gameId && Array.isArray(st.roster) && st.roster.some((x) => x.peer === this.selfId()) && this.onStart) { if (this.onStart(st) !== false) this.gameId = st.id; } // 还在上一局收尾就等下次再接
     if (this.session) this.pump();
     if (this.onUpdate) this.onUpdate();
@@ -404,11 +425,14 @@ const Lobby = {
     const idx = st.roster.findIndex((x) => x.peer === this.selfId());
     if (idx < 0) return -1;
     this.roster = st.roster; this.seenLs = new Map(); this.gameId = st.id; this.linger = null; this.sessionAt = Date.now();
+    const rejoin = !!(this.resumeGame && this.resumeGame === st.id); this.resumeGame = null; // 刷新前正在打这一局：以原身份回去
     // 操作帧的预算：4 KiB 减去在场状态里其他字段（房主还带着开局单）
     const other = JSON.stringify({ mp: this.myMp() }).length;
     this.peerRtt = []; this.lead = null; this.leadAt = 0;
-    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, 3800 - other - 220),
+    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, 3800 - other - 220), rejoin,
       send: (msg) => this.net.presence({ ls: Object.assign({ g: st.id, rt: this.myRtt() }, msg) }) }); // 操作帧单独一个字段：服务器只转发变化，资料不重发
+    if (rejoin) this.session.replaying = true; // 新建的世界从开局按操作记录追上（静音、不放事件）
+    this.saveRoom();
     return idx;
   },
   /* 把别人在场状态里的操作帧喂给会话（同一份状态对象不重复处理；只认这一局的） */
@@ -463,7 +487,7 @@ const Lobby = {
   },
   endGame() {
     if (this.session) { this.linger = this.session; this.lingerUntil = Date.now() + 8000; }
-    this.session = null;
+    this.session = null; this.saveRoom();
     if (this.net && this.code && this.isHost) this.me({ start: null });
   },
 };

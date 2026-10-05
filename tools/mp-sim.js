@@ -51,6 +51,7 @@ function makeCtx(k) {
     }
     function __bot(w, i) {
       const p = w.players[i]; if (!p || !p.alive) return { mx: 0, my: 0, burst: false };
+      if (${!!process.env.NOCHOOSE} && i === 1 && w.ritual && w.ritual.st === 'choose') return { mx: 0, my: 0, burst: false }; // NOCHOOSE=1：1 号选升级时一动不动（测限时自动选推荐）
       if (w.vs) return __vsBot(w, i);
       const mid = (TOP + BOTTOM) / 2; let tx = w.W * 0.22 + i * 30, ty = mid + (i - 0.5) * 60;
       let best = null, bd = 1e9; for (const e of w.enemies) { if (!e.alive || e.x < p.x + 30 || e.x > w.W) continue; const d = e.x - p.x + Math.abs(e.y - p.y) * 0.6 - (e.goal ? 260 : 0); if (d < bd) { bd = d; best = e; } }
@@ -101,12 +102,14 @@ function runDirect(stage, n) {
   const per = R(ctxs[0], `JSON.stringify(__w.players.map((q) => ({ build: q.picks.map((o) => o.kind[0] + ':' + o.id).join('>'), dust: Math.round(q.res.dust), offers: q.res.offers })))`);
   const ends = ctxs.map((c) => R(c, '__res && JSON.stringify([__res.stats.dust, __res.stats.crystals, __res.build.gun])'));
   if (VSM) { // 对抗：每端算出的排名 / 分数必须一样；统计送出的干扰、直攻击毁
-    const vs = ctxs.map((c) => R(c, '__res && __res.vs && JSON.stringify({ scores: __res.vs.scores, towers: __res.vs.towers, held: __res.vs.held, kos: __res.vs.kos, draw: __res.vs.draw, winner: __res.vs.winner })'));
+    const vs = ctxs.map((c) => R(c, '__res && __res.vs && JSON.stringify({ scores: __res.vs.scores, towers: __res.vs.towers, held: __res.vs.held, kos: __res.vs.kos, draw: __res.vs.draw, winner: __res.vs.winner, parts: __res.vs.parts })'));
+    const V0 = vs[0] && JSON.parse(vs[0]), sumOk = !!V0 && V0.parts.every((P, k) => Object.values(P).reduce((a, b) => a + b, 0) === V0.scores[k]); // 分项合计 = 总分
     const sends = R(ctxs[0], '__vsSends'), same = vs.every((x) => x && x === vs[0]);
-    return { stage: 'vs', n, ok: teamEarly === 0 && same && !!res, frames: frame, res, vs: vs[0] && JSON.parse(vs[0]), sends, team: { solo: teamSolo, early: teamEarly }, per: JSON.parse(per), myWins: ctxs.map((c) => R(c, '__res && __res.win')) };
+    return { stage: 'vs', n, ok: teamEarly === 0 && same && !!res && sumOk, sumOk, frames: frame, res, vs: vs[0] && JSON.parse(vs[0]), sends, team: { solo: teamSolo, early: teamEarly }, per: JSON.parse(per), myWins: ctxs.map((c) => R(c, '__res && __res.win')) };
   }
+  const autoPicks = R(ctxs[0], '__w.players[1] ? __w.players[1].picks.length : 0'); // NOCHOOSE 时 1 号靠限时自动选也要拿到升级
   // teamSolo：有人在选升级时另一架活着的飞机不在仪式里（应该很少：只在倒下的人被救起后补选时出现）；teamEarly：有人还在选，别人已经恢复（必须是 0）
-  return { stage, n, ok: teamEarly === 0, frames: frame, res, rescued, team: { solo: teamSolo, early: teamEarly }, downs, per: JSON.parse(per), myResults: ends };
+  return { stage, n, ok: teamEarly === 0 && (!process.env.NOCHOOSE || (autoPicks > 0 && !!res)), autoPicks, frames: frame, res, rescued, team: { solo: teamSolo, early: teamEarly }, downs, per: JSON.parse(per), myResults: ends };
 }
 
 async function runNet(stage, n) {

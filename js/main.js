@@ -42,8 +42,9 @@
   }
 
   applySettings();
-  const invite = inviteCode();
-  if (invite) { G.meta.seenTitle = true; showMultiplayer(showHub, invite); } // 朋友点邀请链接：直接进那个房间
+  const invite = inviteCode(), resumeRoom = Lobby.savedRoom();
+  if (invite && !(resumeRoom && resumeRoom.code === invite)) { G.meta.seenTitle = true; showMultiplayer(showHub, invite); } // 朋友点邀请链接：直接进那个房间
+  else if (resumeRoom) { G.meta.seenTitle = true; showMultiplayer(showHub, null, resumeRoom); } // 刷新页面：回到刚才的联机房间（那一局还在打就回到原对局）
   else if (G.meta.seenTitle && G.meta.firstRunDone) showHub(); else showTitle();
 
   /* ---------- 菜单背景 ---------- */
@@ -104,12 +105,12 @@
     const w = G.world, L = G.mpLoop, S = Lobby.session;
     if (!w || !L || !S || w.done) return;
     if (S.kicked !== undefined) { // 断线太久，队友已经把我移出这一局
-      toast('网络断开太久，已经退出这一局', '#ffb2a8', null, 4000);
-      w.done = true; const r = w.result(false); r.abandoned = true; Lobby.leave(); onRunEnd(r); return;
+      toast('断线超过 60 秒，已按退出处理', '#ffb2a8', null, 4000);
+      w.done = true; const r = w.result(false); r.abandoned = true; r.kicked = true; Lobby.leave(); onRunEnd(r); return;
     }
     if (Lobby.orphaned()) { // 队友那边这一局已经结束了，本机等不到后面的操作
       toast('队友那边这一局已经结束了', '#ffe38a', null, 4000);
-      w.done = true; const r = w.result(false); r.abandoned = true; onRunEnd(r); return;
+      w.done = true; const r = w.result(false); r.abandoned = true; r.orphan = true; onRunEnd(r); return;
     }
     // 本机操作：拖动累计量化成每帧 ±31 像素；暂停 / 菜单 / 后台时发中性操作
     const active = Input.gameActive && !G.paused && !document.hidden;

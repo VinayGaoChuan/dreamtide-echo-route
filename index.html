@@ -499,12 +499,23 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .mp-mem > i{width:10px;height:10px;border-radius:50%;flex:none}
 .mp-mem canvas{width:max(40px,calc(52px*var(--u)));height:auto;flex:none}
 .mp-grow{color:#ffd9a8;font-size:var(--fs-xs)}
+.chip.ok{color:#9ff2c8;border-color:#9ff2c8}
+.mp-cd{color:#ffe38a;font-size:var(--fs-l)}
+.mp-rules{font-size:var(--fs-xs);color:var(--paper);background:rgba(10,8,30,.35);border:1px solid var(--edge);border-radius:12px;padding:.4em .8em}
+.mp-rules summary{cursor:pointer;font-weight:700;color:#ffe38a}
+.mp-rules ul{margin:.3em 0 .2em;padding-left:1.2em;display:flex;flex-direction:column;gap:.2em}
+#mp-rules-card{position:absolute;left:50%;transform:translateX(-50%);max-width:min(560px,70%);pointer-events:none;z-index:6;opacity:.82}
+#mp-rules-card.at-bottom{bottom:10px}
+#mp-rules-card.at-top{top:78px}
+#mp-rules-card .mp-rules{background:rgba(12,9,34,.72);font-size:calc(var(--fs-xs) * .92)}
 .vs-board{display:flex;flex-direction:column;gap:6px;min-width:min(520px,90vw);padding:.6em .8em}
 .vs-row{display:grid;grid-template-columns:2em 12px 1fr auto;align-items:center;gap:4px 10px;padding:.35em .6em;border-radius:10px;background:rgba(10,8,30,.4);border:1px solid var(--edge)}
 .vs-row.me{border-color:rgba(255,201,74,.7)}
 .vs-row > i{width:10px;height:10px;border-radius:50%}
 .vs-row .num{font-size:var(--fs-l);color:var(--lamp2);font-variant-numeric:tabular-nums}
 .vs-row small{grid-column:3 / -1}
+.vs-gap{margin:.4em 0 0;font-size:var(--fs-s);color:var(--paper)}
+.vs-gap b{color:#ffe38a}
 .team{display:flex;flex-direction:column;gap:3px;font-size:var(--fs-xs)}
 .team div{display:flex;align-items:center;gap:6px;padding:1px 8px 1px 4px;border-radius:999px;background:rgba(15,12,42,.55);width:max-content}
 .team div > i{width:9px;height:9px;border-radius:50%;flex:none}

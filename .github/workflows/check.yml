@@ -32,17 +32,21 @@ jobs:
           NETSEED=3 node tools/mp-sim.js js 1-2 3 net 0.1 100 5 '1@2000~900'
           NETSEED=5 node tools/mp-sim.js js 1-2 3 net 0.1 100 5 '0@2000~900'
           NETSEED=7 node tools/mp-sim.js js vs 2 net 0.1 100 5 '1@3000~600'
+      - name: 联机升级限时（1 号一直不选：到时自动选推荐，整局不被拖住）
+        run: |
+          NOCHOOSE=1 node tools/mp-sim.js js 1-1 2 direct
       - name: 联机对抗（2 人打满三段、3 人网络丢包，逐帧比对分数和结局）
         run: |
           node tools/mp-sim.js js vs 2 direct
           node tools/mp-sim.js js vs 3 net 0.1 100 5
       - name: 联机中转服务器
         run: node tools/relay-test.js
-      - name: 真联机（本地中转服务器 + 无头客户端，真实 WebSocket：2 人打 60 秒；3 人房主第 25 秒断线，其余人继续）
+      - name: 真联机（本地中转服务器 + 无头客户端，真实 WebSocket：2 人打 60 秒；3 人房主第 25 秒断线，其余人继续；第 25 秒刷新页面回到原对局）
         run: |
           PORT=8091 node server/relay.js &
           sleep 1
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 60
           node tools/net-bot.js ws://localhost:8091/mp 3 1-1 70 --host-leave=25
+          node tools/net-bot.js ws://localhost:8091/mp 2 1-1 70 --reload=1@25
       - name: 打包单文件
         run: python3 build.py dist/dreamtide.html

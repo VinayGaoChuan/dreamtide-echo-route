@@ -27,6 +27,7 @@ Object.assign(World.prototype, {
       n, h, stage: 0, t: 0, clash: false, over: false,
       lanes: this.players.map((q, k) => ({ top: TOP + k * h, bot: TOP + (k + 1) * h, budget: 1.5, next: null, wind: null, wave: null, queue: [] })),
       score: this.players.map(() => 0), towers: this.players.map(() => 0), held: this.players.map(() => 0), kos: this.players.map(() => 0),
+      parts: this.players.map(() => ({ kill: 0, tower: 0, sent: 0, held: 0, ko: 0, loss: 0 })), // 分数来源账本：各项加起来正好是总分
       tower: [], holes: [], firstTower: -1, offered: {}, stageLog: [],
     };
     for (const q of this.players) { q.x = this.W * 0.22; q.y = this.vsMid(q.idx); q.pvpAcc = 0; q.pvpCd = {}; q.vsRespawn = 0; q.lastHitBy = -1; q.lastHitT = -9; }
@@ -109,7 +110,7 @@ Object.assign(World.prototype, {
       // 风塔清掉：分数归这条航道的主人（不归“最后一发”）；本段第一个清掉的再加一点
       const k = T.lane, first = V.firstTower < 0;
       if (first) V.firstTower = k;
-      this.vsAdd(k, VS.pts.tower + (first ? VS.pts.first : 0), first ? '风塔 · 第一个' : '风塔', T.x, T.y - 60);
+      this.vsAdd(k, VS.pts.tower + (first ? VS.pts.first : 0), first ? '风塔 · 第一个' : '风塔', T.x, T.y - 60, 'tower');
       V.towers[k]++; T.st = 'open'; T.t = 0;
       const L = V.lanes[k], dy = Math.min(70, V.h * 0.3);
       V.holes.push({ lane: k, x: T.x - 90, y: clamp(T.y - dy, L.top + 40, L.bot - 40), kind: 'armor', t: 0, dwell: 0, st: 'open' }, { lane: k, x: T.x - 90, y: clamp(T.y + dy, L.top + 40, L.bot - 40), kind: 'wind', t: 0, dwell: 0, st: 'open' });
@@ -141,7 +142,7 @@ Object.assign(World.prototype, {
   },
   vsSend(from, kind) {
     const V = this.vs, to = this.vsTarget(from); if (to < 0) return;
-    this.vsAdd(from, VS.pts.sent, `送出${VS_INT[kind].name}`, this.players[from].x, this.players[from].y - 40);
+    this.vsAdd(from, VS.pts.sent, `送出${VS_INT[kind].name}`, this.players[from].x, this.players[from].y - 40, 'sent');
     V.lanes[to].queue.push({ kind, from, id: this.eid++ });
     this.emit('vsSend', { from, to, kind });
     if (this.players[from] === this.me) Sound.sfx('select', { ui: true });
@@ -188,13 +189,14 @@ Object.assign(World.prototype, {
       }
     }
   },
-  vsHeld(k, why) { this.vs.held[k]++; this.vsAdd(k, VS.pts.held, why, this.players[k].x, this.players[k].y - 46); },
-  vsAdd(k, n, why, x, y) {
-    const V = this.vs; V.score[k] = Math.max(0, V.score[k] + n);
+  vsHeld(k, why) { this.vs.held[k]++; this.vsAdd(k, VS.pts.held, why, this.players[k].x, this.players[k].y - 46, 'held'); },
+  vsAdd(k, n, why, x, y, cat) {
+    const V = this.vs, before = V.score[k]; V.score[k] = Math.max(0, V.score[k] + n);
+    V.parts[k][cat] += V.score[k] - before; // 记实际加减的分（扣到 0 为止），账本合计永远等于总分
     if (why && x !== undefined) this.text(`${n > 0 ? '+' : ''}${n} ${why}`, x, y, n > 0 ? '#ffe38a' : '#ffb2a8', n >= 50 ? 20 : 15, 3);
   },
   /* 击破：普通小分，厚甲 / 精英多一点；记在开枪的人头上 */
-  vsKill(e) { const p = this.player; if (!p || p.gone) return; this.vs.score[p.idx] += e.elite || e.type === 'armor' || e.type === 'cmdr' ? VS.pts.big : VS.pts.kill; },
+  vsKill(e) { const p = this.player; if (!p || p.gone) return; const n = e.elite || e.type === 'armor' || e.type === 'cmdr' ? VS.pts.big : VS.pts.kill; this.vs.score[p.idx] += n; this.vs.parts[p.idx].kill += n; },
   /* 主炮打到对手：只在冲突区开放、对手在冲突带里时；同一人打同一人有命中间隔，累计到一颗心才扣，扣完短暂无敌 */
   vsPvpShot(s) {
     const V = this.vs; if (!V.clash || !this.vsInBand(s.y)) return;
@@ -213,8 +215,8 @@ Object.assign(World.prototype, {
   /* 击毁：不淘汰，约 3 秒后在自己航道原地复归；扣有限的分，刚被对手打过就给对手压制分 */
   vsDown(p) {
     const V = this.vs; p.hp = 0; p.alive = false; p.vsRespawn = VS.respawn; p.pvpAcc = 0; V.kos[p.idx]++;
-    this.vsAdd(p.idx, -VS.pts.koLoss, '被击毁', p.x, p.y - 40);
-    if (p.lastHitBy >= 0 && this.t - p.lastHitT < 3 && !this.players[p.lastHitBy].gone) { const k = p.lastHitBy; this.vsAdd(k, VS.pts.ko, `压制 ${p.name || ''}`, this.players[k].x, this.players[k].y - 40); }
+    this.vsAdd(p.idx, -VS.pts.koLoss, '被击毁', p.x, p.y - 40, 'loss');
+    if (p.lastHitBy >= 0 && this.t - p.lastHitT < 3 && !this.players[p.lastHitBy].gone) { const k = p.lastHitBy; this.vsAdd(k, VS.pts.ko, `压制 ${p.name || ''}`, this.players[k].x, this.players[k].y - 40, 'ko'); }
     for (let i = 0; i < 14; i++) this.part('dot', p.x, p.y, rand(-220, 220), rand(-220, 220), 0.6, 4, 'rgba(255,122,107,0.95)');
     this.emit('down', { idx: p.idx });
   },
@@ -241,7 +243,9 @@ Object.assign(World.prototype, {
     const V = this.vs, rank = this.vsRank(), me = this.me.idx, top = rank[0];
     const draw = rank.length > 1 && Math.floor(V.score[rank[1]]) === Math.floor(V.score[top]) && V.towers[rank[1]] === V.towers[top];
     return { scores: V.score.map((v) => Math.floor(v)), towers: V.towers.slice(), held: V.held.slice(), kos: V.kos.slice(), rank: rank.indexOf(me) + 1, of: rank.length, draw, winner: draw ? -1 : top, me,
-      names: this.players.map((q) => q.name || `${q.idx + 1}P`), gone: this.players.map((q) => q.gone) };
+      // 显示用的分项：其余各项取整，击破 = 总分（取整）减其余各项——合计永远正好等于榜上的总分
+      parts: V.parts.map((P, k) => { const o = { tower: Math.round(P.tower), sent: Math.round(P.sent), held: Math.round(P.held), ko: Math.round(P.ko), loss: Math.round(P.loss) }; o.kill = Math.floor(V.score[k]) - (o.tower + o.sent + o.held + o.ko + o.loss); return o; }),
+      names: this.players.map((q) => q.name || `${q.idx + 1}P`), gone: this.players.map((q) => q.gone), timedOut: this.players.map((q) => !!q.timedOut), t: V.t };
   },
 
   /* ---------- 画 ---------- */

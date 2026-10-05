@@ -212,7 +212,7 @@ class World {
     this.updateHints();
     this.updateMap(sdt);
     for (const q of this.players) { if (q.gone) continue; this.player = q; this.updateRitual(dt); } // 每架飞机自己的升级队列 / 仪式
-    if (this.mp) this.teamRitualSync();
+    if (this.mp) { this.teamRitualSync(); for (const q of this.players) if (q.away) q.awayClock = (q.awayClock || 0) + dt; } // 断线计时按真实时间（只用于显示剩余席位）
     this.player = this.anchor();
     if (this.mode === 'run' && this.state === 'play' && this.me.stock >= this.me.ultCap && !this.me.ritual) this.m.stockIdle += sdt;
     this.player = this.anchor();
@@ -343,16 +343,18 @@ class World {
   setAway(i, on) {
     const p = this.players[i]; if (!p || p.gone || !!p.away === on) return;
     p.away = on;
-    if (on) { p.wingmen = []; this.text(`${p.name || '队友'} 断线中…`, p.x, p.y - 40, '#ffb2a8', 16, 4); this.emit('away', { idx: i }); }
+    if (on) { p.wingmen = []; p.awayClock = 0; this.text(`${p.name || (this.vs ? '对手' : '队友')} 断线中…`, p.x, p.y - 40, '#ffb2a8', 16, 4); this.emit('away', { idx: i }); }
     else { p.inv = Math.max(p.inv, 2); this.syncWingmenOf(p); this.text(`${p.name || '队友'} 回来了`, p.x, p.y - 40, '#9ff2c8', 16, 4); this.emit('back', { idx: i }); }
   }
   syncWingmenOf(p) { this.withPlayer(p, () => this.syncWingmen()); }
+  /* 断线中还剩多少秒席位（按断线开始的那一帧算，各端看到的一样；只用于显示） */
+  seatLeft(p) { return Math.max(0, Math.ceil(60 - (p.awayClock || 0))); }
   /* 多人：有人断线太久 / 退出 —— 从约定好的那一帧起移除这架飞机 */
   dropPlayer(i) {
     const p = this.players[i]; if (!p || p.gone) return;
     p.gone = true; p.alive = false; p.wingmen = []; p.ritual = null; p.ritualQueue = []; // 离开的人不再参与升级确认，其他人照常继续
     if (this.bursting && this.bursting.owner === i) { this.bursting = null; this.bfx = null; }
-    this.text(`${p.name || '队友'} 离开了`, p.x, p.y - 40, '#ffb2a8', 18, 5);
+    this.text(p.away ? `${p.name || '玩家'} 断线超过 60 秒，按退出处理` : `${p.name || '玩家'} 离开了`, p.x, p.y - 40, '#ffb2a8', 18, 5); p.timedOut = !!p.away;
     this.emit('left', { idx: i });
     if (!this.alivePlayers().length && this.state === 'play') { this.state = 'dying'; this.stateT = 1.6; }
   }
@@ -863,7 +865,7 @@ class World {
   tryBurst() {
     const p = this.player;
     if (this.state !== 'play' || this.ritual || !p.alive) return;
-    if (this.bursting) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text('队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招
+    if (this.bursting) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text(this.vs ? '别人的大招还在放' : '队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招
     if (p.stock < 1) { if (p === this.me) Sound.sfx('denied', { gap: 250 }); return; }
     p.stock--;
     this.startBurst();
@@ -1255,7 +1257,8 @@ class World {
   hud() {
     const p = this.me, B = this.hudBuild || this.buildSummary(); // 槽位按“已经飞进槽里”的状态显示；生命 / 大招看本机这架
     const h = { hp: p.hp, maxHp: p.maxHp, burst: p.burst, stock: p.stock, cap: p.ultCap, ready: p.stock >= 1 && !this.bursting && !this.ritual && p.alive, down: !p.alive && !p.gone, save: !p.alive && !p.gone ? clamp((p.saveT || 0) / RESCUE.dwell, 0, 1) : 0,
-      team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, away: !!q.away, down: !q.alive && !q.gone, me: q === p, color: q.color })) : null,
+      vs: !!this.vs, respawn: this.vs && !p.alive ? Math.max(1, Math.ceil(p.vsRespawn || 0)) : 0,
+      team: this.np > 1 ? this.players.map((q) => ({ idx: q.idx, name: q.name, plane: q.planeId, hp: q.hp, maxHp: q.maxHp, alive: q.alive, gone: q.gone, away: !!q.away, seat: q.away ? this.seatLeft(q) : 0, down: !q.alive && !q.gone, me: q === p, color: q.color })) : null,
       gun: Object.assign({}, B.gun), support: B.support ? Object.assign({}, B.support) : null, bmod: B.bmod ? Object.assign({}, B.bmod) : null, recent: (B.recent || []).slice(),
       syns: B.links.slice(), stream: this.stream ? this.stream.name : null, streak: this.streak.n, dust: Math.floor(p.res.dust), wood: Math.floor(p.res.wood), homeGoal: this.goalText, companions: (this.companions || []).map((c) => c.id),
       moved: p.moved, stage: this.stageId, phase: this.phase, candy: p.candy, ritual: this.myRitualFocus(),
@@ -1335,11 +1338,12 @@ class World {
     const p = this.player, t = this.t, C = this.trailColors;
     if (this.np > 1 && p.away && !p.gone) { // 断线占位：半透明 + 标签
       g.save(); g.globalAlpha = 0.3; drawPlane(g, p.planeId, p.x, p.y, 0.8, t, {}); g.restore();
-      drawStepPill(g, p.x, p.y - 44, isMe ? '网络恢复中…' : `${p.name || '队友'} · 断线中`, '#ffb2a8', 0.85); return;
+      drawStepPill(g, p.x, p.y - 44, isMe ? '网络恢复中…' : `${p.name || (this.vs ? '对手' : '队友')} · 断线中 ${this.seatLeft(p)} 秒`, '#ffb2a8', 0.85); return;
     }
     if (this.np > 1) { // 多人：队友半透明 + 名字，倒下的显示救援圈
       if (!p.alive && !p.gone) {
         g.save(); g.globalAlpha = 0.35; drawPlane(g, p.planeId, p.x, p.y, 0.8, t, { hurt: true }); g.restore();
+        if (this.vs) { drawStepPill(g, p.x, p.y - 44, `${isMe ? '' : (p.name || '对手') + ' · '}${Math.max(1, Math.ceil(p.vsRespawn || 0))} 秒后复归`, '#ffb2a8', 0.9); return; } // 对抗：短暂击毁后原地复归，没有救援
         g.fillStyle = 'rgba(159,242,200,0.07)'; g.beginPath(); g.arc(p.x, p.y, RESCUE.r, 0, TAU); g.fill();
         g.strokeStyle = 'rgba(159,242,200,0.55)'; g.lineWidth = 2.5; g.setLineDash([6, 7]); g.lineDashOffset = -t * 20; g.beginPath(); g.arc(p.x, p.y, RESCUE.r, 0, TAU); g.stroke(); g.setLineDash([]); // 救援范围
         if (p.saveT > 0) { g.strokeStyle = '#9ff2c8'; g.lineWidth = 5; g.beginPath(); g.arc(p.x, p.y, 34, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, p.saveT / RESCUE.dwell)); g.stroke(); }
@@ -1347,7 +1351,7 @@ class World {
       }
       if (p.ritual && p.ritual.st !== 'resume') { // 在升级的飞机：一层护盾（期间不受伤）；队友头上写着在选 / 已选好
         g.strokeStyle = hexA(p.color, 0.55); g.lineWidth = 2.5; g.beginPath(); g.arc(p.x, p.y, 40 + Math.sin(t * 5) * 2, 0, TAU); g.stroke();
-        if (!isMe) drawStepPill(g, p.x, p.y - 48, p.ritual.st === 'wait' ? `${p.name || '队友'} ✓ 选好了` : `${p.name || '队友'} · 选升级中`, p.ritual.st === 'wait' ? '#9ff2c8' : p.color, 0.85);
+        if (!isMe) { const left = p.ritual.st === 'choose' ? this.chooseLeft(p.ritual) : null; drawStepPill(g, p.x, p.y - 48, p.ritual.st === 'wait' ? `${p.name || '玩家'} ✓ 选好了` : `${p.name || '玩家'} · 选升级中${left !== null ? ` ${left}` : ''}`, p.ritual.st === 'wait' ? '#9ff2c8' : p.color, 0.85); }
         if (!isMe && p.lastPick && p.ritual.st === 'wait') drawIcon(g, p.lastPick.icon, p.x + 30, p.y - 22, 20, p.lastPick.color); // 队友这次拿了什么：只给一个小图标
       }
       g.strokeStyle = hexA(p.color, isMe ? 0.9 : 0.6); g.lineWidth = 2; g.beginPath(); g.ellipse(p.x, p.y + 22, 26, 7, 0, 0, TAU); g.stroke();

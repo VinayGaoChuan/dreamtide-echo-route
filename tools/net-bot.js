@@ -11,6 +11,7 @@ const fs = require('fs'), vm = require('vm'), path = require('path');
 const ARGS = process.argv.slice(2).filter((a) => !a.startsWith('--')), FLAG = (k) => { const f = process.argv.find((a) => a.startsWith('--' + k + '=')); return f ? f.split('=')[1] : null; };
 const URL_ = ARGS[0] || 'ws://39.106.153.154:8080/mp', N = +(ARGS[1] || 2), MODE = ARGS[2] === 'vs' ? 'vs' : 'coop', STAGE = MODE === 'vs' ? '1-1' : ARGS[2] || '1-1', MAXS = +(ARGS[3] || 300);
 const HOST_LEAVE = FLAG('host-leave') ? +FLAG('host-leave') : null;
+const RELOAD = FLAG('reload') ? (([k, t]) => ({ k: +k, at: +t }))(FLAG('reload').split('@')) : null; // --reload=1@60：第 2 个客户端第 60 秒刷新页面
 const DARK = FLAG('dark') ? (([k, r]) => { const [t, d] = r.split('~').map(Number); return { k: +k, at: t, dur: d }; })(FLAG('dark').split('@')) : null;
 const dir = path.join(__dirname, '..', 'js');
 const FILES = ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain', 'vs', 'home', 'net'];
@@ -23,7 +24,7 @@ async function main() {
   const httpBase = URL_.replace(/^ws/, 'http').replace(/\/mp$/, '');
   let build = 'dev'; try { build = (await (await fetch(httpBase + '/health')).json()).build || 'dev'; } catch (e) { console.log('读不到 /health，用 dev 频道'); }
   const bots = [];
-  for (let k = 0; k < N; k++) {
+  const makeBot = (k, ss) => { // ss：这个“标签页”的 sessionStorage（刷新页面时原样带到新环境里）
     const io = { tx: 0, rx: 0, txN: 0, rxN: 0 }; // 收发字节 / 条数（看带宽和服务器限流）
     class CountingWS extends WebSocket { // 断网模拟：io.dark 时收发全丢（连接本身不关，和线路断掉一样）
       constructor(u) { super(u); this.addEventListener('message', (ev) => { if (io.dark) { ev.stopImmediatePropagation(); return; } io.rx += String(ev.data).length; io.rxN++; }); }
@@ -31,7 +32,8 @@ async function main() {
     }
     const ctx = { console, Math, Date, JSON, performance, setTimeout, clearTimeout, setInterval, clearInterval, WebSocket: CountingWS, URL, Blob, __io: io,
       window: { addEventListener: noop, matchMedia: () => ({ matches: false }), DREAMTIDE_BUILD: build }, document: { createElement: () => ({ width: 0, height: 0, getContext: () => fakeCtx }), addEventListener: noop, hidden: false },
-      navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop }, location: { search: '', protocol: 'http:', host: 'bot' } };
+      navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop }, location: { search: '', protocol: 'http:', host: 'bot' },
+      sessionStorage: { getItem: (x) => (x in ss ? ss[x] : null), setItem: (x, v) => { ss[x] = String(v); }, removeItem: (x) => { delete ss[x]; } }, __ss: ss };
     ctx.globalThis = ctx; vm.createContext(ctx);
     for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
     ctx.__url = URL_; ctx.__k = k; ctx.__build = build; ctx.__stage = STAGE;
@@ -108,10 +110,11 @@ async function main() {
           stallPct: L && L.ticks ? +((L.stallTicks || 0) / L.ticks * 100).toFixed(1) : null, rttAvg: avg(B.rtts.filter((x) => x !== null)), rttMax: B.rtts.length ? Math.max(...B.rtts.filter((x) => x !== null)) : null,
           lead: B.leads.length ? Math.min(...B.leads.filter((x) => x !== null)) + '~' + Math.max(...B.leads.filter((x) => x !== null)) : null,
           beat: w ? w.beatIdx : null, done: !!(w && w.done), win: B.res ? B.res.win : null, desync: S ? S.desync : null, rescues: B.rescues.join(','), hash: S ? [...S.hashLog].slice(-1)[0] : null,
-          stuck: Lobby.net.stuck || 0, orphan: !!B.orphan, replays: B.replays || 0, aways: S ? S.aways.map((L) => L.map((r) => r[0] + '-' + (r[1] === Infinity ? '?' : r[1])).join(',')).join('|') : null, kicked: S ? S.kicked !== undefined : null, vs: B.res && B.res.vs ? B.res.vs.scores.join('/') : w && w.vs ? w.vs.score.map(Math.floor).join('/') : null, gone: w ? w.players.map((q) => q.gone ? 1 : 0).join('') : null, host: S ? S.isHost : null, left: !!B.left };
+          stuck: Lobby.net.stuck || 0, orphan: !!B.orphan, reloaded: !!B.reloaded, rejoining: S ? !!S.rejoining : null, replays: B.replays || 0, aways: S ? S.aways.map((L) => L.map((r) => r[0] + '-' + (r[1] === Infinity ? '?' : r[1])).join(',')).join('|') : null, kicked: S ? S.kicked !== undefined : null, vs: B.res && B.res.vs ? B.res.vs.scores.join('/') : w && w.vs ? w.vs.score.map(Math.floor).join('/') : null, gone: w ? w.players.map((q) => q.gone ? 1 : 0).join('') : null, host: S ? S.isHost : null, left: !!B.left };
       }`, ctx);
-    bots.push(ctx);
-  }
+    return ctx;
+  };
+  for (let k = 0; k < N; k++) bots.push(makeBot(k, {}));
   const R = (c, code) => vm.runInContext(code, c);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // 连上 → 机器人 1 建房 → 其他人加入 → 人齐了开局
@@ -127,6 +130,14 @@ async function main() {
   const timer = setInterval(() => { for (const c of live) R(c, 'tick()'); }, 8);
   const t0 = Date.now(); let last = 0;
   while (Date.now() - t0 < MAXS * 1000 && !live.every((c) => R(c, 'B.w && B.w.done'))) {
+    if (RELOAD && !RELOAD.done && (Date.now() - t0) / 1000 >= RELOAD.at) { // 刷新页面：整个 JS 环境丢掉，用同一份 sessionStorage 建一个新的，自动回到原房间 / 原对局
+      RELOAD.done = true; const old = bots[RELOAD.k], ss = JSON.parse(JSON.stringify(old.__ss));
+      R(old, 'B.left = true; Lobby.net.close()'); live.splice(live.indexOf(old), 1);
+      const nb = makeBot(RELOAD.k, ss); bots[RELOAD.k] = nb; live.push(nb);
+      for (let t = 0; t < 50 && !R(nb, 'Lobby.net.connected()'); t++) await sleep(100);
+      R(nb, 'B.reloaded = true; Lobby.resume(Lobby.savedRoom())');
+      console.log(`${Math.round((Date.now() - t0) / 1000)}s 机器人${RELOAD.k + 1} 刷新页面`);
+    }
     if (DARK) { const c = bots[DARK.k], el = (Date.now() - t0) / 1000, on = el >= DARK.at && el < DARK.at + DARK.dur; if (c.__io.dark !== on) { c.__io.dark = on; console.log(`${Math.round(el)}s 机器人${DARK.k + 1} ${on ? '断网' : '网络恢复'}`); } }
     if (HOST_LEAVE !== null && live.includes(bots[0]) && Date.now() - t0 > HOST_LEAVE * 1000) { // 房主直接断线（不走“离开房间”按钮）
       live.splice(live.indexOf(bots[0]), 1); R(bots[0], 'B.left = true; Lobby.net.close()'); console.log(`${Math.round((Date.now() - t0) / 1000)}s 房主断开`);
@@ -143,6 +154,14 @@ async function main() {
   const rest = st.filter((s) => !s.left), finished = rest.every((s) => s.done);
   if (finished && MODE !== 'vs' && new Set(rest.map((s) => s.win)).size > 1) fail('各端结局不一样');
   if (finished && MODE === 'vs' && new Set(rest.map((s) => s.vs)).size > 1) fail('各端的对抗分数不一样');
+  if (RELOAD) { // 刷新的那位：必须回到原对局（不是新开一局）、被判过断线中且已恢复、和大家一样推进，没被移出
+    const d = st[RELOAD.k];
+    if (!d.reloaded || !d.started) fail('刷新后没有回到原对局');
+    if (d.kicked) fail('刷新后被移出了这一局');
+    if ((d.aways || '').includes('?') || d.rejoining) fail('刷新回来后一直没有恢复操作');
+    const o = st.find((x, k) => k !== RELOAD.k);
+    if (!finished && Math.abs((d.frame || 0) - (o.frame || 0)) > 60) fail('刷新回来后没有追上大家');
+  }
   if (DARK) { // 断网的那位：必须没被移出、被判过断线中且已恢复、和大家一样打完（或还在一起打）
     const d = st[DARK.k];
     if (d.kicked) fail('断网的人被移出了这一局（应该保留席位）');
@@ -160,7 +179,7 @@ async function main() {
     if (!rest.every((s) => s.frame > HOST_LEAVE * 30 + 300)) fail('房主离开后其余的人没有继续推进');
   }
   const playMs = (Date.now() - t0) * 1;
-  if (st.some((s, k) => !(DARK && k === DARK.k) && s.stallMs > playMs * 0.1)) fail('卡顿太多（等待队友操作的时间超过 10%）'); // 断网那位自己离线的时间不算
+  if (st.some((s, k) => !(DARK && k === DARK.k) && !(RELOAD && k === RELOAD.k) && s.stallMs > playMs * 0.1)) fail('卡顿太多（等待队友操作的时间超过 10%）'); // 断网 / 刷新那位自己离线的时间不算
   console.log(failed ? `真机联机测试失败 ${failed} 项` : `真机联机测试通过${finished ? '' : `（${MAXS} 秒内没打完，按已打部分判定）`}`);
   for (const c of bots) R(c, 'if (!B.left) { Lobby.leave(); Lobby.net.close(); }');
   setTimeout(() => process.exit(failed ? 1 : 0), 300);
