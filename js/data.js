@@ -191,9 +191,9 @@ const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 const STAGES = {
   '1-1': { id: '1-1', ch: 1, name: '梦灯海湾', theme: 'bay', segs: 6, segDur: 54, hpK: 1, avg: 5, peak: 9, fill: 2.3, elites: ['jellyE'], boss: 'captain', bossName: '泡泡小队长', bossHp: 6000, rec: 1, reward: 120, fail: [30, 90], ult: 1,
     map: ['house', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '第一次出击：开局只会直射；先清普通怪群，再对付越来越硬的厚甲怪。' },
-  '1-2': { id: '1-2', ch: 1, name: '纸船灯河', theme: 'river', segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, elites: ['tickE', 'jellyE'], boss: 'captain2', bossName: '裂纹闹钟队长', bossHp: 9000, rec: 6, reward: 150, fail: [40, 100], ult: 2,
+  '1-2': { id: '1-2', ch: 1, name: '纸船灯河', theme: 'river', segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, elites: ['tickE', 'jellyE'], boss: 'captain2', bossName: '裂纹闹钟队长', bossHp: 9000, rec: 4, reward: 150, fail: [40, 100], ult: 2,
     map: ['house', 'bridge', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '敌人会从裂缝、上下方钻出来；途中要护送一位伙伴。' },
-  '1-3': { id: '1-3', ch: 1, name: '失眠钟塔', theme: 'tower', segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, elites: ['starE', 'tickE', 'jellyE'], boss: 'clock', bossName: '失控闹钟', bossHp: 1000, rec: 11, reward: 190, fail: [50, 120], ult: 2,
+  '1-3': { id: '1-3', ch: 1, name: '失眠钟塔', theme: 'tower', segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, elites: ['starE', 'tickE', 'jellyE'], boss: 'clock', bossName: '失控闹钟', bossHp: 1000, rec: 6, reward: 190, fail: [50, 120], ult: 2,
     map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'], intro: '后方追兵和空间裂缝一起出现，最后是第一章 Boss：失控闹钟。' },
 };
 const STAGE_ORDER = ['1-1', '1-2', '1-3'];
@@ -245,21 +245,22 @@ const BUILD_PATHS = [
    Boss / 队长打了 rage.at 秒还没倒就失控：攻击一路加快（rage.ramp 秒加满 rage.max），提前 rage.warn 秒预告。
    失控 wipe 秒后超载（先在血条上倒数，提前 5 秒喊）：全屏冲击、全队倒下——首领战有确定的期限，构筑强度按它算。
    只有成型的火力能在失控前打完；没成型的局要靠操作硬扛失控段 */
-const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, formKOf: { 'pierce+bomb': 2.25, 'bomb+rainbow': 2.3, 'homing+thunder': 2.3, 'bomb+thunder': 2.05, 'homing+wing': 1.8, 'multi+ice': 1.75, 'multi+magnet': 1.8 }, free: { '1-1': true }, bossK: { '1-1': 1.3, '1-2': 3.0, '1-3': 8.5 }, regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35 } };
-/* 第一局（§3.6，上手 = 上钩）：第一个完整仪式一定是传说品质，第一个联动只要两件 1 级（头几分钟一次构筑小爆发），鱼群潮更勤；
+const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, formKOf: { 'pierce+bomb': 2.25, 'bomb+rainbow': 2.3, 'homing+thunder': 3.2, 'bomb+thunder': 2.5, 'homing+wing': 1.8, 'multi+ice': 2.3, 'multi+magnet': 2.3 }, free: { '1-1': true }, bossK: { '1-1': 1.3, '1-2': 3.8, '1-3': 8.4 }, regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35 } };
+/* 第一局（§3.6，上手 = 上钩）：第一个完整仪式保底史诗，第一个联动只要两件 1 级（头几分钟一次构筑小爆发），鱼群潮更勤；
    第一个首领（free 里的关）在基础难度下不自愈、不失控：几乎人人打得过 */
-const FIRST_RUN = { rareTier: 2, needLv: 1, swellK: 0.75, hearts: 2 }; // hearts：第一局多两颗心（极易上手）
-/* 品质（§3.3）：完整仪式掷一档——史诗、传说常给，神话少给；共享等级越高给得越多（luck = 等级 - 1）。
+const FIRST_RUN = { rareTier: 1, needLv: 1, swellK: 0.75, hearts: 2 }; // rareTier：第一局第一个完整仪式保底史诗（一档一档认识品质）；hearts：多两颗心
+/* 品质（§3.4）：完整仪式掷一档。玩家一档一档认识：史诗从第一局就常见，传说从 luck ≥ legendAt 起出现，神话从 luck ≥ mythAt 起少量出现；
+   之后都随共享等级涨（luck = 等级 - 1）。
    品质不加等级：只有对路（属于已成型的流派：两件 + 联动）的件，每件按 tierK 乘到全部火力上——给了不等于强，打穿要靠对路、凑齐、选对 */
-const QUALITY_ROLL = { myth: [0, 0.004], legend: [0.06, 0.02], epic: [0.5, 0.015], floorLuck: 6 }; // [基础概率, 每点 luck 加多少]（累计）：前期史诗常见、传说少；越往后传说、神话越多。装置保底的高档要 luck ≥ floorLuck 才生效
-const QUALITY_K = [0, 0.25, 0.6, 1.3];
+const QUALITY_ROLL = { myth: [0.02, 0.006], legend: [0.08, 0.02], epic: [0.5, 0.015], legendAt: 1, mythAt: 7, floorLuck: 6 }; // [出现时的概率, 之后每点 luck 加多少]（累计）。装置保底的高档要 luck ≥ floorLuck 才生效
+const QUALITY_K = [0, 0.3, 0.7, 1.5];
 /* 难度阶梯“梦魇”（§3.7）：1-3 首通后解锁 1 级，在 N 级打通 1-3 解锁 N+1 级。每级多一条改变“哪些构筑能活”的规则（逐级叠加），
    再把首领加厚 hpK（逐级相乘：深度期玩家带着局外成长，前沿上仍要构筑决定胜负）；星尘奖励 × (1 + pay × 级数) */
 const LADDER = [
   { name: '基础', line: '' },
-  { name: '厚甲', line: '精英和厚甲怪更结实：爆破、多重更值钱', fx: [['敌甲', 1]], eliteK: 1.4, hpK: 1.05 },
+  { name: '厚甲', line: '精英和厚甲怪更结实：爆破、多重更值钱', fx: [['敌甲', 1]], eliteK: 1.4, hpK: 1.36 },
   { name: '护驾', line: '首领的散兵更多更结实，护盾回来更快：清群的流派更值钱', fx: [['散兵', 1]], addsK: 1.5, addHpK: 3, shieldT: 14, hpK: 1.05 },
-  { name: '疾弹', line: '敌弹快两成：冰冻、追踪更值钱', fx: [['敌弹', 1]], bulletK: 1.2, hpK: 1.08 },
+  { name: '疾弹', line: '敌弹快两成：冰冻、追踪更值钱', fx: [['敌弹', 1]], bulletK: 1.2, hpK: 1.25 },
   { name: '自愈', line: '首领自愈更快：单体爆发更值钱', fx: [['自愈', 1]], regenK: 1.5 },
   { name: '失控', line: '首领更早失控、超载：只有最强的构筑打得过', fx: [['失控', 1]], rageK: 0.92 },
 ];

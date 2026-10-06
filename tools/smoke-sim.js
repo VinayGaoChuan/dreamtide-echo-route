@@ -5,7 +5,8 @@ const { R } = load(process.argv[2]);
 R(`
 function run(stage, plane, level, cap, pickIdx, godmode, world) {
   let res = null; const meta = freshMeta(); meta.shared.level = level; meta.planes[plane] = newPlaneRecord(plane);
-  const w = new World({ mode: 'run', W: 1280, plane, stage, ultCap: cap, stats: planeStats(meta, plane), first: stage === '1-1' && level === 1, settings, world, cb: { onEnd: (r) => res = r, onRescue: (id) => rescues.push(id) } });
+  const seed = 4242 + STAGE_ORDER.indexOf(stage) * 97 + pickIdx * 13 + (godmode ? 0 : 7) + plane.length; // 固定种子：冒烟测试每次结果一样，失败能复现
+  const w = new World({ mode: 'run', W: 1280, plane, stage, seed, ultCap: cap, stats: planeStats(meta, plane), first: stage === '1-1' && level === 1, settings, world, cb: { onEnd: (r) => res = r, onRescue: (id) => rescues.push(id) } });
   const rescues = [];
   if (world && world.preferUpper) { const g0 = w.mapGoalPos.bind(w); w.mapGoalPos = (o) => (o.kind === 'wind' && o.upper && o.state === 'idle' ? { x: o.x + o.upper.dx, y: o.upper.y } : g0(o)); } // 测试：主动选上层风圈
   const goalLog = []; let lastGoal = null;
@@ -48,7 +49,8 @@ const story = [
 ].filter((c) => !only || c[0] === only);
 for (const [st, wf, want, upper] of story) {
   try {
-    const r = R(`run('${st}', 'moon', 3, 2, 0, true, ${JSON.stringify(wf)})`); console.log('story', JSON.stringify(r));
+    const slv = Math.min(20, R(`STAGES['${st}'].rec`) + (st === '1-1' ? 2 : 6)); // 流程测试：和上面一样按建议等级宽裕地打、照推荐选，首领一定打得倒
+    const r = R(`run('${st}', 'moon', ${slv}, 2, 1, true, ${JSON.stringify(wf)})`); console.log('story', JSON.stringify(r));
     if (want && !r.rescued.split(',').includes(want)) fail(`${st} 没救到 ${want}`);
     if (upper && !(r.upper >= 1)) fail(`${st} 没走上层云桥`);
     if (!(r.wood >= 10)) fail(`${st} 梦木太少（${r.wood}）`);

@@ -100,7 +100,7 @@ Object.assign(World.prototype, {
     // 另一个候选照常随机：玩家永远可以换方向，换了以后引导跟着他的 Build 走
     let a = null;
     if (this.offerN >= 1 && srnd() < BUILD_CHECK.steer) { // 引导不是每次都有：会规划的人照样成型，随手拿的人难得凑齐
-      const P = this.aimPlan(), steer = P.next ? pool.find((o) => o.id === P.next && (o.kind === 'gun' || o.kind === 'support')) || null : null; // 缺的那件（这个装置的池子里有的话）：没有就给，有了没到级就给升级
+      const P = this.aimPlan(), steer = P.next ? pool.find((o) => o.id === P.next && (o.kind === 'gun' || o.kind === 'support')) || sup.find((o) => o.id === P.next) || null : null; // 缺的那件（这个装置的池子里有的话；支援哪个装置都给，不然大多只出主炮的关凑不齐支援流派）：没有就给，有了没到级就给升级
       a = lk.find((o) => o.id === P.link) || lk[0] || null;
       if (a && steer && a.id !== P.link) return [a, steer]; // 别的流派的联动现在就能拿 vs 接着凑自己流派的下一件：真正的取舍
       if (!a) a = steer && steer.from > 0 && steer.to >= this.linkNeed() ? Object.assign({}, steer, { why: `到 ${this.linkNeed()} 级就能接联动` }) : steer;
@@ -135,7 +135,8 @@ Object.assign(World.prototype, {
   },
   /* 完整仪式掷品质：史诗、传说常给，神话少给；luck（共享等级）越高给得越多；装置自带的档位是保底；第一局第一个完整仪式一定是传说 */
   rollQuality(p, floor) {
-    const L = p.stats.luck || 0, Q = QUALITY_ROLL, r = srnd(), at = (k) => Q[k][0] + Q[k][1] * L;
+    const L = p.stats.luck || 0, Q = QUALITY_ROLL, r = srnd(), myth = L < Q.mythAt ? 0 : Q.myth[0] + Q.myth[1] * (L - Q.mythAt), legend = L < Q.legendAt ? 0 : Q.legend[0] + Q.legend[1] * (L - Q.legendAt);
+    const at = (k) => (k === 'myth' ? myth : k === 'legend' ? myth + legend : Math.max(myth + legend, Q.epic[0] + Q.epic[1] * L)); // 累计概率：先认识史诗，再传说，再神话
     let tier = r < at('myth') ? 3 : r < at('legend') ? 2 : r < at('epic') ? 1 : 0;
     if (this.first && !p.firstRare) { tier = Math.max(tier, FIRST_RUN.rareTier); p.firstRare = true; }
     return Math.max(tier, Math.min(floor || 0, 1 + Math.floor(L / Q.floorLuck))); // 装置保底：前期最多保到史诗
@@ -450,8 +451,10 @@ Object.assign(World.prototype, {
       for (const x of others) { const k = synKey(o.id, x); if (SYNERGIES[k] && !this.links.has(k)) { link = `★ 能和${SKILLS[x].name}凑联动`; break; } }
     }
     const armor = (o.kind === 'gun') && this.goal && (this.goal.kind === 'armor1' || this.goal.kind === 'pack') && ARMOR_FIT[o.id] ? [['敲甲', o.id === 'bomb' || o.id === 'multi' ? 2 : 1]] : [];
-    const I = this.optInfo(o);
-    return { target, link, fx: [...(I.fx || []), ...armor].slice(0, 3) };
+    const I = this.optInfo(o), q = o.qUp ? Math.min(3, o.qUp) : 0, onPath = !!q && P.path.includes(o.id);
+    // 品质只在对路时乘火力：对路的卡多一个“对路”箭头；不对路的好东西说清楚“好看，但不是本局流派”（能凑联动的另有提示）
+    const qNote = q && !onPath && (o.kind === 'gun' || o.kind === 'support') ? `${QUALITY[q].name}好看，但不是本局流派的件` : '';
+    return { target, link: link || qNote, fx: [...(q && onPath ? [['对路', q]] : []), ...(I.fx || []), ...armor].slice(0, 3) };
   },
   /* 中央展示：大图标 + 名字 + 等级变化 + 一小段演示；0.8~1.2 秒 */
   drawCentral(g, R) {

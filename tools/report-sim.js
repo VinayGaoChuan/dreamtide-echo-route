@@ -12,6 +12,15 @@ const args = argv.filter((a, i) => !a.startsWith('--') && !VALUED.has(argv[i - 1
 const gate = argv.includes('--gate'), HUMAN = argv.includes('--human'), JOBS = +(flag('jobs') || 1), WORKER = flag('worker');
 const LAD = +(flag('ladder') || 0), LV = flag('lv') ? +flag('lv') : 0, FIRSTF = argv.includes('--first'), CAREER = +(flag('career') || 0); // 梦魇级、共享等级（默认关卡建议等级）、按第一局的规则、连续玩的玩家数
 const { R } = load(args[0]);
+/* 目标从设计文档读（docs/design.md 里的 ```json report-targets 块，每个数写明从梦潮自己的哪个量推出来）；读不到才用兜底值。警告是提醒回头想，不是标准答案 */
+const TARGETS = (() => {
+  const fb = { difficulty: { loS: 0.8, loWin: 25, hiS: 1.25, hiWin: 75, breakS: 2, rareAt: 150, onBuildK: 1.3, pathSpread: 0.35, stages: {}, ladderTopRec: [0.9, 1.2] }, career: { firstBoss: 80, clearMedian: [2, 99], clearP25: 2, quietMax: 4 } };
+  try {
+    const md = require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'design.md'), 'utf8'), m = md.match(/```json report-targets\n([\s\S]*?)\n```/);
+    if (!m) return fb; const t = JSON.parse(m[1]);
+    return { difficulty: Object.assign(fb.difficulty, t.difficulty || {}), career: Object.assign(fb.career, t.career || {}), from: 'docs/design.md' };
+  } catch (e) { console.error('读设计文档的目标失败，用兜底值：' + e.message); return fb; }
+})();
 if (flag('eval')) R(flag('eval')); // 调参试验：--eval "BUILD_CHECK.rage.max = 2"（子进程同样执行）
 const N = +(args[1] || 3), STAGES_RUN = (args[2] || '1-1,1-2,1-3').split(',');
 
@@ -30,7 +39,7 @@ function aimAt(P) {
   const sc0 = (o) => {
     if (o.kind === 'link') return o.id === link ? 100 : 30;
     if (o.kind === 'support' && o.replace && comps.includes(o.replace.id)) return -50;
-    if ((o.kind === 'gun' || o.kind === 'support') && comps.includes(o.id)) return o.from > 0 ? 40 : 60;
+    if ((o.kind === 'gun' || o.kind === 'support') && comps.includes(o.id)) { const core = link ? SYNERGIES[link].need : comps, need = (G.world && G.world.linkNeed()) || 2; return core.includes(o.id) && (o.from || 0) < need ? 70 : o.from > 0 ? 30 : 60; } // 联动的两件先各升到够接联动的级，再去升别的
     if (o.from > 0) return 20;
     return o.kind === 'bmod' ? 10 : 15;
   };
@@ -260,7 +269,7 @@ if (ends.length >= 5) {
 }
 /* ---------- 难度：构筑强度和胜负（DE1；目标见 docs/design.md §3.5）。强度 = 首领战每秒打掉的生命 ÷ 预算要的每秒伤害 ---------- */
 {
-  const D = { loS: 0.8, loWin: 25, hiS: 1.25, hiWin: 75, planLo: 1.05, planHi: 1.5, breakS: 2, breakLo: 5, breakHi: 30, rndHi: 0.95, pathLo: 1, topLo: 0.9, topHi: 1.2 };
+  const D = TARGETS.difficulty; // 阈值以设计文档为准（§14 report-targets）
   const rate = (L) => (L.length ? pct(L.filter((s) => s.won).length, L.length) : null), show = (L) => (L.length ? `${rate(L)}%（${L.length}）` : '—');
   const isPlan = (s) => s.archetype !== 'random' && s.archetype !== 'rec';
   const medS = (L) => { const v = L.map((s) => s.strength).filter((x) => x != null).sort((a, b) => a - b); return v.length ? v[v.length >> 1] : null; };
@@ -271,7 +280,7 @@ if (ends.length >= 5) {
     console.log(`  ${label}：强度中位 有计划 ${f2(medS(plan))}，照推荐 ${f2(medS(rec))}，随机 ${f2(medS(rnd))}；胜率 有计划 ${show(plan)}，照推荐 ${show(rec)}，随机 ${show(rnd)}；成型刻度：成型赢 ${show(fo)}，没成型赢 ${show(un)}，有计划时成型 ${pct(fo.length, plan.length)}%，成型在一局的 ${Math.round(frac * 100)}%`);
     return { plan, fo, un, rnd, rec, frac };
   };
-  console.log(`\n难度（${HUMAN ? '机器人按普通玩家：反应 0.25 秒、会走神、瞄不准' : '机器人完美反应：只作参考，量难度用 --human'}${LAD ? `；梦魇 ${LAD}` : ''}${LV ? `；共享等级 ${LV}` : '；共享等级按关卡建议'}${FIRSTF ? '；第一局规则' : ''}）`);
+  console.log(`\n难度（目标来自 ${TARGETS.from || '兜底值'}；${HUMAN ? '机器人按普通玩家：反应 0.25 秒、会走神、瞄不准' : '机器人完美反应：只作参考，量难度用 --human'}${LAD ? `；梦魇 ${LAD}` : ''}${LV ? `；共享等级 ${LV}` : '；共享等级按关卡建议'}${FIRSTF ? '；第一局规则' : ''}）`);
   const A = line(sums, '全部');
   for (const st of STAGES_RUN) line(sums.filter((s) => s.stage === st), st);
   // 强度分布和按强度分档的胜率（S 形：弱的输、强的赢、中间看操作）
@@ -287,20 +296,26 @@ if (ends.length >= 5) {
   const byOn = [[0, 0], [1, 2], [3, 9]].map(([a, b]) => { const L = A.plan.filter((s) => s.rareOnBuild >= a && s.rareOnBuild <= b); return [`${a === b ? a : b > 8 ? `≥${a}` : `${a}–${b}`} 件对路`, L]; });
   console.log('  按对路的高品质件分：' + byOn.map(([k, L]) => `${k} 强度中位 ${f2(medS(L))}，赢 ${show(L)}`).join('；') + `；随机乱选 强度中位 ${f2(medS(A.rnd))}`);
   if (HUMAN && !LAD) {
-    if (rareAts.length && med(rareAts) > 150) warn.push(`第一件高品质件中位在 ${med(rareAts)} 秒（目标 150 秒以内）`);
+    if (rareAts.length && med(rareAts) > D.rareAt) warn.push(`第一件高品质件中位在 ${med(rareAts)} 秒（目标 ${D.rareAt} 秒以内）`);
     const s0 = medS(byOn[0][1]), s3 = medS(byOn[2][1]);
-    if (s0 != null && s3 != null && byOn[2][1].length >= 5 && s3 < s0 * 1.3) warn.push(`对路件凑到三件的局强度 ${f2(s3)}，没对路件的 ${f2(s0)}：凑齐没让构筑明显更强`);
+    if (s0 != null && s3 != null && byOn[2][1].length >= 5 && s3 < s0 * D.onBuildK) warn.push(`对路件凑到三件的局强度 ${f2(s3)}，没对路件的 ${f2(s0)}：凑齐没让构筑明显更强`);
   }
   if (HUMAN) {
-    const lo = withS.filter((s) => s.strength < D.loS), hi = withS.filter((s) => s.strength >= D.hiS), mp = medS(A.plan), mr = medS(A.rnd);
+    const lo = withS.filter((s) => s.strength < D.loS), hi = withS.filter((s) => s.strength >= D.hiS), mr = medS(A.rec);
     if (lo.length >= 10 && rate(lo) > D.loWin) warn.push(`强度不到 ${D.loS} 倍的局赢了 ${rate(lo)}%（目标 ≤ ${D.loWin}%）：弱构筑也能赢`);
     if (hi.length >= 10 && rate(hi) < D.hiWin) warn.push(`强度 ${D.hiS} 倍以上的局只赢 ${rate(hi)}%（目标 ≥ ${D.hiWin}%）：强构筑也没把握`);
-    if (LAD >= LADDER_MAX_N) { if (mp != null && (mp < D.topLo || mp > D.topHi)) warn.push(`最高一级梦魇，有计划的强度中位 ${f2(mp)}（目标 ${D.topLo}–${D.topHi}）`); }
-    else if (!LAD) {
-      if (mp != null && (mp < D.planLo || mp > D.planHi)) warn.push(`有计划的构筑强度中位 ${f2(mp)}（目标 ${D.planLo}–${D.planHi}）：${mp < D.planLo ? '会搭也打不过' : '随便搭搭就过'}`);
-      if (planS.length && (brk < D.breakLo || brk > D.breakHi)) warn.push(`打穿的局 ${brk}%（目标 ${D.breakLo}–${D.breakHi}%）`);
-      if (mr != null && mr >= D.rndHi) warn.push(`随机乱选的强度中位 ${f2(mr)}（目标 < ${D.rndHi}）：怎么选都一样`);
-      for (const [k, L] of Object.entries(byPath)) { const v = medS(L); if (v != null && v < D.pathLo) warn.push(`${k} 强度中位 ${f2(v)} 到不了 1 倍：陷阱路线`); }
+    if (LAD >= LADDER_MAX_N) { if (mr != null && (mr < D.ladderTopRec[0] || mr > D.ladderTopRec[1])) warn.push(`最高一级梦魇，照推荐的强度中位 ${f2(mr)}（目标 ${D.ladderTopRec.join('–')}）`); }
+    else if (!LAD) for (const st of STAGES_RUN) {
+      // 每关在它的建议等级上的目标（设计文档按每关的到达 / 通关等级和尝试次数推出来）；跑的不是那个等级就不比
+      const T = D.stages[st], lv = LV || R(`STAGES['${st}'].rec`); if (!T || (T.lv && T.lv !== lv)) continue;
+      const L = sums.filter((s) => s.stage === st), plan = L.filter(isPlan), rnd = L.filter((s) => s.archetype === 'random'), mp = medS(plan), mrd = medS(rnd);
+      const ps = plan.filter((s) => s.strength != null), bk = pct(ps.filter((s) => s.strength >= D.breakS).length, ps.length);
+      if (T.plan && mp != null && (mp < T.plan[0] || mp > T.plan[1])) warn.push(`${st}（${lv} 级）有计划的强度中位 ${f2(mp)}（目标 ${T.plan.join('–')}）`);
+      if (T.win && plan.length && (rate(plan) < T.win[0] || rate(plan) > T.win[1])) warn.push(`${st}（${lv} 级）有计划的胜率 ${rate(plan)}%（目标 ${T.win.join('–')}%）`);
+      if (T.brk && ps.length && (bk < T.brk[0] || bk > T.brk[1])) warn.push(`${st} 打穿的局 ${bk}%（目标 ${T.brk.join('–')}%）`);
+      if (mrd != null && mrd >= D.loS) warn.push(`${st} 随手拿的强度中位 ${f2(mrd)}（目标 < ${D.loS}）：怎么选都一样`);
+      const bp = {}; for (const s2 of plan) (bp[s2.archetype] = bp[s2.archetype] || []).push(s2);
+      for (const [k, P2] of Object.entries(bp)) { const v = medS(P2); if (v != null && mp != null && v < mp * (1 - D.pathSpread)) warn.push(`${st} ${k} 强度中位 ${f2(v)}，比有计划的中位低 ${Math.round(D.pathSpread * 100)}% 以上：陷阱路线`); }
     }
   }
 }
@@ -337,13 +352,16 @@ async function careerReport() {
   console.log(`  高品质件：前五局每局 ${avgR(early)} 件，最后五局每局 ${avgR(late)} 件；共享等级 首通时中位 Lv${q(out.map((P) => { const x = P.log.find((y) => y.stage === '1-3' && y.won && !y.lad); return x ? x.lv : null; }), 0.5)}，最后中位 Lv${q(out.map((P) => P.log[P.log.length - 1].lv), 0.5)}`);
   const ph = (L) => `${pc(L.filter((x) => x.won).length, L.length)}%（${L.length}）`;
   console.log(`  各段胜率：1-1 ${ph(all.filter((x) => x.stage === '1-1'))}，1-2 ${ph(all.filter((x) => x.stage === '1-2'))}，1-3 首通前 ${ph(all.filter((x) => x.stage === '1-3' && !x.lad))}` + Array.from({ length: LADDER_MAX_N }, (_, i) => `，梦魇 ${i + 1} ${ph(all.filter((x) => x.lad === i + 1))}`).join(''));
-  // 目标（docs/design.md §3.6）：第一局打过首领 ≥ 80%；首通中位不早于 2 小时、四分之一的人也不早于 2 小时；没有白打的局；连续没新东西不超过 4 局
-  if (pc(fb, first.length) < 80) W.push(`第一局打过首领只有 ${pc(fb, first.length)}%（目标 ≥ 80%）`);
-  const fc = ms['首通（1-3）'].filter((x) => x != null);
-  if (fc.length && q(fc, 0.25) < 2) W.push(`四分之一的人 ${hr(q(fc, 0.25))} 就首通了（目标不早于 2 小时）`);
+  // 目标从设计文档读（§7、§14 report-targets）
+  const C = TARGETS.career, fc = ms['首通（1-3）'].filter((x) => x != null);
+  if (pc(fb, first.length) < C.firstBoss) W.push(`第一局打过首领只有 ${pc(fb, first.length)}%（目标 ≥ ${C.firstBoss}%）`);
+  if (fc.length && (q(fc, 0.5) < C.clearMedian[0] || q(fc, 0.5) > C.clearMedian[1])) W.push(`首通中位 ${hr(q(fc, 0.5))}（目标 ${C.clearMedian.join('–')} 小时）`);
+  if (fc.length && q(fc, 0.25) < C.clearP25) W.push(`四分之一的人 ${hr(q(fc, 0.25))} 就首通了（目标不早于 ${C.clearP25} 小时）`);
   if (fc.length < out.length * 0.5) W.push(`20 小时内只有 ${pc(fc.length, out.length)}% 的人首通`);
   if (white) W.push(`${white} 局什么都没带出来`);
-  if (q(quiet, 0.5) > 4) W.push(`玩家中位连续 ${q(quiet, 0.5)} 局没有新东西`);
+  const lad5 = ms[`梦魇 ${LADDER_MAX_N} 通关`] || [], q5 = q(lad5, 0.5), quietPre = out.map((P) => { const end = (P.log.find((x) => x.lad === LADDER_MAX_N && x.won) || {}).r; let m = 0, c = 0; for (const x of P.log) { if (end !== undefined && x.r > end) break; c = x.news.length ? 0 : c + 1; m = Math.max(m, c); } return m; });
+  if (q(quietPre, 0.5) > C.quietMax) W.push(`打完梦魇 ${LADDER_MAX_N} 之前，玩家中位连续 ${q(quietPre, 0.5)} 局没有新东西（目标 ≤ ${C.quietMax}）`);
+  console.log(`  打完梦魇 ${LADDER_MAX_N} 之前最长连续没有新东西：中位 ${q(quietPre, 0.5)} 局；之后内容用完（第二章之前）`);
   for (const w of W) console.log('  WARN ' + w);
   console.log(W.length ? `连续玩有 ${W.length} 条警告` : '连续玩无警告');
 }
