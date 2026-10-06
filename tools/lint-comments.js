@@ -15,7 +15,7 @@ for (const f of files) {
       const c = line[k];
       if (esc) { esc = false; continue; }
       if (c === '\\') { esc = true; continue; }
-      if (tpl > 0 && !q) { if (c === '`') tpl--; continue; }
+      if (tpl > 0 && !q && c === '`') { tpl--; continue; } // 模板字符串里也查：report-sim 的模拟代码整段放在模板字符串里
       if (q) { if (c === q) q = null; continue; }
       if (c === '`') { tpl++; continue; }
       if (c === '"' || c === "'") { q = c; continue; }

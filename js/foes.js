@@ -19,7 +19,7 @@ Object.assign(World.prototype, {
   /* ---------- 生成 ---------- */
   armorSetup(e) {
     const k = this.stage ? this.stage.hpK : 1;
-    e.armorMax = ARMOR.plate * k; e.armorHp = e.armorMax; e.crack = 0; e.push = 0; e.chipT = 0;
+    e.armorMax = ARMOR.plate * k * ((this.L && this.L.eliteK) || 1); e.armorHp = e.armorMax; e.crack = 0; e.push = 0; e.chipT = 0;
     return e;
   },
   addArmor(o = {}) {

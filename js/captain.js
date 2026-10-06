@@ -59,8 +59,9 @@ class CaptainBoss {
       case 'summon': {
         // 散兵：从右边补一队小怪，不计入“必须清零”的目标
         const top = w.arena.top + 60, bot = w.arena.bottom - 60, y0 = srand(top, bot);
-        if (this.kind === 'captain') for (let i = 0; i < 6; i++) w.addEnemy('jelly', { x: w.W + 10 + i * 50, y: y0, path: 'sine', vx: -120, amp: 30, freq: 2, phase: i * 0.5, escort: true, bossAdd: true });
-        else { for (let i = 0; i < 7; i++) w.addEnemy('moth', { x: w.W + 10 + srand(0, 160), y: srand(top, bot), path: 'line', vx: -srand(130, 170), escort: true, bossAdd: true }); w.addEnemy('star', { x: w.W + 40, y: srand(top, bot), path: 'dive', vx: -200, fire: 'aim', escort: true, bossAdd: true }); }
+        const nA = Math.round((this.kind === 'captain' ? 6 : 7) * (w.L.addsK || 1)), aHp = w.L.addHpK || 1; // 梦魇·护驾：散兵更多更结实
+        if (this.kind === 'captain') for (let i = 0; i < nA; i++) w.addEnemy('jelly', { x: w.W + 10 + i * 50, y: y0, path: 'sine', vx: -120, amp: 30, freq: 2, phase: i * 0.5, escort: true, bossAdd: true, hp: ENEMY_HP.jelly * aHp });
+        else { for (let i = 0; i < nA; i++) w.addEnemy('moth', { x: w.W + 10 + srand(0, 160), y: srand(top, bot), path: 'line', vx: -srand(130, 170), escort: true, bossAdd: true, hp: ENEMY_HP.moth * aHp }); w.addEnemy('star', { x: w.W + 40, y: srand(top, bot), path: 'dive', vx: -200, fire: 'aim', escort: true, bossAdd: true }); }
         this.guard = true;
         w.text('散兵来了 · 护盾撑起来了', this.x, this.y - 110, this.C.color, 18, 3);
         yield* wait(0.4); break;

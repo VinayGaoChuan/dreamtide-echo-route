@@ -76,7 +76,7 @@ class ClockBoss {
     if (this.phase === 3) {
       this.revT -= dt; if (this.revT <= 0) { this.revT = srand(4.5, 5.5); w.reverseT = 0.9; Sound.sfx('rewind'); w.emit('flag', { text: '时间倒流', color: 'gold', dur: 1 }); }
       this.repeatT -= dt; if (this.repeatT <= 0) { this.repeatT = 6.5; this.repeatGone(); }
-      this.shieldT -= dt; if (this.shieldT <= 0) { this.shieldT = 24; if (this.shield <= 0) { this.shield = 60; this.shieldMax = 60; w.emit('flag', { text: '护盾恢复', color: 'white', dur: 1 }); Sound.sfx('weakOpen'); } }
+      this.shieldT -= dt; if (this.shieldT <= 0) { this.shieldT = w.L.shieldT || 24; if (this.shield <= 0) { this.shield = 60; this.shieldMax = 60; w.emit('flag', { text: '护盾恢复', color: 'white', dur: 1 }); Sound.sfx('weakOpen'); } }
     }
     // sweep beam
     if (this.sweep) {

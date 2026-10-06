@@ -96,6 +96,7 @@ const PLAN = [
   { name: 'boss-late', until: 'w.boss && w.boss.phase >= 2 && w.bullets.count() > 20', max: 240 },
   { name: 'victory', until: "w.state === 'victory'", max: 200 },
   { name: 'result', wait: 3500 },
+  { name: 'hub-ladder', screen: 'eval', js: "clearScreens(); const P = G.meta.progress; P.ladder = 3; P.ladderSel = 2; P.selected = '1-3'; showHub()", wait: 1200 }, // 家园出击区：梦魇级选择
 ];
 const SHOTS = ['hand', 'ritual-choose', 'bridge', 'swell', 'boss-late']; // 02~06：地图出手、升级、断桥、割草、Boss
 /* 标志时刻：到点后按真实时间连拍（游戏照常跑），看动画而不是一张静帧 */
@@ -138,9 +139,10 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
     const SEL = !MOMENTS_MODE ? PLAN : !ONLY ? MOMENTS : MOMENTS.filter((m) => ONLY.split(',').includes(m.name)).map((m, i) => (i === 0 && !m.start ? Object.assign({}, m, { start: '1-1' }) : m));
     for (const s of SEL) {
       if (s.screen === 'title') { await sleep(1500); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
+      if (s.screen === 'eval') { await ev(s.js + '; true'); await sleep(s.wait || 900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; } // 任意界面：先执行 js 再截
       if (s.screen === 'keyart') { await ev("clearScreens(); G.bg = 'keyart'; true"); await sleep(900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
       if (s.start) {
-        await ev(`(() => { const m = G.meta; m.seenTitle = true; m.firstRunDone = true; m.tutorialDone = true; m.shared.level = 5; m.progress.cleared['1-1'] = true; m.progress.cleared['1-2'] = true; startRun('${s.start}'); return true; })()`);
+        await ev(`(() => { const m = G.meta; m.seenTitle = true; m.firstRunDone = true; m.tutorialDone = true; m.shared.level = 16; m.progress.cleared['1-1'] = true; m.progress.cleared['1-2'] = true; startRun('${s.start}'); return true; })()`);
         await sleep(400); await ev('__S.attach(); G.world.pilotNoBurst = true; true'); // 像玩家一样攒着大招，只在“大招”那一刻放
       }
       if (s.setup) await ev(s.setup);

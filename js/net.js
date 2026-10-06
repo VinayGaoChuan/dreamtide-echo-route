@@ -12,7 +12,7 @@ const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAf
 const SS_ID = 'dreamtide.mp.id', SS_ROOM = 'dreamtide.mp.room'; // 本标签页的联机身份和所在房间（刷新后回到原对局）
 function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
 function ssSet(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* 隐私模式等：只是不能刷新回来 */ } }
-const MP_PROTO = 4; // 4：刷新回到原对局（rj）、准备确认；3：断线保留席位（断线区间 w / 恢复请求 ry / 断线占位操作）；2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
+const MP_PROTO = 5; // 5：开局带梦魇级数（ladder）； 4：刷新回到原对局（rj）、准备确认；3：断线保留席位（断线区间 w / 恢复请求 ry / 断线占位操作）；2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
 
 /* ---------- 操作编码：一帧 5 个字符 ---------- */
 const NetCodec = {
@@ -376,7 +376,7 @@ const Lobby = {
       const r = rooms.get(m.code) || { code: m.code, members: [], host: null, started: false, stage: null, mode: 'coop' };
       const ls = p.presence.ls;
       r.members.push({ peer: p.peer, isMe: p.isMe, name: String(m.name || '玩家').slice(0, 12), plane: PLANES[m.plane] ? m.plane : 'moon', host: !!m.host, prof: m.prof || null, playing: !!(ls && ls.g), rtt: typeof m.rtt === 'number' ? m.rtt : null, rdy: m.rdy || null });
-      if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; r.mode = m.mode === 'vs' ? 'vs' : 'coop'; r.stat = m.stat === 'fair' ? 'fair' : 'real'; r.cfg = m.cfg || null; r.cd = m.cd || null; r.startId = m.start ? m.start.id : null; r.players = m.start && Array.isArray(m.start.peers) ? m.start.peers : m.start && Array.isArray(m.start.roster) ? m.start.roster.map((x) => x.peer) : []; }
+      if (m.host) { r.host = p.peer; r.started = !!m.start; r.stage = m.stage || null; r.mode = m.mode === 'vs' ? 'vs' : 'coop'; r.stat = m.stat === 'fair' ? 'fair' : 'real'; r.ladder = m.ladder | 0; r.cfg = m.cfg || null; r.cd = m.cd || null; r.startId = m.start ? m.start.id : null; r.players = m.start && Array.isArray(m.start.peers) ? m.start.peers : m.start && Array.isArray(m.start.roster) ? m.start.roster.map((x) => x.peer) : []; }
       rooms.set(m.code, r);
     }
     for (const r of rooms.values()) r.members.sort((a, b) => (b.host - a.host) || (a.peer < b.peer ? -1 : a.peer > b.peer ? 1 : 0));
@@ -396,7 +396,7 @@ const Lobby = {
   room() { return this.openRooms().find((x) => x.code === this.code) || null; },
   members() { const r = this.room(); return r ? r.members : []; },
   /* 房主开局：把名单（含每人的局外属性）写进自己的在场状态，大家看到就各自开始 */
-  start(stage, delay, mode, stat) {
+  start(stage, delay, mode, stat, ladder) {
     if (!this.isHost) return false;
     const ms = this.members().slice(0, MP_MAX); if (ms.length < 2) return false;
     const fair = mode === 'vs' && stat === 'fair'; // 统一属性：所有人按 1 级基础属性、大招容量 1（关掉局外成长差距）
@@ -404,7 +404,7 @@ const Lobby = {
     const id = Math.random().toString(36).slice(2, 8), seed = (Math.random() * 4294967296) >>> 0;
     const now = this.net.serverNow ? this.net.serverNow() : null, at = now === null ? null : Math.round(now + 900); // 约 0.9 秒后大家在同一刻开局
     const vs = mode === 'vs'; // 对抗（v0.11）：每人一条航道、三段计分；关卡数值按第一关
-    this.me({ stage, mode: vs ? 'vs' : 'coop', cd: null, start: { id, stage: vs ? '1-1' : stage, mode: vs ? 'vs' : 'coop', stat: fair ? 'fair' : 'real', peers: roster.map((r) => r.peer), seed, roster, at, delay: delay || this.autoDelay(ms), world: vs ? {} : this.mergeWorld(ms) } }); // 家园改变的世界状态：合并房间里每个人的（写进开局单，各端一致）
+    this.me({ stage, mode: vs ? 'vs' : 'coop', cd: null, start: { id, stage: vs ? '1-1' : stage, mode: vs ? 'vs' : 'coop', stat: fair ? 'fair' : 'real', ladder: vs ? 0 : ladder | 0, peers: roster.map((r) => r.peer), seed, roster, at, delay: delay || this.autoDelay(ms), world: vs ? {} : this.mergeWorld(ms) } }); // 家园改变的世界状态：合并房间里每个人的（写进开局单，各端一致）
     this.changed(); // 房主自己马上开局（不用等服务器把自己的状态转回来）
     return true;
   },

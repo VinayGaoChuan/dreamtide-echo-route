@@ -10,7 +10,7 @@ const RIT = {
   full: { trigger: 0.3, transform: 0.75, roll: 1.5, reveal: 0.5, show: 1.0, fly: 0.5, resume: 0.8 },
   short: { trigger: 0.2, transform: 0, roll: 0.45, reveal: 0.35, show: 0.7, fly: 0.45, resume: 0.8 },
 };
-const QUALITY = [{ name: '普通', color: '#e8e2ff' }, { name: '精良', color: '#7fd8ff' }, { name: '闪耀', color: '#ffd76a' }];
+const QUALITY = [{ name: '普通', color: '#e8e2ff' }, { name: '史诗', color: '#c08bff' }, { name: '传说', color: '#ffd76a' }, { name: '神话', color: '#ff6b8a' }];
 const GATE_R = 56;       // 候选确认圈半径
 const GATE_DWELL = 0.3;  // 在圈里停多久确认
 const CHOOSE_LIMIT = { coop: 25, vs: 15 }; // 联机选升级限时（秒）：到时自动选推荐，不让一个人拖住全场；单人不限时
@@ -50,11 +50,12 @@ Object.assign(World.prototype, {
     if (cur && cur.id === id) return cur.lv >= 2 ? null : { kind: 'bmod', id, from: cur.lv, to: 2 };
     return { kind: 'bmod', id, from: 0, to: 1, replace: cur ? { id: cur.id, lv: cur.lv } : null };
   },
-  optLink(key) { if (this.links.has(key)) return null; return SYNERGIES[key].need.every((n) => this.ownLv(n) >= BUILD_CHECK.needLv) ? { kind: 'link', id: key } : null; }, // 两件都到 needLv 级才能接
+  linkNeed() { return this.first && !this.links.size ? FIRST_RUN.needLv : BUILD_CHECK.needLv; }, // 第一局的第一个联动只要 1 级（构筑小爆发）
+  optLink(key) { if (this.links.has(key)) return null; return SYNERGIES[key].need.every((n) => this.ownLv(n) >= this.linkNeed()) ? { kind: 'link', id: key } : null; }, // 两件都到 needLv 级才能接
   enablesLink(o) {
     if (o.kind === 'link') return true;
     if (o.kind !== 'gun' && o.kind !== 'support') return false;
-    return Object.entries(SYNERGIES).some(([k, L]) => !this.links.has(k) && L.need.includes(o.id) && L.need.every((n) => (n === o.id ? o.to : this.ownLv(n)) >= BUILD_CHECK.needLv) && !(o.replace && L.need.includes(o.replace.id)));
+    return Object.entries(SYNERGIES).some(([k, L]) => !this.links.has(k) && L.need.includes(o.id) && L.need.every((n) => (n === o.id ? o.to : this.ownLv(n)) >= this.linkNeed()) && !(o.replace && L.need.includes(o.replace.id)));
   },
   /* 这一局在追的流派：单人时大厅的目标流派优先（还没走到别的流派上时），否则是离当前 Build 最近、还没做完的那条。
      联机不用本机的目标，只看自己的 Build（各端一致） */
@@ -77,7 +78,7 @@ Object.assign(World.prototype, {
     const gun = GUN_ORDER.map((id) => this.optGun(id, rare)).filter(Boolean);
     const sup = SUPPORT_ORDER.map((id) => this.optSupport(id, rare)).filter(Boolean);
     const bm = BURST_MOD_ORDER.map((id) => this.optBmod(id)).filter(Boolean);
-    const lk = Object.keys(SYNERGIES).map((k) => this.optLink(k)).filter(Boolean);
+    const lk = []; // 联动不再单独占一次选择：两件到级就自动接上（applyOption 末尾）
     const everything = [...gun, ...sup, ...bm, ...lk];
     // 第一只厚甲怪之后：一个“集中打单体”的方案 + 一个“清一片”的方案，两者兼容
     if ((source === 'wind' || source === 'armor') && this.goal && this.goal.kind === 'armor1') {
@@ -98,11 +99,11 @@ Object.assign(World.prototype, {
     // 引导（v0.12）：能凑的联动一出现就给（哪个装置都给）；否则给本局流派还缺的那一件（这个装置的池子里有的话）。
     // 另一个候选照常随机：玩家永远可以换方向，换了以后引导跟着他的 Build 走
     let a = null;
-    if (this.offerN >= 1) {
+    if (this.offerN >= 1 && srnd() < BUILD_CHECK.steer) { // 引导不是每次都有：会规划的人照样成型，随手拿的人难得凑齐
       const P = this.aimPlan(), steer = P.next ? pool.find((o) => o.id === P.next && (o.kind === 'gun' || o.kind === 'support')) || null : null; // 缺的那件（这个装置的池子里有的话）：没有就给，有了没到级就给升级
       a = lk.find((o) => o.id === P.link) || lk[0] || null;
       if (a && steer && a.id !== P.link) return [a, steer]; // 别的流派的联动现在就能拿 vs 接着凑自己流派的下一件：真正的取舍
-      if (!a) a = steer && steer.from > 0 && steer.to >= BUILD_CHECK.needLv ? Object.assign({}, steer, { why: `到 ${BUILD_CHECK.needLv} 级就能接联动` }) : steer;
+      if (!a) a = steer && steer.from > 0 && steer.to >= this.linkNeed() ? Object.assign({}, steer, { why: `到 ${this.linkNeed()} 级就能接联动` }) : steer;
     }
     if (!a && this.offerN === 1 && upgrades.length && fresh.length) a = spick(upgrades);
     else if (!a && (this.offerN === 2 || rare || source === 'core' || source === 'moon')) { const L = pool.filter((o) => this.enablesLink(o)); if (L.length) a = spick(L); }
@@ -128,11 +129,23 @@ Object.assign(World.prototype, {
     return list[list.length - 1];
   },
   /* 品质提升：只升不降——能升级就多升 1 级，满级了就附带一份大招能量 */
+  /* 品质提升一档：不加等级，只给这件一个品质（对路时乘到全部火力上，见 recalcPower），附带一小截大招充能 */
   upgradeOpt(o) {
-    const c = Object.assign({}, o); c.qUp = (c.qUp || 0) + 1;
-    if ((c.kind === 'gun' || c.kind === 'support') && c.to < 3) { c.to++; return c; }
-    if (c.kind === 'bmod' && c.to < 2) { c.to = 2; return c; }
-    c.bonus = (c.bonus || 0) + 0.35; return c;
+    const c = Object.assign({}, o); c.qUp = (c.qUp || 0) + 1; c.bonus = (c.bonus || 0) + 0.15; return c;
+  },
+  /* 完整仪式掷品质：史诗、传说常给，神话少给；luck（共享等级）越高给得越多；装置自带的档位是保底；第一局第一个完整仪式一定是传说 */
+  rollQuality(p, floor) {
+    const L = p.stats.luck || 0, Q = QUALITY_ROLL, r = srnd(), at = (k) => Q[k][0] + Q[k][1] * L;
+    let tier = r < at('myth') ? 3 : r < at('legend') ? 2 : r < at('epic') ? 1 : 0;
+    if (this.first && !p.firstRare) { tier = Math.max(tier, FIRST_RUN.rareTier); p.firstRare = true; }
+    return Math.max(tier, Math.min(floor || 0, 1 + Math.floor(L / Q.floorLuck))); // 装置保底：前期最多保到史诗
+  },
+  /* 火力：成型（第一个联动）× formK，再乘上每件对路的高品质件（属于已成型流派的件和联动本身）；没对路的高品质件不加火力 */
+  recalcPower(p) {
+    const links = [...p.links]; let k = links.length ? BUILD_CHECK.formKOf[links[0]] || BUILD_CHECK.formK : 1, on = 0;
+    const onIds = new Set(); for (const P of BUILD_PATHS) if (links.includes(P.path.find((x) => x.includes('+')))) for (const id of P.path) onIds.add(id);
+    for (const id of onIds) { const q = p.qual[id] || 0; if (q) { k *= 1 + QUALITY_K[q]; on++; } }
+    p.stats.dmgK = p.baseDmgK * k; p.rareOn = on;
   },
   /* 卡片信息：名字 + 等级、一句话（不写数值）、一排箭头；附带的大招能量也只是一个箭头 */
   optInfo(o) {
@@ -163,8 +176,8 @@ Object.assign(World.prototype, {
     const T = q.full ? RIT.full : RIT.short;
     const first = this.offerN === 0;
     const x = q.x !== undefined ? clamp(q.x, 120, this.W - 120) : clamp(p.x + 320, this.W * 0.45, this.W * 0.74), y = q.y !== undefined ? clamp(q.y, top, bot) : clamp(p.y - 40, top, bot);
-    const qPlan = q.full && !first ? clamp(q.q, 0, 2) : 0;
-    this.ritual = { q, T, opts, st: 'trigger', t: 0, total: 0, x, y, rot: 0, spin: q.full ? 20 : 12, qNow: 0, qPlan, qAt: qPlan === 2 ? [0.35, 0.78] : qPlan === 1 ? [0.62] : [], gates: null, pick: -1, chooseT: 0, first, px: p.x, py: p.y, flyT: 0 };
+    const qPlan = q.full && !first ? this.rollQuality(p, q.q) : 0;
+    this.ritual = { q, T, opts, st: 'trigger', t: 0, total: 0, x, y, rot: 0, spin: q.full ? 20 : 12, qNow: 0, qPlan, qAt: [[], [0.62], [0.35, 0.78], [0.3, 0.55, 0.8]][qPlan], gates: null, pick: -1, chooseT: 0, first, px: p.x, py: p.y, flyT: 0 };
     this.offerN++; p.res.offers++;
     const hasUp = opts.some((o) => o && o.from > 0);
     this.dryOffers = hasUp || this.offerN < 3 ? 0 : this.dryOffers + 1;
@@ -272,16 +285,17 @@ Object.assign(World.prototype, {
     if (this.m.firstSkill === null) this.m.firstSkill = this.runT;
     const pre = this.buildSummary();
     this.applyOption(G.opt); // 数据在确认时写入
-    R.word = G.opt.kind === 'link' ? '组合完成' : G.opt.from > 0 ? '升级' : '获得';
+    R.linked = this.links.size > (pre.links || []).length; // 这一次补齐了两件：联动自动接上
+    R.word = G.opt.kind === 'link' || R.linked ? '组合完成' : G.opt.from > 0 ? '升级' : '获得';
     R.prevBuild = pre;
-    if (this.mine()) { Sound.sfx(G.opt.kind === 'link' ? 'synergy' : 'crystal', { ui: true }); this.rumble(0.35, 0.3, 80); }
+    if (this.mine()) { Sound.sfx(G.opt.kind === 'link' || R.linked ? 'synergy' : 'crystal', { ui: true }); this.rumble(0.35, 0.3, 80); }
     this.ritStep('show');
   },
   landRitual(R) {
     const G = R.gates[R.pick];
     this.hudBuild = this.buildSummary();
     if (this.mine()) {
-      if (G.opt.kind === 'link') { this.player.linkFx = 2.5; this.part('ring', this.player.x, this.player.y, 0, 0, 0.5, 140, 'rgba(255,215,106,0.95)'); } // 组合完成：飞机周围亮一圈金色光环
+      if (G.opt.kind === 'link' || R.linked) { this.player.linkFx = 2.5; this.part('ring', this.player.x, this.player.y, 0, 0, 0.5, 140, 'rgba(255,215,106,0.95)'); } // 组合完成：飞机周围亮一圈金色光环
       this.emit('slotLand', { slot: SLOT_OF[G.opt.kind] || 'gun', kind: G.opt.kind, id: G.opt.id, lv: G.info.lv, name: G.info.name, desc: G.info.desc, color: G.info.color, tag: G.info.tag, replace: G.opt.replace || null, word: R.word, first: this.picks.length === 1 });
       Sound.sfx('slotLand', { ui: true });
     }
@@ -311,11 +325,14 @@ Object.assign(World.prototype, {
         if (o.replace && o.replace.id === 'thunder') this.storm = null;
         break;
       case 'bmod': this.bmod = { id: o.id, lv: o.to }; break;
-      // 第一个联动 = 成型：之后所有攻击 × formK
-      case 'link': this.links.add(o.id); p.res.syns++; if (this.links.size === 1) { this.stats.dmgK *= BUILD_CHECK.formKOf[o.id] || BUILD_CHECK.formK; this.text('成型！火力大涨', p.x, p.y - 70, '#ffd76a', 24, 5); } if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); if (mine) { this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); } break;
+      // 第一个联动 = 成型：之后所有攻击 × formK（recalcPower）
+      case 'link': this.links.add(o.id); p.res.syns++; if (this.links.size === 1) this.text('成型！火力大涨', p.x, p.y - 70, '#ffd76a', 24, 5); if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); if (mine) { this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); } break;
       case 'res': if (o.id === 'charge') this.addCharge(0.5, true); else if (p.hp < p.maxHp) p.hp++; break;
     }
     if (o.bonus) this.addCharge(o.bonus, true);
+    if (o.qUp && o.kind !== 'res') { p.qual[o.id] = Math.max(p.qual[o.id] || 0, Math.min(3, o.qUp)); p.res.rare = (p.res.rare || 0) + 1; if (p.res.rareAt === undefined) p.res.rareAt = this.runT; } // 品质记在这一件上
+    if (o.kind === 'gun' || o.kind === 'support') for (const k of Object.keys(SYNERGIES)) if (this.optLink(k)) this.applyOption({ kind: 'link', id: k, qUp: o.qUp && SYNERGIES[k].need.includes(o.id) ? o.qUp : 0 }); // 两件到级：联动自动接上（品质跟着补齐它的那一件）
+    this.recalcPower(p); // 成型、对路的高品质件 → 全部火力
     p.skills = this.support ? [Object.assign({}, this.support, { t: 0.4, t2: 3 })] : []; // 自己的支援技能和冷却
     this.picks.push(o); this.crystals = this.picks.length; p.res.crystals++;
     if (mine && (o.kind === 'gun' || o.kind === 'support') && this.cb.onSkill) this.cb.onSkill(o.id);
@@ -346,7 +363,7 @@ Object.assign(World.prototype, {
     } else if (this.stream) this.stream = { id: this.topId(), name };
   },
   buildSummary() {
-    return { gun: Object.assign({}, this.gun), support: this.support ? { id: this.support.id, lv: this.support.ulv } : null, bmod: this.bmod ? Object.assign({}, this.bmod) : null, links: [...this.links], recent: (this.recentMods || []).slice() };
+    return { need: this.linkNeed(), gun: Object.assign({}, this.gun), support: this.support ? { id: this.support.id, lv: this.support.ulv } : null, bmod: this.bmod ? Object.assign({}, this.bmod) : null, links: [...this.links], recent: (this.recentMods || []).slice() };
   },
 
   /* ---------- 画：装置 / 候选 / 中央展示 / 飞入 ---------- */

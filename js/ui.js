@@ -163,6 +163,15 @@ function levelUp() {
 }
 function stageUnlocked(id) { const i = STAGE_ORDER.indexOf(id); return i === 0 || !!G.meta.progress.cleared[STAGE_ORDER[i - 1]]; }
 function nextStage() { return STAGE_ORDER.find((id) => !G.meta.progress.cleared[id]) || STAGE_ORDER[STAGE_ORDER.length - 1]; }
+/* 当前选的梦魇级（不超过已解锁的） */
+function ladderNow(m) { m = m || G.meta; return Math.min(m.progress.ladderSel || 0, m.progress.ladder || 0); }
+/* 梦魇（难度阶梯）：1-3 首通后才出现；选中的那一级写出它多的那条规则（规则逐级叠加） */
+function ladderChips() {
+  const P = G.meta.progress, top = P.ladder || 0; if (!top) return '';
+  const sel = ladderNow(), Lr = LADDER[sel];
+  const chips = LADDER.slice(0, top + 1).map((L, i) => `<button class="chip ${i === sel ? 'gold' : ''}" data-ladder="${i}" type="button">${i ? `梦魇 ${i} · ${L.name}` : '基础'}</button>`).join('');
+  return `<div class="row wrap" style="justify-content:center">${chips}</div>${sel ? `<span class="dim-text" style="font-size:var(--fs-xs)">${esc(Lr.line)} · 星尘 ×${(1 + LADDER_PAY * sel).toFixed(2)}${sel > 1 ? ` · 前 ${sel - 1} 级的规则也在` : ''}</span>` : ''}`;
+}
 function ultCapNow() { return ULT_CAP.reduce((c, u) => (!u.need || G.meta.progress.cleared[u.need] ? Math.max(c, u.cap) : c), 1); }
 function stageChips(sel) {
   const P = G.meta.progress;
@@ -278,7 +287,8 @@ function showHub() {
     <div class="hub-start home-start">
       <div class="row wrap" style="justify-content:center"><span class="pname">${P.name}</span><span class="chip gold">大招 · ${P.burst.name} · 最多存 ${cap} 次</span></div>
       ${stageChips(sel)}
-      <div class="row" style="justify-content:center"><button class="btn primary big" id="hub-go" type="button" autofocus>${icon('i-hangar')} 出击 · ${sel} ${S.name}</button><button class="btn big cyan" id="hub-mp2" type="button">${icon('i-team')} ${Lobby.code ? `房间 ${esc(Lobby.code)}` : '联机'}</button></div>
+      ${ladderChips()}
+      <div class="row" style="justify-content:center"><button class="btn primary big" id="hub-go" type="button" autofocus>${icon('i-hangar')} 出击 · ${sel} ${S.name}${ladderNow() ? ` · 梦魇 ${ladderNow()}` : ''}</button><button class="btn big cyan" id="hub-mp2" type="button">${icon('i-team')} ${Lobby.code ? `房间 ${esc(Lobby.code)}` : '联机'}</button></div>
       ${m.shared.level < S.rec ? `<span class="dim-text" style="font-size:var(--fs-xs)">建议共享等级 ${S.rec}（只是提示，不锁关）</span>` : ''}
     </div>
     <div class="panel home-panel" id="home-panel" ${UI.panel ? '' : 'hidden'}>${UI.panel ? homePanelHtml(UI.panel) : ''}</div>`, { bg: 'home', label: '家园' });
@@ -287,6 +297,7 @@ function showHub() {
   $('#hub-go', el).onclick = () => { Sound.sfx('select'); UI.panel = null; UI.place = null; if (Lobby.code) { Lobby.leave(); toast('单人出击：已离开联机房间', '#ffe38a'); } startRun(sel); };
   $('#hub-mp2', el).onclick = () => { Sound.sfx('select'); UI.panel = null; UI.place = null; showMultiplayer(showHub); };
   $$('[data-stage]', el).forEach((b) => b.onclick = () => { if (!stageUnlocked(b.dataset.stage)) { Sound.sfx('denied'); toast('先通关上一关', '#ffb2a8'); return; } Sound.sfx('ui'); m.progress.selected = b.dataset.stage; persist(); showHub(); });
+  $$('[data-ladder]', el).forEach((b) => b.onclick = () => { Sound.sfx('ui'); m.progress.ladderSel = +b.dataset.ladder; persist(); showHub(); });
   $('#stage-ch2', el).onclick = () => { Sound.sfx('denied'); toast('第 2 章还在制作中', '#ffe38a'); };
   const gb = $('#hub-gacha', el); if (gb) gb.onclick = () => { Sound.sfx('ui'); showGacha(showHub); };
   $('#hub-planes', el).onclick = () => { Sound.sfx('ui'); showPlanes(showHub); };
@@ -430,7 +441,8 @@ function showMultiplayer(back, joinCode, resumeData) {
   nick.addEventListener('change', () => { m.nick = nick.value.trim().slice(0, 12) || m.nick; persist(); if (Lobby.code) Lobby.me({ name: m.nick }); });
   const rm = resumeData && resumeData.isHost ? resumeData.mp || {} : {}; // 房主刷新回来：沿用刷新前的设置
   let sig = '', stage = G.mpStage || rm.stage || m.progress.selected || nextStage(), delay = 0, mode = G.mpMode || rm.mode || 'coop', stat = G.mpStat || rm.stat || 'real'; // 合作 / 对抗（v0.11）；对抗属性：真实成长 / 统一属性
-  const cfgNow = () => `${mode}|${mode === 'vs' ? stat : stage}|${G.mpRound || 0}`; // 房主的配置号：改玩法 / 关卡 / 属性（或开过一局）就变，之前的“准备”自动作废
+  const lad = ladderNow(m); // 房主当前选的梦魇级，合作开局时带上
+  const cfgNow = () => `${mode}|${mode === 'vs' ? stat : stage + '|' + lad}|${G.mpRound || 0}`; // 房主的配置号：改玩法 / 关卡 / 属性（或开过一局）就变，之前的“准备”自动作废
   let cdTimer = null;
   const paint = () => {
     if (G.screen !== 'mp' || !document.body.contains(el)) { Lobby.onUpdate = null; if (cdTimer) { clearInterval(cdTimer); cdTimer = null; } return; }
@@ -443,12 +455,12 @@ function showMultiplayer(back, joinCode, resumeData) {
       : net.kind === 'room' ? '通过 Claude 房间连接：打开同一个游戏链接的人都能看到你的房间。' : '本机测试模式：在这个浏览器里再开一个窗口打开游戏，就能互相看到。';
     if (room && !Lobby.isHost) { if (room.mode) mode = room.mode; if (room.stat) stat = room.stat; } // 跟着房主选的玩法
     const host = Lobby.isHost, me = Lobby.myMp();
-    if (host && room && me.cfg !== cfgNow()) Lobby.me({ cfg: cfgNow(), mode, stage, stat, cd: null }); // 房主改了设置：发出新的配置号（准备全部作废、倒计时取消）
+    if (host && room && me.cfg !== cfgNow()) Lobby.me({ cfg: cfgNow(), mode, stage, stat, ladder: lad, cd: null }); // 房主改了设置：发出新的配置号（准备全部作废、倒计时取消）
     const ms = room ? room.members : [], n = ms.length, cfg = room && room.cfg, others = ms.filter((x) => !x.host);
     const isReady = (x) => x.host || (cfg && x.rdy === cfg), notReady = others.filter((x) => !isReady(x)), allReady = n >= 2 && !notReady.length;
     const cd = room && room.cd && room.cd.cfg === cfg ? room.cd : null, now = net.serverNow ? net.serverNow() : Date.now(), cdLeft = cd && now !== null ? Math.max(0, Math.ceil((cd.at - now) / 1000)) : null;
     // 房主：倒计时到了就开局；倒计时中有人取消准备 / 设置变了就自动取消
-    if (host && cd) { if (!allReady) Lobby.me({ cd: null }); else if (now !== null && now >= cd.at) { Lobby.me({ cd: null }); G.mpRound = (G.mpRound || 0) + 1; if (!Lobby.start(stage, delay, mode, stat)) Sound.sfx('denied'); return; } }
+    if (host && cd) { if (!allReady) Lobby.me({ cd: null }); else if (now !== null && now >= cd.at) { Lobby.me({ cd: null }); G.mpRound = (G.mpRound || 0) + 1; if (!Lobby.start(stage, delay, mode, stat, lad)) Sound.sfx('denied'); return; } }
     if (cd && !cdTimer) cdTimer = setInterval(paint, 200); else if (!cd && cdTimer) { clearInterval(cdTimer); cdTimer = null; }
     const k = JSON.stringify([Lobby.code, host, stage, delay, mode, stat, cfg, cdLeft, room && room.members.map((x) => [x.peer, x.name, x.plane, x.playing, x.rdy, x.prof && x.prof.g, x.prof && x.prof.w && x.prof.w.target, x.prof && x.prof.w && x.prof.w.upper, x.prof && x.prof.s && x.prof.s.hearts, x.prof && x.prof.s && x.prof.s.dmgK, x.prof && x.prof.u]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.mode, r.stat, r.players.join(), r.members[0].name])]);
     if (k === sig) return; sig = k;
@@ -465,7 +477,7 @@ function showMultiplayer(back, joinCode, resumeData) {
     const chips = STAGE_ORDER.map((id) => { const ok = stageUnlocked(id); return `<button class="stage-chip ${id === stage ? 'sel' : ''} ${ok ? '' : 'locked'}" data-mst="${id}" type="button" ${ok ? '' : 'aria-disabled="true"'}><b>${id}</b><span>${STAGES[id].name}</span>${ok ? '' : icon('i-lock')}</button>`; }).join('');
     const dOpts = [[0, '自动'], [3, '短'], [6, '中'], [10, '长']], dNow = delay; // 0 = 按大家的延迟自动定
     const meReady = me.rdy && me.rdy === cfg;
-    body.innerHTML = `<h3>房间 <b class="mp-code">${esc(Lobby.code)}</b> <small class="dim-text">${n}/${MP_MAX} 人 · ${mode === 'vs' ? `对抗 · ${stat === 'fair' ? '统一属性' : '真实成长'}` : `合作 · ${esc(stage)}`}</small></h3>
+    body.innerHTML = `<h3>房间 <b class="mp-code">${esc(Lobby.code)}</b> <small class="dim-text">${n}/${MP_MAX} 人 · ${mode === 'vs' ? `对抗 · ${stat === 'fair' ? '统一属性' : '真实成长'}` : `合作 · ${esc(stage)}${(host ? lad : room.ladder) ? ` · 梦魇 ${host ? lad : room.ladder}` : ''}`}</small></h3>
       <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : isReady(x) ? ' <small class="chip ok">✓ 准备</small>' : ' <small class="chip">未准备</small>'}<br><small class="dim-text">${PLANES[x.plane].name}${mode === 'vs' ? '' : x.prof && x.prof.g ? ` · ${esc(x.prof.g)}` : ''}</small>${mode === 'vs' && stat === 'fair' ? '<br><small class="mp-grow">统一属性：♥5 · 攻 ×1.00 · 大招 1</small>' : growthHtml(x.prof)}</span></div>`).join('')}</div>
       ${mode === 'vs' ? (stat === 'fair' ? '<p class="dim-text mp-world">本场统一属性：所有人按 1 级基础属性、大招容量 1，不带局外成长</p>' : vsGapHtml(ms)) : ''}
       ${mode === 'vs' ? '' : (() => { const w = Lobby.mergeWorld(ms); const bits = []; if (w.upper) bits.push('上层云桥开着'); if (w.targets.length) bits.push(`这局会遇到：${w.targets.map((t) => NPCS[t].name).join('、')}`); return bits.length ? `<p class="dim-text mp-world">${esc(bits.join(' · '))}</p>` : ''; })()}
@@ -539,7 +551,9 @@ function startRun(stageId, mp) {
     mode: 'run', W: mp ? 1280 : G.W, plane: id, stage: stageId, ultCap: cap, stats: planeStats(m, id), first, vs: vsRun,
     seed: mp ? mp.st.seed : undefined, me: mp ? mp.idx : 0,
     world: mp ? mp.st.world || {} : Home.worldFor(m), goalText: vsRun ? null : Home.runGoalText(m), // 家园改变战场：多人时用房主的世界状态，各端一致
-    players: mp ? mp.st.roster.map((r) => ({ id: r.peer, name: r.name, plane: r.plane, stats: r.stats || planeStats(null, r.plane), ultCap: r.ultCap || 1, cos: r.cos || {} })) : undefined, target: (m.nextHint && (m.nextHint.target || m.nextHint.buildName)) || null, tutorial: !m.tutorialDone, settings: m.settings, scene: G.sea, cos: m.cosmetics, seenMap: Object.keys(m.codex.map || {}),
+    players: mp ? mp.st.roster.map((r) => ({ id: r.peer, name: r.name, plane: r.plane, stats: r.stats || planeStats(null, r.plane), ultCap: r.ultCap || 1, cos: r.cos || {} })) : undefined,
+    // 梦魇级数：多人用房主开局时定的
+    ladder: vsRun ? 0 : mp ? mp.st.ladder || 0 : ladderNow(m), target: (m.nextHint && (m.nextHint.target || m.nextHint.buildName)) || null, tutorial: !m.tutorialDone, settings: m.settings, scene: G.sea, cos: m.cosmetics, seenMap: Object.keys(m.codex.map || {}),
     cb: {
       onEnd: onRunEnd,
       onRescue: (id) => { const r = Home.rescue(m, id); if (r) { G.runRescued.push(r); persist(); } }, // 伙伴到达修理点就存档：之后被击落也不会丢
@@ -580,7 +594,8 @@ function onRunEnd(res) {
   // v0.10 失败保留：每完成一个目标当场入账的星尘、捡到的星砂（50:1 折算）、梦木都带回来；通关另给终点奖励
   Home.ensure(m);
   const earned = Math.floor(st.earned || 0), base = res.win ? endPay(S, firstClear) : 0;
-  const sand = Math.floor(st.dust), sandStar = Math.floor(sand / 50), dust = earned + base + sandStar, before = Math.floor(m.stardust);
+  const lad = (G.world && G.world.ladder) || 0, ladK = 1 + LADDER_PAY * lad; // 梦魇：星尘奖励按级数加成
+  const sand = Math.floor(st.dust), sandStar = Math.floor(sand / 50), dust = Math.round((earned + base + sandStar) * ladK), before = Math.floor(m.stardust);
   const baseLabel = res.win ? (firstClear ? '首通' : '再通关') : '';
   const wood = Math.floor(st.wood || 0);
   for (const id of st.rescuedNow || []) { const r = Home.rescue(m, id); if (r) G.runRescued.push(r); } // 正常已经在救出那一刻存过；这里只是补漏
@@ -593,6 +608,7 @@ function onRunEnd(res) {
   if (res.win) { P.cleared[res.stage] = true; P.clears[res.stage] = (P.clears[res.stage] || 0) + 1; if (!P.best[res.stage] || res.runT < P.best[res.stage]) P.best[res.stage] = Math.round(res.runT); }
   for (const id of newRescues) P.rescued[id] = 1;
   const capUp = ultCapNow() > capBefore ? ultCapNow() : 0; m.ultCap = ultCapNow();
+  let ladderUp = 0; if (res.win && res.stage === '1-3' && lad + 1 > (P.ladder || 0) && lad < LADDER_MAX) { P.ladder = lad + 1; ladderUp = lad + 1; } // 1-3 首通解锁梦魇 1；在 N 级打通解锁 N+1
   m.stardust += dust; m.tickets += tickets; m.cosTickets += cos;
   m.home.res.wood += wood; m.home.visit++;
   const workLog = Home.work(m, st.workT || 0); // 家园工作：按这一局的有效战斗时间推进（加工 → 卖货）
@@ -601,7 +617,7 @@ function onRunEnd(res) {
   Sx.kills += st.kills; Sx.bursts += st.bursts; Sx.runs += 1; Sx.syns += st.syns; Sx.streak100 += st.streak100 ? 1 : 0; Sx.crystals += st.crystals; Sx.bossKills += res.win ? 1 : 0; Sx.lv5 += st.lv5 ? 1 : 0; Sx.chests += st.chests;
   Sx.interacts = (Sx.interacts || 0) + (st.interacts || 0); Sx.rescues = (Sx.rescues || 0) + (st.rescues || 0); Sx.giants = (Sx.giants || 0) + (st.giants || 0);
   Tele.add('map_interacts', st.interacts); Tele.add('map_rescues', st.rescues); Tele.add('map_giants', st.giants); Tele.add('map_missed', st.interactFails); Tele.add('offers', st.offers); Tele.add('offer_missed', st.offerMiss);
-  const R = m.records;
+  const R = m.records; R.playT = (R.playT || 0) + (res.runT || 0); // 累计出击时间（记录用）
   if (res.win) { R.clears++; if (!R.bestTime || res.runT < R.bestTime) R.bestTime = Math.round(res.runT); }
   R.bestStreak = Math.max(R.bestStreak, st.maxStreak); R.bestCrystals = Math.max(R.bestCrystals, st.crystals);
   Tele.log(res.win ? 'run_completed' : 'run_failed', { stage: res.stage });
@@ -615,7 +631,7 @@ function onRunEnd(res) {
   const lure = makeLure(res);
   m.nextHint = lure;
   persist();
-  G.lastRes = { res, rewards: { dust, base, baseLabel, earned, sand, sandStar, wood, before, after: Math.floor(m.stardust), tickets, cos, frags, firstClear, capUp, newRescues, newbie: first && res.stage === '1-1' && firstClear }, lure };
+  G.lastRes = { res, rewards: { dust, base, baseLabel, earned, sand, sandStar, wood, before, after: Math.floor(m.stardust), tickets, cos, frags, firstClear, capUp, ladderUp, ladder: lad, newRescues, newbie: first && res.stage === '1-1' && firstClear }, lure };
   const sold = workLog.filter((e) => e.k === 'sell').length;
   G.homeArrive = { dust: dust + sold * HOME.sell, wood, log: workLog, rescued: (G.runRescued || []).slice(), newNpcs: (G.runRescued || []).filter((r) => r.resident).map((r) => r.id), lightDock: (G.runRescued || []).some((r) => r.id === 'bunny') };
   showEnd(G.lastRes);
@@ -640,7 +656,7 @@ function vsGapLine(v, order) {
    有效战斗时间照常推进家园工作（这是自己实际参与的出击） */
 const VS_PAY = { base: 30, tower: 10, win: 25 };
 function settleVs(res) {
-  const m = G.meta, st = res.stats, v = res.vs; Home.ensure(m);
+  const m = G.meta, st = res.stats, v = res.vs; Home.ensure(m); m.records.playT = (m.records.playT || 0) + (res.runT || 0); // 对抗也算累计出击时间
   const won = !res.abandoned && v.rank === 1 && !v.draw, sand = Math.floor(st.dust), sandStar = Math.floor(sand / 50);
   // 参与奖要有效参与：打完全程；主动退出至少打满一段（约 2 分钟）；掉线被移出 / 队友那边先结束的，打满 1 分钟就给（不误罚掉线）
   const quit = res.abandoned && !res.kicked && !res.orphan, base = !res.abandoned ? VS_PAY.base : (quit ? v.t >= VS.stageT : v.t >= 60) ? VS_PAY.base : 0;
@@ -723,7 +739,7 @@ function showEnd(E) {
     <div class="center-col">
       <div class="h-display" style="font-size:var(--fs-xl);color:${r.win ? 'var(--lamp2)' : 'var(--paper)'}">${r.win ? `${r.stage} ${S.name} 通关！` : r.abandoned ? '本局结束' : r.mp ? `全队 ${r.team.length} 架都被击落了` : `${P.name}被击落了`}</div>
       ${r.mp ? `<div class="dim-text">联机 · ${r.team.map((q) => esc(q.name) + (q.gone ? '（中途离开）' : '')).join('、')}</div>` : ''}
-      <div class="dim-text">${r.win ? `出击 ${fmtTime(r.runT)} · ${S.bossName} ${fmtTime(r.bossTime)}${rw.capUp ? ` · <b class="good">大招容量升到 ${rw.capUp} 次（所有飞机）</b>` : ''}` : `出击 ${fmtTime(r.runT)} · 完成度 ${Math.round(r.progress * 100)}% · 成长资源照常结算`}</div>
+      <div class="dim-text">${r.win ? `出击 ${fmtTime(r.runT)} · ${S.bossName} ${fmtTime(r.bossTime)}${rw.ladder ? ` · 梦魇 ${rw.ladder}` : ''}${rw.ladderUp ? ` · <b class="good">梦魇 ${rw.ladderUp} 解锁了</b>` : ''}${rw.capUp ? ` · <b class="good">大招容量升到 ${rw.capUp} 次（所有飞机）</b>` : ''}` : `出击 ${fmtTime(r.runT)} · 完成度 ${Math.round(r.progress * 100)}% · 成长资源照常结算`}</div>
       ${deathHtml(r)}
       ${(r.memories && r.memories.length) || r.clue ? `<div class="memo">${r.memories && r.memories.length ? `<span><b>这一局</b> ${r.memories.map(esc).join(' · ')}</span>` : ''}${r.clue ? `<span class="clue"><b>还没见过</b> ${esc(r.clue)}</span>` : ''}</div>` : ''}
       <div class="statrow">${[['击破', st.kills], ['最高连杀', st.maxStreak], ['升级选择', st.crystals], ['联动', st.syns], ['破甲', st.breaks || 0], ['大招', st.bursts]].map(([k, v]) => `<div class="stat-pill"><span class="num" data-count="${v}">${v}</span><span>${k}</span></div>`).join('')}</div>
@@ -971,11 +987,6 @@ function showPlanes(back, sel) {
 }
 
 /* ================================================== 天赋树（每架飞机一棵，解锁时生成并保存）================================================== */
-function recommendNode(rec) {
-  let best = null, bs = -1;
-  for (const r of ROUTE_ORDER) { const i = rec.lit[r]; if (i >= rec.map[r].length) continue; const n = rec.map[r][i], T = NODE_TYPES[n.type], sc = T.score - i * 0.2 + (T.needs ? -0.5 : 0); if (sc > bs) { bs = sc; best = r; } }
-  return best;
-}
 /* 选中节点的说明：效果、前置、是否已生效、成本；只有“点亮”按钮才花天赋点 */
 function nodeDetail(rec, sel, pts, recR) {
   if (!sel || !rec.map[sel.r] || !rec.map[sel.r][sel.i]) return '<p class="dim-text">点一个节点查看说明</p>';
@@ -1352,8 +1363,9 @@ function updateHud(force) {
   if (L.comp !== ck) { L.comp = ck; R.comps.innerHTML = (h.companions || []).map((id) => `<canvas width="64" height="64" data-npc="${id}" title="${NPCS[id].name}：${NPCS[id].effect}"></canvas>`).join(''); paintPlaneCanvases(R.comps); }
   if (h.boss) {
     if (L.bossOn !== true) { L.bossOn = true; R.boss.hidden = false; R.tc.hidden = true; R.bname.textContent = h.boss.name; R.bticks.innerHTML = (h.boss.ticks || [70, 35]).map((x) => `<span class="tick" style="left:${x}%"></span>`).join(''); }
-    const B = w.boss, at = BUILD_CHECK.rage.at[w.stageId], left = B && at && !w.vs && w.bossIntroT <= 0 ? Math.ceil(at - (B.fightT || 0)) : null; // 构筑考验：失控倒计时
-    setText(R.bphase, 'bph', h.boss.phaseName + (h.boss.weak ? ' · 弱点暴露' : '') + (left === null ? '' : left > 0 ? (left <= 15 ? ` · ${left} 秒后失控` : '') : ' · 失控中'));
+    const B = w.boss, BB = w.bossBudget(), f = B ? B.fightT || 0 : 0, on = B && !w.vs && !BB.free && w.bossIntroT <= 0; // 构筑考验：失控、超载倒计时
+    const toRage = Math.ceil(BB.at - f), toWipe = Math.ceil(BB.T - f);
+    setText(R.bphase, 'bph', h.boss.phaseName + (h.boss.weak ? ' · 弱点暴露' : '') + (!on ? '' : toRage > 0 ? (toRage <= 15 ? ` · ${toRage} 秒后失控` : '') : toWipe > 0 ? ` · 失控中 · ${toWipe} 秒后超载` : ' · 超载'));
     // 血条：入场蓄势时是空的，落地那一刻从空涨满（FP10）
     const intro = w.bossIntroT > 0, bw = intro ? '0%' : `${(h.boss.hp / h.boss.maxHp) * 100}%`;
     if (L.bw !== bw) { if (!intro && L.bw === '0%' && !L.bossFill) { L.bossFill = true; R.bf.style.transition = 'width 1s cubic-bezier(.2,.8,.2,1)'; setTimeout(() => { R.bf.style.transition = ''; }, 1100); } L.bw = bw; R.bf.style.width = bw; }

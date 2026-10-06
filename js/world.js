@@ -19,7 +19,7 @@ function planeStats(meta, planeId) {
     for (let i = 0; i < Math.min(lit, nodes.length); i++) if (nodes[i].type in s) s[nodes[i].type] += nodes[i].v;
   }
   return { dmgK: sharedAtk(lv) * (1 + s.dmg / 100), blastK: 1 + s.blast / 100, chargeK: 1 + s.charge / 100, magnetK: 1 + s.magnet / 100, repeat: s.repeat / 100, wings: 0,
-    hearts: P.hearts + s.heart + sharedHearts(lv), bossK: 1 + s.boss / 100, stars: rec.stars || 1, pierceX: s.pierceX, homingX: s.homingX / 100, houseFast: s.houseFast / 100, npcBoost: s.npcBoost / 100, level: lv, raw: s };
+    hearts: P.hearts + s.heart + sharedHearts(lv), luck: Math.max(0, lv - 1), bossK: 1 + s.boss / 100, stars: rec.stars || 1, pierceX: s.pierceX, homingX: s.homingX / 100, houseFast: s.houseFast / 100, npcBoost: s.npcBoost / 100, level: lv, raw: s };
 }
 
 const ENEMY_HP = { jelly: 8, moth: 8, boat: 22, tick: 30, star: 18, beacon: 60, jellyE: 480, tickE: 540, starE: 440, mirror: 220, dummy: 1e9 };
@@ -46,6 +46,8 @@ class World {
     if (!Array.isArray(this.wf.targets)) this.wf.targets = this.wf.target ? [this.wf.target] : []; // 联机：房间里每个人当前要救的伙伴都在这里
     this.goalText = o.goalText || null; // HUD 只追踪家园的当前目标（纯显示）
     this.players = roster.map((r, i) => this.makePlayer(r, i));
+    // 难度阶梯（梦魇 N 级，规则逐级叠加）和上钩期（有人还在头两小时）：多人时用房主开局时定的，各端一致
+    this.ladder = o.vs ? 0 : Math.max(0, Math.min(LADDER_MAX, o.ladder | 0)); this.L = ladderRules(this.ladder);
     this.meIdx = o.me || 0; this.me = this.players[this.meIdx]; this.player = this.players[0];
     this.inputs = this.players.map(() => Object.assign({}, NEUTRAL_INPUT));
     this.scene = o.scene || new SeaScene(); this.scene.speed = 90; this.scene.dir = 1; this.scene.dim = this.mode === 'run' ? 1 : 0; this.scene.moonFx = null;
@@ -82,9 +84,9 @@ class World {
     const planeId = r.plane || 'moon', P = PLANES[planeId], stats = Object.assign({}, r.stats || planeStats(null, planeId)), cos = r.cos || {}, n = Math.max(1, this.np || 1);
     const expC = COSMETICS.exp.find((c) => c.id === cos.exp), trC = COSMETICS.trail.find((c) => c.id === cos.trail) || COSMETICS.trail[0];
     const y = (TOP + BOTTOM) / 2 + (i - (n - 1) / 2) * 90;
-    return { idx: i, id: r.id || 'p' + i, name: r.name || '', planeId, P, stats, ultCap: r.ultCap || 1, expColors: (expC && expC.colors) || P.colors.exp, trailColors: trC.colors, trailId: trC.id,
+    return { idx: i, id: r.id || 'p' + i, name: r.name || '', planeId, P, stats, baseDmgK: stats.dmgK, qual: {}, ultCap: r.ultCap || 1, expColors: (expC && expC.colors) || P.colors.exp, trailColors: trC.colors, trailId: trC.id,
       color: PLAYER_COLORS[i % PLAYER_COLORS.length], wingmen: [], storm: null, skills: [], downT: 0, gone: false,
-      x: this.W * 0.24 - (n > 1 ? (i % 2) * 40 : 0), y, vx: 0, vy: 0, r: 6, hp: stats.hearts, maxHp: stats.hearts, inv: 0, hurtT: 0, burst: 0, stock: 0, tilt: 0, blink: 0, blinkT: 2, cloudShield: false, cloudCd: 0, fireT: 0.1, alt: 1, trail: [], trailT: 0, alive: true, candy: 0, moved: 0,
+      x: this.W * 0.24 - (n > 1 ? (i % 2) * 40 : 0), y, vx: 0, vy: 0, r: 6, hp: stats.hearts + (this.first ? FIRST_RUN.hearts : 0), maxHp: stats.hearts + (this.first ? FIRST_RUN.hearts : 0), inv: 0, hurtT: 0, burst: 0, stock: 0, tilt: 0, blink: 0, blinkT: 2, cloudShield: false, cloudCd: 0, fireT: 0.1, alt: 1, trail: [], trailT: 0, alive: true, candy: 0, moved: 0,
       // 自己的 Build：三个槽、联动、流派、升级队列和正在进行的升级仪式
       gun: { pierce: 0, homing: 0, multi: 0, bomb: 0 }, support: null, bmod: null, links: new Set(), ritual: null, ritualQueue: [], offerN: 0, dryOffers: 0, picks: [], stream: null, recentMods: [], crystals: 0, rareNext: false,
       hudBuild: { gun: { pierce: 0, homing: 0, multi: 0, bomb: 0 }, support: null, bmod: null, links: [], recent: [] },
@@ -144,8 +146,14 @@ class World {
   /* 人数系数：主目标 / 精英 / Boss 按人数加厚，普通杂兵不变（一发一个的手感不丢） */
   teamK(per) { return 1 + per * Math.max(0, this.np - 1); }
   /* Boss / 队长会自愈（每秒回 regen × 最大生命，回不过本阶段的上限）：火力不够就打不动，只有成型的火力压得住 */
+  /* 首领战的时间预算：at 秒开始失控（攻击加快），T 秒超载（全屏冲击，全队倒下）——T 之前要打完，同时压过自愈（每秒 regen × 最大生命）；
+     free = 这一关基础难度不考（第一个首领一定打得过） */
+  bossBudget() {
+    const R = BUILD_CHECK.rage, L = this.L || {}, k = L.rageK || 1, at = (R.at[this.stageId] || 60) * k;
+    return { at, T: at + R.wipe * k, regen: BUILD_CHECK.regen * (L.regenK || 1), free: !!BUILD_CHECK.free[this.stageId] && !this.ladder };
+  }
   bossRegen(b, cap, dt) {
-    const r = BUILD_CHECK.regen; if (!r || this.vs || b.dying || !(b.hp > 0) || b.hp >= cap) return;
+    const B = this.bossBudget(), r = B.regen; if (!r || B.free || this.vs || b.dying || !(b.hp > 0) || b.hp >= cap) return;
     b.hp = Math.min(cap, b.hp + r * b.maxHp * dt); b.regenAt = this.t; // 画面：血条发绿光、Boss 身边冒绿色“+”
   }
   /* 构筑考验看得见：自愈时身边冒绿色“+”，失控时一圈越来越红的光 */
@@ -165,18 +173,17 @@ class World {
   }
   /* Boss / 队长打太久会失控：攻击速度倍数（1 = 正常）；跨过预告和失控那一刻各喊一次 */
   bossRageK(b) {
-    const R = BUILD_CHECK.rage, at = R.at[this.stageId]; if (!at || !b || this.vs) return 1;
+    const R = BUILD_CHECK.rage, B = this.bossBudget(), at = B.at; if (!at || !b || this.vs || B.free) return 1;
     const f = b.fightT || 0;
     if (!b.rageCall && f >= at - R.warn) { b.rageCall = 1; this.emit('flag', { text: `${R.warn} 秒后失控 · 快打！`, color: 'gold', dur: 1.6 }); Sound.sfx('weakOpen'); }
     if (b.rageCall === 1 && f >= at) { b.rageCall = 2; this.emit('flag', { text: '失控了 · 攻击越来越快', color: 'red', dur: 1.8 }); Sound.sfx('rewind'); this.shake(0.35); }
     b.rage = f <= at ? 0 : Math.min(1, (f - at) / R.ramp); // 画面用：越失控越红
-    // 失控太久：每 pulse 秒一次全屏冲击（提前 1.5 秒预告），躲不掉——拖下去必输
-    const over = f - at - R.wipe;
-    if (over > 0) {
-      const n = Math.floor(over / R.pulse);
-      if (over - n * R.pulse >= R.pulse - 1.5 && b.pulseWarn !== n) { b.pulseWarn = n; this.emit('flag', { text: '失控冲击！', color: 'red', dur: 1.2 }); Sound.sfx('weakOpen'); }
-      if (b.pulseN !== n) { b.pulseN = n; if (n > 0) { for (const q of this.players) if (q.alive && !q.gone) { q.inv = 0; this.hurtPlayer(1, 'c:rage', q); } this.shake(0.5); } }
+    // 超载（T 秒）：提前 5 秒喊，到点全屏冲击、全队倒下——首领战有一个确定的期限（构筑强度按它算）
+    if (b.rageCall === 2 && f >= B.T - 5) { b.rageCall = 3; this.emit('flag', { text: '5 秒后超载！', color: 'red', dur: 1.6 }); Sound.sfx('weakOpen'); }
+    if (b.rageCall === 3 && f >= B.T && !this.testNoWipe) { // testNoWipe：只给无头流程测试（不会受伤的机器人）用
+      b.rageCall = 4; this.emit('flag', { text: '超载！', color: 'red', dur: 2 }); this.shake(0.9); this.flash = 1; this.flashColor = '255,90,110';
     }
+    if (b.rageCall === 4) for (const q of this.players) if (q.alive && !q.gone && !(q.ritual && q.ritual.st !== 'resume')) { q.inv = 0; q.cloudShield = false; this.hurtPlayer(99, 'c:rage', q); } // 正在选升级的等选完
     return 1 + Math.min(R.max, (Math.max(0, f - at)) / R.ramp);
   }
   /* 模拟里默认的“当前飞机”：第一架还活着的（各端一致）；渲染 / HUD 用 this.me */
@@ -521,6 +528,7 @@ class World {
       t: 0, seed: srand(10), path: 'line', amp: 0, freq: 0, phase: 0, fireT: srand(1.5, 3.5), charge: 0, alive: true, hitFlash: 0, frozen: 0, stun: 0,
       mark: false, clockMark: false, seenT: null, fire: null, fodder: false, leaving: false, shots: 0, pull: null,
     }, o);
+    if (big && this.L && this.L.eliteK) e.hp *= this.L.eliteK; // 梦魇·厚甲
     e.maxHp = e.hp; e.y0 = e.y;
     if (this.seg && this.seg.explosive && !elite) e.explosive = true;
     return e;
@@ -625,7 +633,7 @@ class World {
     this.m.dmgOut += dmg;
     if (e.isBoss) {
       if (!this.boss) return;
-      let k = this.stats.bossK / this.teamK(0.7) / (BUILD_CHECK.bossK[this.stageId] || 1); // 多人：Boss 按人数加厚（固定系数，不随成长变）；bossK：要成型的火力才打得动
+      let k = this.stats.bossK / this.teamK(0.7) / (BUILD_CHECK.bossK[this.stageId] || 1) / ((this.L && this.L.hpK) || 1); // 多人：Boss 按人数加厚（固定系数，不随成长变）；bossK：要成型的火力才打得动
       if (this.boss.conductive && o.kind === 'zap') k *= 1.3;
       if (this.boss.marked && o.kind === 'explosion') k *= 1.5;
       this.boss.hit({ dmg: dmg * k, x: o.x !== undefined ? o.x : e.x, y: o.y !== undefined ? o.y : e.y, kind: o.kind || 'shot' });
@@ -700,6 +708,7 @@ class World {
     if (x > this.W + 4) return null; // 屏幕外生成的子弹不算数：攻击必须看得见
     if (this._firer === 'boss' && this.boss && dist2(x, y, this.boss.x, this.boss.y) < 40 * 40) { x += Math.cos(ang) * 96; y += Math.sin(ang) * 96; } // Boss 从中心放的弹从表盘边缘出来：表盘始终看得清
     const b = this.bullets.get(); if (!b) return null;
+    if (this.L && this.L.bulletK) spd *= this.L.bulletK; // 梦魇·疾弹
     b.on = true; b.type = type; b.x = x; b.y = y; b.vx = Math.cos(ang) * spd; b.vy = Math.sin(ang) * spd;
     b.r = B_RADIUS[type] || 7; b.t = 0; b.life = o.life || 12; b.rot = ang; b.spin = type === 'blue' ? srand(-3, 3) : 0; b.ghost = o.ghost || 0;
     b.src = o.noRepeat ? null : { x, y, a: ang, s: spd, type }; b.pull = null; b.from = o.from || this._firer || 'shot'; b.fresh = this.freshFoe(this._firerE) || x > this.W + 5;

@@ -11,7 +11,7 @@ function run(stage, plane, level, cap, pickIdx, godmode, world) {
   const goalLog = []; let lastGoal = null;
   w.pilotPick = pickIdx;
   if (pickIdx === 1) w.pilotPickFn = (gs) => gs[w.recIndex(w.ritual)] || gs[0]; // 选法 1：照游戏推荐选（像按大招键的新手）；难度和构筑挂钩后，不成型的乱选打不过首领
-  if (godmode) { w.player.hp = w.player.maxHp = 999; }
+  if (godmode) { w.player.hp = w.player.maxHp = 999; w.testNoWipe = true; } // 流程测试：不超载，首领要真的被打倒
   const STEP = 1 / 120; let t = 0, frames = 0, maxE = 0, maxB = 0, pickLog = [];
   const _apply = w.applyOption.bind(w); w.applyOption = (o) => { pickLog.push(o.kind === 'link' ? SYNERGIES[o.id].name : (SKILLS[o.id] || BURST_MODS[o.id] || { name: o.id }).name + (o.to || '')); _apply(o); };
   while (!res && t < 900) {
@@ -32,9 +32,11 @@ const show = (o) => console.log(JSON.stringify(o));
 const only = process.argv[3];
 // 退出码：脚本报错，或“不会受伤”的两局没打通，就算失败（会被击中的普通机器人输了不算失败，只看数据）
 let failed = 0; const fail = (msg) => { failed++; console.log('FAIL', msg); };
-const cases = [['1-1', 1, 1], ['1-2', 2, 2], ['1-3', 3, 2]].filter((c) => !only || c[0] === only);
+// 这是流程测试：关卡按建议共享等级 +6 打（比前沿宽裕，结果不靠运气；难度本身由 report-sim 量，docs/design.md §3.5）。
+// 必须通关的是“照推荐选”（选法 1）；选法 0 总选第一张，构筑常常不成型，打不过首领是设计如此，只看数据
+const cases = ['1-1', '1-2', '1-3'].map((st, i) => [st, Math.min(20, R(`STAGES['${st}'].rec`) + (i ? 6 : 0)), i ? 2 : 1]).filter((c) => !only || c[0] === only);
 for (const [st, lv, cap] of cases) for (const pk of [0, 1]) {
-  try { const r = R(`run('${st}', 'moon', ${lv}, ${cap}, ${pk}, true)`); show(r); if (!r.win) fail(`${st} 选法 ${pk} 没有通关`); }
+  try { const r = R(`run('${st}', 'moon', ${lv}, ${cap}, ${pk}, true)`); show(r); if (!r.win && pk === 1) fail(`${st} 选法 ${pk} 没有通关`); }
   catch (e) { fail(`${st} 脚本报错 ${e && e.stack ? e.stack.split('\n').slice(0, 6).join(' | ') : e}`); }
 }
 // v0.10 家园因果链在真实战斗里成立：要救的伙伴一定出现并能救下；风道修好后上层风圈通往高空云桥，糖果商人在上面

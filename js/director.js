@@ -231,7 +231,7 @@ Object.assign(World.prototype, {
     for (const e of this.enemies) { if (!e.alive || e.isBoss) continue; if (!e.swell) alive++; if (e.x < this.W + 60) active++; if (e.x - e.r < this.W) onScreen = true; } // 鱼群潮是给你割的，不算“积压”
     if (D.st === 'goal' && this.goal && this.goal.kind !== 'boss') {
       D.swellT = (D.swellT === undefined ? 12 : D.swellT) - dt;
-      if (D.swellT <= 0) { D.swellT = 16 - Math.min(6, this.beatIdx); if (!this.focusBusy() && active < 24) { this.swell(); D.peakT = 7; } } // 屏幕上已经很满就跳过这一波（同屏上限）；鱼群潮之后 7 秒是高潮
+      if (D.swellT <= 0) { D.swellT = (16 - Math.min(6, this.beatIdx)) * (this.first ? FIRST_RUN.swellK : 1); if (!this.focusBusy() && active < 24) { this.swell(); D.peakT = 7; } } // 屏幕上已经很满就跳过这一波（同屏上限）；鱼群潮之后 7 秒是高潮
     }
     this.directSides(dt, active);
     if (alive > 24) D.backlogT += dt; else D.backlogT = 0;
