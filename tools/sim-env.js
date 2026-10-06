@@ -20,6 +20,8 @@ function pilot(w) {
   }
   let dodge = 0; if (!busy || w.pilotDodge) w.bullets.each((b) => { const dx = b.x - p.x, dy = b.y - p.y; if (dx > -20 && dx < 160 && Math.abs(dy) < 50) dodge += dy > 0 ? -1 : 1; });
   for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
+  // 地图伸手：看到危险色的柱子和横向箭头，就离开那一条高度（像玩家一样）
+  for (const L of (w.lurks || [])) if (L.kind === 'hand' && L.st !== 'retract' && Math.abs(p.y - L.reachY) < 80 && p.x < L.x + 60) dodge += p.y < L.reachY ? -2 : 2; // 手会伸到这一高度往这边抓：上下让开
   // 白线预警（灯塔眼 / Boss 指针）：像玩家一样离开那条线
   for (const wr of w.warns) {
     if (wr.kind !== 'line') continue;

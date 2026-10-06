@@ -1446,6 +1446,7 @@ function drainWorldEvents() {
       case 'streak': if (e.n >= 100 && !(G.streakToastAt > performance.now() - 20000)) { G.streakToastAt = performance.now(); toast(`${e.n} 连杀！金色强化出现`, '#ffd76a', null, 1600); } break; // 连杀常有（鱼群潮）：只提 100 连杀，20 秒内不重复；数字右侧一直显示
       case 'elite': toast(e.elite === 'cmdr' ? '带队精英出现 · 等它举旗再打旗头水晶' : '精英出现 · 击败它能充不少大招', '#ff9d8c', 'n-crown'); Sound.setBoost('tension', 0.3); setTimeout(() => Sound.setBoost('tension', 0), 12000); break;
       case 'boss': Sound.sfx('alarm'); break; // 入场蓄势：警报，名牌等它落地再出
+      case 'lurkTeach': banner(e.name, e.hint, 2.6, hexA(e.color, 0.75), 3); break; // 地图第一次出手：讲一句怎么看先兆、怎么反制
       case 'bossLand': { const S = w.stage; banner(S.bossName, S.boss === 'clock' ? '第一乐章 · 指针卡住' : '先打碎正面三块护甲，核心才吃满伤害', 1.8, 'rgba(255,90,110,.7)', 4); Sound.setMode('boss1'); break; }
       case 'bossResponse': banner(e.title, e.sub, 1.6, 'rgba(255,215,106,.8)', 3); break;
       case 'phase': banner(e.name, e.captain ? '攻击更密，还带着散兵' : e.n === 2 ? '攻击越来越快，安全区在缩小' : '弹幕会逆行，消失的弹幕会重演', 1.8, null, 3); break;

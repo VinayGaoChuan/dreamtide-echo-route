@@ -62,14 +62,14 @@ window.__S = {
   },
   attach() {
     const w = G.world; if (!w || w.__wrapped) return; w.__wrapped = true;
-    const st = w.step.bind(w); w.step = (dt) => { if (!__S.hold) pilot(w); st(dt); };
+    const st = w.step.bind(w); w.step = (dt) => { if (__S.freeze && !__S.manual) return; if (!__S.hold) pilot(w); st(dt); }; // freeze：连拍按游戏时间走，页面自己的循环只画不走
     w.hurtPlayer = function () {};
   },
   until(src, maxSec) {
-    const f = new Function('w', 'return (' + src + ')'); __S.attach(); const w = G.world; let i = 0; const n = maxSec * 120;
+    const f = new Function('w', 'return (' + src + ')'); __S.attach(); const w = G.world; let i = 0; const n = maxSec * 120; __S.manual = true;
     // 快进时横幅按真实时间排队会互相挡住：每次取事件前放开，屏幕上留下的是此刻该有的那条
     while (i < n && !w.done && !f(w)) { w.step(1 / 120); i++; if (i % 4 === 0) { banner._until = 0; drainWorldEvents(); __S.expire(); } }
-    banner._until = 0; drainWorldEvents(); __S.expire(); return { ok: !!f(w), secs: Math.round(i / 12) / 10, runT: Math.round(w.runT) };
+    __S.manual = false; banner._until = 0; drainWorldEvents(); __S.expire(); return { ok: !!f(w), secs: Math.round(i / 12) / 10, runT: Math.round(w.runT) };
   },
 };
 `;
@@ -83,6 +83,7 @@ const PLAN = [
   { name: 'ritual-roll', until: "w.ritual && w.ritual.st === 'roll'", max: 60 },
   { name: 'ritual-choose', until: "w.ritual && w.ritual.st === 'choose'", max: 10, hold: true },
   { name: 'wind', until: "w.mapObjs.some((o) => o.kind === 'wind' && o.state === 'blow' && o.blowT > 0.5)", max: 120 },
+  { name: 'hand', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.spawnLurk(LURK_THEMES.bay.kinds[0], false)", until: "w.lurks && w.lurks.some((L) => L.kind === 'hand' && ((L.st === 'reach' && L.t > 0.3) || L.st === 'grab'))", max: 30, clean: true, wait: 60 }, // 地图出手：海里伸出来的手（真实机制，在这一刻触发）
   { name: 'elite', until: "w.goal && w.goal.kind === 'cmdr' && w.enemies.some((e) => e.alive && e.type === 'cmdr' && e.x < w.W - 60 && e.rally > 0)", max: 150 },
   // 1-2 纸船灯河：断桥灯环、厚甲编队、大招、队长
   { name: 'bridge', start: '1-2', until: "w.mapObjs.some((o) => o.kind === 'bridge' && (o.lit.filter(Boolean).length >= 2 || o.state === 'build'))", max: 120 },
@@ -91,23 +92,27 @@ const PLAN = [
   { name: 'captain', setup: 'G.world.pilotNoBurst = true', until: 'w.boss && w.bossIntroT <= 0 && w.boss.t > 5 && w.bullets.count() > 12', max: 240 },
   // 1-3 失眠钟塔：巨鲸、Boss、通关
   { name: 'giant', start: '1-3', until: "w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp' && o.stT > 0.35)", max: 160 },
-  { name: 'swell', until: "w.enemies.filter((e) => e.alive && e.swell && e.x < w.W * 0.95).length >= 14", max: 90, clean: true, wait: 60 }, // 鱼群潮：满屏割草（这张清掉临时横幅，只看玩法）
+  { name: 'swell', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.swell()", until: "w.enemies.filter((e) => e.alive && e.swell && e.x < w.W * 0.95).length >= 6 || (!w.warns.some((x) => x.kind === 'swell') && !w.enemies.some((e) => e.alive && e.swell) && !w.focusBusy() && w.D.st === 'goal' && !w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp') && (w.swell(), false))", max: 30, clean: true, wait: 60 }, // 鱼群潮：满屏割草（这张清掉临时横幅，只看玩法）；被巨鲸吞掉或换目标清掉了就再叫一次
   { name: 'boss-late', until: 'w.boss && w.boss.phase >= 2 && w.bullets.count() > 20', max: 240 },
   { name: 'victory', until: "w.state === 'victory'", max: 200 },
   { name: 'result', wait: 3500 },
 ];
-const SHOTS = ['swell', 'ritual-choose', 'bridge', 'giant', 'boss-late']; // 02~06：割草、升级、三关各自的装置、Boss
+const SHOTS = ['hand', 'ritual-choose', 'bridge', 'swell', 'boss-late']; // 02~06：地图出手、升级、断桥、割草、Boss
 /* 标志时刻：到点后按真实时间连拍（游戏照常跑），看动画而不是一张静帧 */
 const MOMENTS = [
   { name: 'ritual', start: '1-1', until: "w.ritual && w.ritual.st === 'trigger'", max: 60, seq: { n: 16, every: 260 } },
+  { name: 'lurk-hand', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.spawnLurk(LURK_THEMES.bay.kinds[0], false)", until: "w.lurks && w.lurks.some((L) => L.kind === 'hand')", max: 4, seq: { n: 12, dt: 0.3 } },
+  { name: 'lurk-wake', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.spawnLurk(LURK_THEMES.bay.kinds[1], false)", until: "w.lurks && w.lurks.some((L) => L.kind === 'wake')", max: 4, seq: { n: 12, dt: 0.25 } },
+  { name: 'lurk-break', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.spawnLurk(LURK_THEMES.bay.kinds[0], false); __S.until('w.lurks.some((L) => L.kind === \\'hand\\' && L.e && L.e.alive)', 4)", until: 'true', max: 1, seq: { n: 10, dt: 0.12, each: "const L = G.world.lurks.find((q) => q.kind === 'hand' && q.e && q.e.alive); if (L) G.world.damageEnemy(L.e, L.e.maxHp * 0.2)" } }, // 打碎地图伸出来的手：裂纹、血条、原地弹奖励（模拟连续命中）
   { name: 'link', until: "w.ritual && w.ritual.st === 'choose' && w.ritual.gates.some((G) => G.opt.kind === 'link')", max: 200, seq: { n: 14, every: 200 } },
   { name: 'core', until: "w.props && w.props.some((q) => q.kind === 'core')", max: 200, seq: { n: 16, every: 300 } },
   { name: 'chest', until: "w.pickups.some((k) => k.kind === 'chest' && k.near > 0.2)", max: 20, seq: { n: 8, every: 120 } },
+  { name: 'lurk-close', start: '1-2', until: "w.lurks && w.lurks.some((L) => L.kind === 'close' && L.st === 'omen')", max: 200, seq: { n: 12, dt: 0.75 } },
   { name: 'boss-in', start: '1-3', setup: 'G.world.beginBeat(G.world.plan.length - 1)', until: 'w.phase === "boss" && w.bossIntroT > 2.4', max: 20, seq: { n: 12, every: 280 } },
   { name: 'boss-down', setup: 'const b = G.world.boss; if (b) { b.phase = 3; b.nextPhase = 3; b.transT = 0; b.shield = 0; b.hp = 25; }', until: 'w.boss && w.boss.dying > 0', max: 60, seq: { n: 16, every: 260 } },
 ];
-const TRAILER = ['open', 'ritual-roll', 'swell', 'bridge', 'pack', 'burst', 'giant', 'boss-late', 'victory']; // 3×3
-const MOMENTS_MODE = args.includes('--moments');
+const TRAILER = ['open', 'hand', 'ritual-roll', 'bridge', 'swell', 'burst', 'giant', 'boss-late', 'victory']; // 3×3
+const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a,b：只拍这几个时刻（同一局里按顺序走）
 
 (async () => {
   fs.mkdirSync(path.join(OUT, 'raw'), { recursive: true }); fs.mkdirSync(path.join(OUT, 'images'), { recursive: true });
@@ -129,7 +134,8 @@ const MOMENTS_MODE = args.includes('--moments');
     await ev(HELPER + ';true');
     const shot = async (name) => { const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(OUT, 'raw', name + '.png'), Buffer.from(r.data, 'base64')); };
     const log = [];
-    for (const s of MOMENTS_MODE ? MOMENTS : PLAN) {
+    const SEL = !MOMENTS_MODE ? PLAN : !ONLY ? MOMENTS : MOMENTS.filter((m) => ONLY.split(',').includes(m.name)).map((m, i) => (i === 0 && !m.start ? Object.assign({}, m, { start: '1-1' }) : m));
+    for (const s of SEL) {
       if (s.screen === 'title') { await sleep(1500); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
       if (s.screen === 'keyart') { await ev("clearScreens(); G.bg = 'keyart'; true"); await sleep(900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
       if (s.start) {
@@ -141,8 +147,10 @@ const MOMENTS_MODE = args.includes('--moments');
       if (s.until) r = await ev(`__S.until(${JSON.stringify(s.until)}, ${s.max})`);
       if (s.hold) await ev('__S.hold = true; true');
       if (s.clean) await ev("banner._until = 0; $('#banner').innerHTML = ''; $('#toast').innerHTML = ''; true");
-      if (s.seq) { // 连拍：游戏按真实时间跑，每隔 every 毫秒一张
-        for (let k = 0; k < s.seq.n; k++) { await shot(`${s.name}-${String(k + 1).padStart(2, '0')}`); await sleep(s.seq.every); }
+      if (s.seq) { // 连拍：默认游戏按真实时间跑，每隔 every 毫秒一张；给了 dt 就冻住游戏，每张之间快进 dt 秒游戏时间（短先兆也能拍到每一步）
+        if (s.seq.dt) await ev('__S.freeze = true; true');
+        for (let k = 0; k < s.seq.n; k++) { await sleep(120); await shot(`${s.name}-${String(k + 1).padStart(2, '0')}`); if (s.seq.each) await ev('{ ' + s.seq.each + ' } true'); if (s.seq.dt) await ev(`__S.until('false', ${s.seq.dt})`); else await sleep(s.seq.every); }
+        if (s.seq.dt) await ev('__S.freeze = false; true');
         log.push(Object.assign({ name: s.name }, r)); console.log(s.name, JSON.stringify(r)); continue;
       }
       await sleep(s.wait || 180);

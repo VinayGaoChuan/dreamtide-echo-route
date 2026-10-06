@@ -52,7 +52,7 @@ function reportRun(stage, archIdx, plane, seed) {
     if (frames % 120 === 0 && !(pace.length > 1 && pace[pace.length - 1].over && pace[pace.length - 2].over)) pace.push(w.pacing());
     if (res) break;
   }
-  return { stage, archetype: P.name, character: plane, won: !!(res && res.win), picks, statOnly: stat, keyAt, archAt, secs: Math.round(t), hurt: res && res.hurt, last: res && res.lastHurt, unfairSrc, pace };
+  return { stage, archetype: P.name, character: plane, won: !!(res && res.win), picks, statOnly: stat, keyAt, archAt, secs: Math.round(t), hurt: res && res.hurt, last: res && res.lastHurt, unfairSrc, lurkKills: w.m.lurkKills || 0, pace };
 }
 `);
 
@@ -105,6 +105,13 @@ console.log('  追到目标流派的联动：' + Object.entries(arch).map(([x, A
 
 /* ---------- 节奏报告（每秒一个样本） ---------- */
 const T = { calmMax: 40, peakMax: 60, droughtMax: 75, firstAction: 8, ramp: 1.3, spike: 0.4, calm: 0.25, peak: 0.85, powerGrowth: 2 };
+// 出怪方向：按强度三等分，比较最平静的三分之一和最紧张的三分之一里“最近几秒威胁来自几个方向”
+const sidesOf = (r, xs) => {
+  const sd = r.map((p, i) => [xs[i], p.sides]).filter(([, v]) => v != null).sort((a, b) => a[0] - b[0]);
+  if (sd.length < 9) return { sidesCalm: null, sidesPeak: null, sidesMax: null };
+  const st = Math.max(1, Math.floor(sd.length / 3)), av = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  return { sidesCalm: av(sd.slice(0, st).map((x) => x[1])), sidesPeak: av(sd.slice(-st).map((x) => x[1])), sidesMax: Math.max(...sd.map((x) => x[1])) };
+};
 const per = paces.map((r) => {
   const xs = r.map((p) => p.intensity || 0), act = xs.filter((x) => x > 0).sort((a, b) => a - b), mx = Math.max(...xs, 0);
   const base = act.length ? act[Math.floor(act.length * 0.75)] : 1;
@@ -121,7 +128,7 @@ const per = paces.map((r) => {
   const end = r.findIndex((p) => p.over);
   const pw = r.map((p) => p.power).filter((v) => v > 0), pthird = Math.max(1, Math.floor(pw.length / 3));
   return { len: xs.length, calm, peak, first: first == null ? xs.length : first, cycles, ramp: avg(xs.slice(-third)) / Math.max(1e-9, avg(xs.slice(0, third))),
-    power: pw.length >= 6 ? avg(pw.slice(-pthird)) / Math.max(1e-9, avg(pw.slice(0, pthird))) : null, drought, rewards: r.length ? r[r.length - 1].rewards || 0 : 0, unfair: r.length ? r[r.length - 1].unfair || 0 : 0,
+    power: pw.length >= 6 ? avg(pw.slice(-pthird)) / Math.max(1e-9, avg(pw.slice(0, pthird))) : null, drought, ...sidesOf(r, xs), rewards: r.length ? r[r.length - 1].rewards || 0 : 0, unfair: r.length ? r[r.length - 1].unfair || 0 : 0,
     end: end < 0 ? null : end, won: end >= 0 ? !!r[end].won : null,
     phases: r.reduce((m, p) => { if (p.phase != null) m[p.phase] = (m[p.phase] || 0) + 1; return m; }, {}) };
 });
@@ -148,6 +155,18 @@ if (m('power') != null) {
   console.log(`  火力成长（有敌人在场时每秒伤害，后三分之一 ÷ 前三分之一）${m('power').toFixed(2)}×（目标 ≥ ${T.powerGrowth}×）`);
   if (m('power') < T.powerGrowth) warn.push(`火力只涨了 ${m('power').toFixed(2)}×：玩家会觉得升级没变强`);
 }
+if (m('sidesPeak') != null) {
+  const mf = (k) => { const v = per.map((x) => x[k]).filter((x) => x != null); return v.reduce((a, b) => a + b, 0) / Math.max(1, v.length); };
+  console.log(`  出怪方向（最近 4 秒）：平静时 ${mf('sidesCalm').toFixed(1)} 个，最紧张时 ${mf('sidesPeak').toFixed(1)} 个，最多 ${m('sidesMax')} 个`);
+  if (m('sidesMax') <= 1 && m('len') > 120) warn.push('威胁全从一个方向来：像传送带；推压时要开别的方向（带先兆）');
+  else if (mf('sidesPeak') <= mf('sidesCalm')) warn.push('出怪方向没跟压力走：紧张时应该比平静时来自更多方向');
+}
+{ const byT = {}; for (const r of paces) for (const p of r) if (p.tens && p.sides != null) (byT[p.tens] = byT[p.tens] || []).push(p.sides);
+  const order = ['calm', 'build', 'peak', 'breathe', 'boss'], nm = { calm: '平静', build: '蓄压', peak: '高潮', breathe: '喘息', boss: 'Boss' };
+  console.log('  按压力阶段的出怪方向：' + order.filter((k) => byT[k]).map((k) => `${nm[k]} ${(byT[k].reduce((a, b) => a + b, 0) / byT[k].length).toFixed(2)}`).join('，'));
+  if (byT.calm && byT.peak && byT.peak.reduce((a, b) => a + b, 0) / byT.peak.length <= byT.calm.reduce((a, b) => a + b, 0) / byT.calm.length) warn.push('高潮段的出怪方向不比平静段多'); }
+const lk = sums.reduce((a, s) => a + (s.lurkKills || 0), 0), lh = sums.reduce((a, s) => a + ((s.hurt || {}).lurk || 0), 0);
+console.log(`  地图出手：打碎 ${lk} 次（${(lk / Math.max(1, sums.length)).toFixed(1)} 次/局），被它打中 ${lh} 次`);
 const unfairAll = per.map((x) => x.unfair), unfairSum = unfairAll.reduce((a, b) => a + b, 0);
 console.log(`  不公平受击（攻击者刚出现 0.5 秒内或在屏幕外）：中位每局 ${m('unfair')}，合计 ${unfairSum}`);
 const uS = {}; for (const s of sums) for (const [k, v] of Object.entries(s.unfairSrc || {})) uS[k] = (uS[k] || 0) + v;

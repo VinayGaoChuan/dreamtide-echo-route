@@ -271,12 +271,14 @@ const HURT_TIPS = {
   laser: { label: '白线激光', tip: '灯塔眼先画白线再射：看到白线就离开那条线' },
   drop: { label: '纸船投下的弹', tip: '纸船灯往下投弹：别待在它们正下方' },
   boss: { label: 'Boss 的弹幕', tip: '先对准正面护甲打；弹幕来时只小幅移动找空隙，别大范围乱飞' },
+  lurk: { label: '地图伸出来的手 / 醒来的装饰', tip: '先看先兆：冒泡、抽动、睁眼、折痕出现时，离开那一列 / 那条白线，再回头打碎它拿奖励' },
   surprise: { label: '惊喜怪的攻击', tip: '它咬过来前会先画出航道：离开那条航道再回头打' },
   shot: { label: '敌弹', tip: '被击中后有一小段无敌：趁这段时间换到安全的高度' },
 };
 function hurtCat(src) {
   if (!src) return 'shot';
   if (src === 'c:armor' || src === 'c:wreck') return 'armorC';
+  if (src === 'c:lurk') return 'lurk';
   if (src === 'c:chaser' || src === 'b:chaser') return 'rear';
   if (['c:mimic', 'c:hmimic', 'c:mcore', 'c:mtooth', 'b:bite', 'b:mimic', 'b:hmimic', 'b:moonArm'].includes(src)) return 'surprise';
   if (src === 'c:boss' || src === 'b:boss') return 'boss';

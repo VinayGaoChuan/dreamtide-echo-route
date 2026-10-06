@@ -16,6 +16,11 @@ Object.assign(World.prototype, {
     this.D = { st: 'goal', t: 0, budget: 3, next: null, advT: 0, noGoalT: 0, backlogT: 0, delay: 0, mapAt: -1, reward: null, dropSide: 1 };
     this.seg = { tier: 0 };
     Object.assign(this.m, { noGoalMax: 0, goalTimes: [], breaks: 0, backlogs: 0 });
+    // 出怪方向跟着压力曲线（v0.12）：一开始只有前方；之后每个目标在平静时教一个新方向 / 一种会出手的地图元素（一次只开一个）
+    const TH = this.lurkTheme(); this.sideLog = []; this.lurks = this.lurks || [];
+    this.D.open = ['front']; this.D.taught = []; this.D.flankT = 0; this.D.peakT = 0; this.D.lurkT = 0; this.D.teachBeat = -1;
+    this.D.teachQ = [];
+    for (const dir of TH.order) { const ks = TH.kinds.filter((k) => k.side === dir); if (ks.length) for (const k of ks) this.D.teachQ.push({ dir, lurk: k }); else this.D.teachQ.push({ dir }); }
     for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: this.W - 80 + i * 56, y: this.player.y, path: 'sine', vx: -150, amp: 14, freq: 2.2, phase: i * 0.5 }); // 开局第一排：第一秒就有东西打
     this.beginBeat(0);
   },
@@ -26,6 +31,7 @@ Object.assign(World.prototype, {
   /* ---------- 目标 ---------- */
   beginBeat(i) {
     const B = this.plan[i]; this.beatIdx = i;
+    if (this.D) { this.D.swellT = 9; this.D.peakT = 0; } // 每个目标自己一轮压力：平静 → 蓄压（鱼群潮前 5 秒）→ 鱼群潮 + 7 秒高潮
     this.seg = { tier: i + STAGE_ORDER.indexOf(this.stageId), explosive: false };
     this.goal = { B, id: B.id, kind: B.kind, title: B.goal, t: 0, n: 0, total: B.n || 0, targets: [], wave: 0, waves: 0, state: 'active', portrait: B.kind === 'surprise' ? B.surprise : PORTRAIT_OF[B.kind] || 'jelly', sub: null };
     this.D.st = 'goal'; this.D.t = 0; this.D.mapAt = B.map ? B.mapAt || 6 : -1;
@@ -141,6 +147,56 @@ Object.assign(World.prototype, {
     this.emit('goalNext', { title: nb.goal, kind: nb.kind, portrait: nb.kind === 'surprise' ? nb.surprise : PORTRAIT_OF[nb.kind] || 'jelly', boss: nb.kind === 'boss' });
   },
   focusBusy() { return !!(this.worldRitual() || (this.surprise && this.surprise.busy) || this.bursting); },
+  /* 压力曲线：平静（目标刚开始）→ 蓄压（鱼群潮快来了）→ 高潮（鱼群潮后 7 秒）→ 喘息（优势窗口 / 预告 / 拿奖励） */
+  tension() {
+    const D = this.D; if (this.phase !== 'fight' || !D) return 'boss';
+    if (D.st !== 'goal') return 'breathe';
+    if (D.peakT > 0) return 'peak';
+    return D.swellT === undefined || D.swellT > 5 ? 'calm' : 'build';
+  },
+  /* Boss 战是一局的高潮：打了 12 秒或血掉到八成以下后，每 7 秒从已经开过的侧面来一小队（各带先兆） */
+  bossFlanks(dt) {
+    if (this.props && this.props.length) this.updateProps(dt); // Boss 场里侧面小队的先兆道具也要走（平时由 updateDirector 推进）
+    const D = this.D, b = this.boss; if (!D || !b || this.bossIntroT > 0 || this.focusBusy() || !b.maxHp || ((b.fightT || 0) < 12 && b.hp / b.maxHp > 0.8)) return;
+    D.bossFlankT = (D.bossFlankT === undefined ? 4 : D.bossFlankT) - dt;
+    const flanks = (D.open || []).filter((s) => s === 'top' || s === 'bottom' || s === 'rear');
+    if (D.bossFlankT <= 0 && flanks.length) { D.bossFlankT = 7; this.flankGroup(spick(flanks), 3); }
+  },
+  noteSide(side) { if (!this.sideLog) this.sideLog = []; this.sideLog.push({ t: this.t, side }); if (this.sideLog.length > 60) this.sideLog.splice(0, 20); },
+  /* 侧面来的一小队：上 / 下先有云影或海面鼓起（1 秒），后方先有左边缘红影（1.3 秒）。teach = 第一次，带一句话 */
+  flankGroup(side, n, teach) {
+    const W = this.W, top = this.arena.top + 50, bot = this.arena.bottom - 50, mid = (top + bot) / 2;
+    if (side === 'rear') { this.rearChase(n, null, null); if (teach) this.text('后面也会来敌：看左边的红影', W * 0.3, mid - 120, '#ffb2a8', 20, 5); return; }
+    const s = side === 'top' ? -1 : 1, x = srand(W * 0.56, W * 0.8);
+    this.props.push({ kind: 'drop', flank: true, side: s, x, t: 0, warn: 1.0, spawn: () => {
+      this.noteSide(side);
+      for (let i = 0; i < n; i++) this.addIncoming(i % 2 ? 'moth' : 'jelly', { path: 'line', vx: -125 - i * 8 }, 'drop', { x0: x + 40 + i * 24, y0: s < 0 ? TOP - 50 : BOTTOM + 50, x1: x - 30 - i * 34, y1: clamp(mid + (i - (n - 1) / 2) * 46 + s * 40, top, bot), dur: 0.9 });
+    } });
+    if (teach) this.text(side === 'top' ? '上面也会来敌：看云影' : '下面也会来敌：看海面鼓起', x, s < 0 ? this.arena.top + 110 : this.arena.bottom - 110, '#ffb2a8', 20, 5);
+  },
+  /* 每帧：按压力决定从哪些方向来，以及什么时候让地图出手 */
+  directSides(dt, active) {
+    const D = this.D, T = this.tension(); D.tens = T;
+    if (D.peakT > 0) D.peakT -= dt;
+    D.flankT -= dt; D.lurkT -= dt;
+    if (this.focusBusy() || this.phase !== 'fight') return;
+    const live = (this.lurks || []).length;
+    // 教学：每个目标（从第二个起）在平静时开一个新方向 / 一种地图元素，一次只开一个
+    if (T === 'calm' && D.teachQ.length && this.beatIdx >= 1 && D.teachBeat !== this.beatIdx && D.t > 2 && !live) {
+      const q = D.teachQ.shift(); D.teachBeat = this.beatIdx;
+      if (!D.open.includes(q.dir)) D.open.push(q.dir);
+      if (q.lurk) { this.spawnLurk(q.lurk, true); D.taught.push(q.lurk); D.lurkT = 10; }
+      else this.flankGroup(q.dir, 3, true);
+      return;
+    }
+    const flanks = D.open.filter((s) => s === 'top' || s === 'bottom' || s === 'rear');
+    if (T === 'build' && flanks.length && D.flankT <= 0 && active < 28) { D.buildSide = D.buildSide || spick(flanks); D.flankT = 5; this.flankGroup(D.buildSide, 3); } // 蓄压：前方 + 固定的一侧（带预告）
+    if (T !== 'build') D.buildSide = null;
+    if (T === 'peak') {
+      if (flanks.length && D.flankT <= 0 && active < 30) { D.flankT = 2.6; this.flankGroup(spick(flanks), 4); } // 高潮：多个方向轮流来
+      if (D.taught.length && !live && D.lurkT <= 0) { D.lurkT = 14; this.spawnLurk(spick(D.taught), false); } // 高潮：地图出手
+    }
+  },
   /* 首次大招教学：只在“预告下一个目标”的空档里开（不和验证编队、装置操作抢）；清掉敌弹、停刷怪、摆一排好打的靶子，
      同一时间只有这一个中央教学；放过一次（或 9 秒后）就收回，之后只剩大招按钮发光 */
   burstDemo(dt) {
@@ -175,8 +231,9 @@ Object.assign(World.prototype, {
     for (const e of this.enemies) { if (!e.alive || e.isBoss) continue; if (!e.swell) alive++; if (e.x < this.W + 60) active++; if (e.x - e.r < this.W) onScreen = true; } // 鱼群潮是给你割的，不算“积压”
     if (D.st === 'goal' && this.goal && this.goal.kind !== 'boss') {
       D.swellT = (D.swellT === undefined ? 12 : D.swellT) - dt;
-      if (D.swellT <= 0) { D.swellT = 16 - Math.min(6, this.beatIdx); if (!this.focusBusy() && active < 24) this.swell(); } // 屏幕上已经很满就跳过这一波（同屏上限）
+      if (D.swellT <= 0) { D.swellT = 16 - Math.min(6, this.beatIdx); if (!this.focusBusy() && active < 24) { this.swell(); D.peakT = 7; } } // 屏幕上已经很满就跳过这一波（同屏上限）；鱼群潮之后 7 秒是高潮
     }
+    this.directSides(dt, active);
     if (alive > 24) D.backlogT += dt; else D.backlogT = 0;
     if (D.backlogT >= 3) { D.backlogT = 0; D.delay = 3; this.m.backlogs++; this.emit('backlog'); }
     if (D.delay > 0) { D.delay -= dt; return; }
@@ -190,6 +247,7 @@ Object.assign(World.prototype, {
       if (tr && r < 0.3 && kind !== 'beacon' && kind !== 'ticks') this.spawnFromTrace(tr, kind === 'vee' || kind === 'swarm' ? 'moth' : 'jelly', 5);
       else if (this.seg.tier >= 2 && r > 0.8 && (kind === 'boats' || kind === 'line' || kind === 'vee')) this.spawnPushed(kind === 'boats' ? 'boat' : kind === 'vee' ? 'moth' : 'jelly', kind === 'boats' ? 3 : 5);
       else this.spawnFormation(kind);
+      this.noteSide('front');
       D.budget = Math.max(0, D.budget - size); D.next = null;
     }
   },
@@ -205,7 +263,7 @@ Object.assign(World.prototype, {
         else this.addEnemy(i % 3 ? 'jelly' : 'moth', { x: W + 30 + col * 38 + srand(0, 14), y, path: 'sine', amp: 12, freq: 2.2, phase: srand(TAU), vx: -150 - srand(0, 30), fodder: true, swell: true });
       }
     } });
-    Sound.sfx('wind', { pan: 0.8 });
+    Sound.sfx('wind', { pan: 0.8 }); this.noteSide('front');
   },
   formationPool(tier) {
     const L = ['line', 'vee', 'snake', 'wall'];
@@ -255,12 +313,14 @@ Object.assign(World.prototype, {
       if (tr) { c.x = tr.x; c.y = tr.y; this.text('裂口里钻出了带队精英', tr.x, tr.y + (tr.side < 0 ? 70 : -60), '#ffb2a8', 18, 4); }
       return;
     }
+    this.noteSide({ shell: 'scene', rift: 'scene', crack: 'scene', rear: 'rear', drop: 'drop' }[from] || 'front');
     switch (from) {
       case 'shell': this.props.push({ kind: 'shell', x: W + 120, y: ty, tx, t: 0, st: 'in', goal: o.goal }); this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
       case 'rift': this.openRift(Math.max(W * 0.6, this.player.x + 340), ty, type === 'armor' && this.goal && this.goal.kind === 'armor1' ? ['moth', 'moth', 'moth', 'moth', 'moth', 'armor'] : [type], { goal: o.goal, tx, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
       case 'rear': this.rearChase(1, null, { type, goal: o.goal, ty }); if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1; break;
       case 'drop': {
         const side = o.side || (this.D.dropSide = -this.D.dropSide), x = srand(W * 0.62, W * 0.8); // 上下交替，一次只从一边进，不会同时封死
+        if (this.sideLog && this.sideLog.length && this.sideLog[this.sideLog.length - 1].side === 'drop') this.sideLog[this.sideLog.length - 1].side = side < 0 ? 'top' : 'bottom';
         this.props.push({ kind: 'drop', side, x, t: 0, warn: 1.0, spawn: () => make('drop', { x0: x + 60, y0: side < 0 ? TOP - 50 : BOTTOM + 50, x1: tx, y1: ty, dur: 0.9 }) });
         if (o.goal) this.goal.pendingT = (this.goal.pendingT || 0) + 1;
         break;
@@ -293,6 +353,7 @@ Object.assign(World.prototype, {
     const cy = below ? this.arena.bottom - 30 : this.arena.top + 30, y0 = below ? this.arena.bottom - 90 : this.arena.top + 90;
     const prop = { kind: 'rear', t: 0, warn: 1.3, below, y0, cy, chase: !one, spawn: null };
     prop.spawn = () => {
+      this.noteSide('rear');
       if (one) {
         for (let i = 0; i < 4; i++) this.later(i * 0.15, () => this.addIncoming('moth', { path: 'line', vx: -110 }, 'arc', { x0: -50, y0: y0 + i * 10, cx: p.x + 40, cy, x1: this.W * (0.62 + i * 0.04), y1: clamp(one.ty + (i - 1.5) * 50, this.arena.top + 40, this.arena.bottom - 40), dur: 1.8 }));
         this.later(0.8, () => { const e = this.addIncoming(one.type, { path: 'hold', tx: this.W * 0.74, ty: one.ty, bob: 36, fire: 'slow', fireT: 2.5 }, 'arc', { x0: -60, y0, cx: p.x, cy, x1: this.W * 0.74, y1: one.ty, dur: 2.2 }); if (one.goal) { this.addTarget(e); if (this.goal) this.goal.pendingT--; } });
@@ -363,7 +424,7 @@ Object.assign(World.prototype, {
           } else if (P.st === 'open' && P.t > 3) P.done = true;
           if (P.st === 'open') P.x -= 40 * dt;
           break;
-        case 'drop': if (!P.fired && P.t >= P.warn) { P.fired = true; P.spawn(); if (this.goal) this.goal.pendingT = Math.max(0, (this.goal.pendingT || 0) - 1); } if (P.t > P.warn + 1) P.done = true; break;
+        case 'drop': if (!P.fired && P.t >= P.warn) { P.fired = true; P.spawn(); if (this.goal && !P.flank) this.goal.pendingT = Math.max(0, (this.goal.pendingT || 0) - 1); } if (P.t > P.warn + 1) P.done = true; break;
         case 'rear': if (!P.fired && P.t >= P.warn) { P.fired = true; P.spawn(); } if (P.t > P.warn + 2.4) P.done = true; break;
         case 'rift':
           P.open = P.t < P.warn ? 0 : Math.min(1, (P.t - P.warn) / 0.3);

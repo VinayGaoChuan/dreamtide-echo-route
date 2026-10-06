@@ -12,7 +12,7 @@ function mapShuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) {
 
 Object.assign(World.prototype, {
   initMap(o) {
-    this.mapObjs = []; this.orbs = []; this.companions = []; this.journey = [];
+    this.mapObjs = []; this.orbs = []; this.companions = []; this.journey = []; this.lurks = [];
     this.mapCalm = false; this.mapDwell = false; this.cam = { z: 1, x: this.W / 2, y: LH / 2 };
     this.seenMap = new Set(o.seenMap || []); this.mapHintKind = null;
     this.nextRare = false; this.rareNext = false; this.laneT = 0; this.minerKills = 0; this.grandpaT = 0; this.sky = null;
@@ -104,6 +104,7 @@ Object.assign(World.prototype, {
   /* ---------- 每帧 ---------- */
   updateMap(dt) {
     if (this.mode !== 'run') return;
+    if (this.timeStop <= 0) this.updateLurks(dt);
     this.mapCalm = false; this.mapDwell = false;
     for (const o of this.mapObjs) { if (o.by !== undefined) { const b = this.players[o.by]; if (!b || b.gone || b.away) o.by = undefined; } } // 拖着矿核 / 吊舱的人断线或离开：转成大家都能接手（v0.11 §8）
     for (const o of this.mapObjs) if (this.state === 'play') this.withPlayer(this.mapActor(o), () => this.updateMapObj(o, dt)); // 谁在操作这个装置，“当前飞机”就是谁
@@ -260,7 +261,7 @@ Object.assign(World.prototype, {
     this.traces.door = { x: this.W * 0.88, y: this.arena.top + 110, side: -1, born: this.t };
     // 一排敌人被推到炮口前
     const y = clamp(p.y, top + 20, bot - 20);
-    let list = this.enemies.filter((e) => e.alive && !e.isBoss && !e.elite && !e.goal && e.type !== 'armor' && e.type !== 'wreck' && e.x < this.W + 40).slice(0, 8);
+    let list = this.enemies.filter((e) => e.alive && !e.isBoss && !e.elite && !e.goal && !e.lurk && e.type !== 'armor' && e.type !== 'wreck' && e.x < this.W + 40).slice(0, 8);
     for (let i = list.length; i < 6; i++) list.push(this.addEnemy('jelly', { x: this.W + 30 + i * 30, y: srand(top, bot), path: 'line', vx: -120 }));
     list.forEach((e, i) => { e.rowX = Math.min(this.W - 40, p.x + 250 + i * 50); e.rowY = y; e.path = 'line'; e.vx = -40; });
     o.pushed = list;
@@ -309,7 +310,7 @@ Object.assign(World.prototype, {
   giantGulp(o) {
     const M = this.giantMouth(o);
     this.clearBullets(true); this.hitStop(0.06); this.flash = Math.max(this.flash, 0.25 * this.flashK()); this.flashColor = '200,235,255';
-    for (const e of this.enemies) if (e.alive && !e.isBoss && !e.elite && !e.goal && e.type !== 'cmdr' && e.type !== 'wreck' && e.x < this.W + 40) e.pull = { x: M.x, y: M.y, v: 620, giant: o.id };
+    for (const e of this.enemies) if (e.alive && !e.isBoss && !e.elite && !e.goal && !e.lurk && e.type !== 'cmdr' && e.type !== 'wreck' && e.x < this.W + 40) e.pull = { x: M.x, y: M.y, v: 620, giant: o.id };
     for (let i = 0; i < 16; i++) this.part('puff', M.x + rand(0, 400), M.y + rand(-200, 200), -rand(300, 600), rand(-60, 60), 0.6, rand(10, 18), 'rgba(200,230,255,0.5)');
   },
 
@@ -619,3 +620,211 @@ function drawTurret(g, x, y, t, shots) {
   g.restore();
   if (shots > 0) drawStepPill(g, x, y + 46, `修好的炮台 · ${shots}`, '#ffd76a', 0.85);
 }
+
+/* ================================================== 会出手的地图（v0.12，用户 2026-10-06：横版通关没有特色就太传统） ==================================================
+   地图的一部分会转过来对付你：边缘伸出一只手来抓、装饰突然醒来扑咬、上下的地形往里合拢。
+   每一种都先给固定的先兆（约 1 秒：冒泡 / 抽动 / 睁眼 / 折痕 + 声音），每次都一样，玩家学得会；先兆期间碰不到人。
+   每一种都能躲开或打碎：打碎有额外奖励。第一次出现在平静段当教学（带一句提示），之后加入推压段。
+   出怪方向跟着压力曲线（director.js tension）：平静只从前方，蓄压加一侧，高潮多方向 + 地图出手，喘息回到前方。 */
+const LURK_THEMES = {
+  bay: { order: ['bottom', 'scene', 'top', 'rear'], kinds: [{ kind: 'hand', side: 'bottom', look: 'tide' }, { kind: 'wake', side: 'scene', look: 'lantern' }] },
+  river: { order: ['scene', 'top', 'bottom', 'rear'], kinds: [{ kind: 'wake', side: 'scene', look: 'boat' }, { kind: 'close', side: 'scene', look: 'paper' }, { kind: 'hand', side: 'top', look: 'paper' }] },
+  tower: { order: ['top', 'scene', 'rear', 'bottom'], kinds: [{ kind: 'hand', side: 'top', look: 'clock' }, { kind: 'wake', side: 'scene', look: 'clock' }, { kind: 'close', side: 'scene', look: 'gear' }] },
+};
+const LURK_INFO = {
+  'hand:tide': { name: '潮汐之手', hint: '海面冒泡的那一列会伸出一只手：离开那一列，或打碎它的手掌', color: '#7fd8ff', tell: 'tide' },
+  'hand:paper': { name: '折纸手', hint: '上方纸面起皱的那一列会伸下一只纸手：离开那一列，或打碎手掌', color: '#fff1d6', tell: 'peel' },
+  'hand:clock': { name: '发条手', hint: '上方齿轮转起来的那一列会伸下一只发条手：离开那一列，或打碎它', color: '#ffd76a', tell: 'rewind' },
+  'wake:lantern': { name: '咬人灯笼', hint: '灯串上抖动、睁眼的灯笼会沿白线扑过来：躲开白线，或打掉它', color: '#ffcf6a', tell: 'houseWake' },
+  'wake:boat': { name: '纸船怪', hint: '河上抖动、睁眼的纸船会沿白线扑过来：躲开白线，或打掉它', color: '#fff1d6', tell: 'houseWake' },
+  'wake:clock': { name: '钟面怪', hint: '背景里睁眼的小钟会沿白线扑过来：躲开白线，或打掉它', color: '#ffb3e6', tell: 'moonBlink' },
+  'close:paper': { name: '折页合拢', hint: '上下纸页起折痕就会往里合：打碎两边发光的封印，马上打开', color: '#fff1d6', tell: 'riftOpen' },
+  'close:gear': { name: '齿轮墙', hint: '上下边缘裂开，齿轮墙会往里压：打碎两边发光的齿轮心，马上退回', color: '#ffcf7a', tell: 'riftOpen' },
+};
+const HAZ = '#ff5f87'; // 地图出手的统一危险色：和自己的子弹（青 / 白 / 金）分得开
+const LURK = { handOmen: 1.1, wakeOmen: 1.0, closeOmen: 1.3, handHp: 70, wakeHp: 40, sealHp: 60, closeDepth: 92, closeHold: 6, reward: 6 };
+
+Object.assign(World.prototype, {
+  lurkTheme() { return LURK_THEMES[(this.stage && this.stage.theme) || 'bay'] || LURK_THEMES.bay; },
+  lurkInfo(L) { return LURK_INFO[`${L.kind}:${L.look}`] || LURK_INFO['hand:tide']; },
+  /* 出一只（teach = 第一次，带教学提示）；同一时间最多一只 */
+  spawnLurk(def, teach) {
+    if (!this.lurks) this.lurks = [];
+    const W = this.W, top = this.arena.top, bot = this.arena.bottom, q = this.pickTarget(), hpK = this.stage ? this.stage.hpK : 1;
+    const L = { id: this.eid++, kind: def.kind, look: def.look, side: def.side, t: 0, st: 'omen', teach: !!teach, hpK };
+    if (def.kind === 'hand') {
+      L.omen = LURK.handOmen; L.x = clamp(q.x + srand(140, 200), W * 0.3, W * 0.85); L.from = def.side === 'bottom' ? 1 : -1; // 在飞机前方升起：打得到，也看得清
+      L.edgeY = L.from > 0 ? LH + 30 : TOP - 30; L.reachY = clamp(q.y, top + 50, bot - 50); L.grabX = L.x - 120; // 升到飞机的高度，再往飞机这边抓一把
+    } else if (def.kind === 'wake') {
+      L.omen = LURK.wakeOmen; L.x = clamp(q.x + srand(320, 460), W * 0.45, W * 0.9);
+      L.y = def.look === 'lantern' ? top + 26 : def.look === 'boat' ? bot - 34 : clamp(srand(top + 80, bot - 80), top + 60, bot - 60);
+      L.tx = q.x; L.ty = q.y;
+      const a = angTo(L.x, L.y, L.tx, L.ty), d = Math.hypot(L.tx - L.x, L.ty - L.y) + 160;
+      L.warn = this.addWarn({ kind: 'line', x: L.x, y: L.y, a, len: d, w: 34, tWarn: L.omen, beam: 0, silent: true, hidden: true }); // 扑咬路线：危险色的箭头线（drawLurks 画）
+    } else {
+      L.omen = LURK.closeOmen; L.depth = LURK.closeDepth;
+    }
+    this.lurks.push(L);
+    Sound.sfx(this.lurkInfo(L).tell, { pan: this.pan(L.x || W / 2) });
+    if (teach) { const I = this.lurkInfo(L); this.emit('lurkTeach', { name: I.name, hint: I.hint, color: I.color }); }
+    return L;
+  },
+  updateLurks(dt) {
+    if (!this.lurks || !this.lurks.length) return;
+    const top = this.arena.top, bot = this.arena.bottom;
+    for (const L of this.lurks) {
+      L.t += dt;
+      const e = L.e;
+      if (L.st === 'omen') {
+        if (L.t < L.omen) continue;
+        L.t = 0; this.noteSide(L.side);
+        if (L.kind === 'hand') { L.st = 'reach'; L.e = this.addEnemy('lurk', { x: L.x, y: L.edgeY, path: 'fixed', fodder: true, lurk: L.id, look: L.look, part: 'hand', from: L.from, r: 32, hp: LURK.handHp * L.hpK, shownT: this.t - L.omen }); Sound.sfx('bite', { pan: this.pan(L.x) }); }
+        else if (L.kind === 'wake') { L.st = 'lunge'; const a = angTo(L.x, L.y, L.tx, L.ty); L.vx = Math.cos(a) * 560; L.vy = Math.sin(a) * 560; L.e = this.addEnemy('lurk', { x: L.x, y: L.y, path: 'fixed', fodder: true, lurk: L.id, look: L.look, part: 'wake', r: 26, hp: LURK.wakeHp * L.hpK, shownT: this.t - L.omen }); Sound.sfx('bite', { pan: this.pan(L.x) }); }
+        else {
+          L.st = 'hold'; this.arenaTarget = { top: TOP + L.depth, bottom: BOTTOM - L.depth };
+          L.seals = [-1, 1].map((s) => this.addEnemy('lurk', { x: this.W * 0.62, y: s < 0 ? TOP + L.depth - 6 : BOTTOM - L.depth + 6, path: 'fixed', fodder: true, lurk: L.id, look: L.look, part: 'seal', nocontact: true, r: 30, hp: LURK.sealHp * L.hpK, shownT: this.t - L.omen }));
+          Sound.sfx('riftOpen'); this.shake(0.25);
+        }
+        continue;
+      }
+      if (L.kind === 'hand') {
+        if (!e || !e.alive) { if (L.st !== 'done') L.st = 'done'; continue; }
+        if (L.st === 'reach') { const u = Math.min(1, L.t / 0.35); e.y = lerp(L.edgeY, L.reachY, Ease.outBack(u)); e.grip = 0; if (u >= 1) { L.st = 'grab'; L.t = 0; } }
+        else if (L.st === 'grab') { const k = Math.min(1, L.t / 0.45); e.grip = k; e.x = lerp(L.x, L.grabX, Ease.inOutCubic ? Ease.inOutCubic(k) : k); e.y = L.reachY + Math.sin(L.t * 9) * 4; if (L.t > 1.2) { L.st = 'retract'; L.t = 0; } }
+        else if (L.st === 'retract') { const k = Math.min(1, L.t / 0.5); e.x = lerp(L.grabX, L.x, k); e.y = lerp(L.reachY, L.edgeY, k); if (L.t >= 0.5) { e.alive = false; L.st = 'done'; this.lurkDodged(L); } }
+      } else if (L.kind === 'wake') {
+        if (!e || !e.alive) { L.st = 'done'; continue; }
+        if (L.st === 'lunge') { e.x += L.vx * dt; e.y = clamp(e.y + L.vy * dt, top + 20, bot - 20); if (L.t > 0.75) { L.st = 'hover'; L.t = 0; } }
+        else if (L.st === 'hover') { e.x -= 40 * dt; e.y += Math.sin(this.t * 3 + L.id) * 30 * dt; if (L.t > 2.6) { L.st = 'flee'; L.t = 0; } }
+        else if (L.st === 'flee') { e.x -= 340 * dt; if (e.x < -60) { e.alive = false; L.st = 'done'; this.lurkDodged(L); } }
+      } else if (L.kind === 'close') {
+        const alive = L.seals.filter((s) => s.alive).length;
+        if (alive === 0 && L.st === 'hold') { L.st = 'open'; L.t = 0; this.lurkBonus(this.W * 0.62, (TOP + BOTTOM) / 2, 1.5); for (const sy of [TOP + L.depth, BOTTOM - L.depth]) for (let i = 0; i < 18; i++) this.part(L.look === 'paper' ? 'plate' : 'shard', rand(0, this.W), sy, rand(-160, 160), (sy < LH / 2 ? -1 : 1) * rand(120, 360), 0.9, rand(10, 22), L.look === 'paper' ? '#fff1d6' : '#ffcf7a'); this.text(`${this.lurkInfo(L).name}被撑开了！`, this.W * 0.5, (TOP + BOTTOM) / 2 - 60, this.lurkInfo(L).color, 20, 5); }
+        if (L.st === 'hold' && L.t > LURK.closeHold) { L.st = 'open'; L.t = 0; for (const s of L.seals) s.alive = false; }
+        if (L.st === 'open') { this.arenaTarget = { top: TOP, bottom: BOTTOM }; if (L.t > 1.6) L.st = 'done'; }
+      }
+    }
+    this.lurks = this.lurks.filter((L) => L.st !== 'done');
+  },
+  /* 躲开了（这一下没伤到任何人）：飞机旁一点闪光和一句字 */
+  lurkDodged(L) {
+    if (L.hit) return;
+    this.m.lurkDodges = (this.m.lurkDodges || 0) + 1;
+    const p = this.me; if (!p || !p.alive) return;
+    this.text('躲开了！', p.x, p.y - 44, '#9ff2c8', 18, 3);
+    for (let i = 0; i < 8; i++) this.part('spark', p.x, p.y, rand(-160, 160), rand(-160, 60), 0.4, 3, '#9ff2c8');
+  },
+  /* 打碎地图伸出来的东西：一把大星砂 + 一截大招（多人时每人一份） */
+  onLurkKilled(e) {
+    this.m.lurkKills = (this.m.lurkKills || 0) + 1;
+    if (e.part === 'seal') { this.fx(e.x, e.y, 2, 70, ['#fff6c8', '#ffcf7a', '#ffffff']); return; } // 封印：两个都碎了才算撑开，奖励在 updateLurks 里给
+    this.lurkBonus(e.x, e.y, 1);
+    const L = this.lurks && this.lurks.find((q) => q.id === e.lurk);
+    if (L) this.text(e.part === 'hand' ? `打碎了${this.lurkInfo(L).name}！` : `打掉了${this.lurkInfo(L).name}！`, e.x, e.y - 50, this.lurkInfo(L).color, 19, 5);
+  },
+  lurkBonus(x, y, k) {
+    for (let i = 0; i < Math.round(LURK.reward * k); i++) this.dropPickup('dust', x + srand(-20, 20), y + srand(-20, 20), { value: 3, big: true, vx: srand(-220, 160), vy: srand(-380, -140) });
+    for (const q of this.players) if (!q.gone && q.alive) this.withPlayer(q, () => this.addCharge(0.12 * k));
+    this.text(`+${Math.round(LURK.reward * k) * 3} 星砂`, x, y - 18, '#ffe38a', 22, 4); // 奖励当场弹出来：打碎它值多少一眼看见
+    this.fx(x, y, 2, 90, ['#ffe38a', '#fff6c8', HAZ]);
+    this.hitStop(0.04); Sound.sfx('eliteKill', { pan: this.pan(x), gap: 0 });
+  },
+  /* 先兆和手臂 / 墙（画在敌人下面；手掌、扑咬的装饰、封印是真敌人，由 EnemyArt.lurk 画）。
+     统一的危险语言：危险色 HAZ 的虚线框 / 箭头线，来源那一侧的屏幕边缘闪“！” */
+  drawLurks(g) {
+    if (!this.lurks || !this.lurks.length) return;
+    const t = this.t, pulse = 0.55 + 0.45 * Math.sin(t * 14);
+    const alert = (x, y) => { g.save(); g.translate(x, y); g.globalAlpha = pulse; g.fillStyle = HAZ; g.strokeStyle = PAL.ink; g.lineWidth = 2.5; g.beginPath(); g.moveTo(0, -18); g.lineTo(17, 13); g.lineTo(-17, 13); g.closePath(); g.fill(); g.stroke(); g.fillStyle = '#ffffff'; g.font = '900 18px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.fillText('!', 0, 9); g.restore(); };
+    for (const L of this.lurks) {
+      const I = this.lurkInfo(L), u = L.st === 'omen' ? clamp(L.t / L.omen, 0, 1) : 1;
+      if (L.kind === 'hand') {
+        const edge = L.from > 0 ? BOTTOM : TOP;
+        if (L.st === 'omen') { // 先兆：危险色的柱子标出会伸到哪里、横向箭头标出会往哪边抓；边缘闪“！”；根部冒泡 / 起皱 / 齿轮转；指尖探出来抽动
+          const yA = Math.min(edge, L.reachY), yB = Math.max(edge, L.reachY);
+          g.save(); g.globalAlpha = 0.2 + 0.25 * u; g.fillStyle = HAZ; g.fillRect(L.x - 40, yA, 80, yB - yA); g.restore();
+          g.save(); g.strokeStyle = HAZ; g.lineWidth = 3; g.setLineDash([10, 8]); g.lineDashOffset = -t * 50; g.strokeRect(L.x - 40, yA, 80, yB - yA);
+          g.beginPath(); g.moveTo(L.x - 40, L.reachY); g.lineTo(L.grabX - 30, L.reachY); g.stroke(); g.setLineDash([]);
+          g.fillStyle = HAZ; g.beginPath(); g.moveTo(L.grabX - 44, L.reachY); g.lineTo(L.grabX - 26, L.reachY - 11); g.lineTo(L.grabX - 26, L.reachY + 11); g.closePath(); g.fill(); g.restore();
+          alert(L.x, L.from > 0 ? BOTTOM - 30 : TOP + 30);
+          if (L.look === 'tide') { for (let i = 0; i < 5; i++) { const k = (t * 1.6 + i / 5) % 1; g.strokeStyle = `rgba(190,235,255,${(1 - k) * 0.8})`; g.lineWidth = 2; g.beginPath(); g.ellipse(L.x, edge - 6, 20 + k * 50, 6 + k * 10, 0, Math.PI, TAU); g.stroke(); } for (let i = 0; i < 4; i++) { g.fillStyle = 'rgba(200,240,255,0.8)'; g.beginPath(); g.arc(L.x + Math.sin(t * 7 + i * 2) * 26, edge - 10 - ((t * 60 + i * 23) % 50), 4, 0, TAU); g.fill(); } }
+          else if (L.look === 'paper') { g.strokeStyle = 'rgba(255,241,214,0.85)'; g.lineWidth = 2; g.beginPath(); for (let i = -3; i <= 3; i++) { g.moveTo(L.x + i * 12, edge); g.lineTo(L.x + i * 12 + Math.sin(t * 20 + i) * 4, edge + 18 + u * 14); } g.stroke(); }
+          else { g.save(); g.translate(L.x, edge + 16); g.rotate(t * (4 + u * 10)); g.strokeStyle = 'rgba(255,215,106,0.9)'; g.lineWidth = 3; g.beginPath(); for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU; g.moveTo(Math.cos(a) * 14, Math.sin(a) * 14); g.lineTo(Math.cos(a) * 24, Math.sin(a) * 24); } g.stroke(); g.restore(); }
+          const peek = 10 + u * 16 + Math.sin(t * 30) * 3 * u;
+          g.fillStyle = I.color; g.strokeStyle = PAL.ink; g.lineWidth = 2;
+          for (let i = -1; i <= 1; i++) { g.beginPath(); g.ellipse(L.x + i * 13, edge - L.from * peek * 0.5, 6, peek * 0.6, 0, 0, TAU); g.fill(); g.stroke(); }
+        } else if (L.e && L.e.alive) { // 手臂：从屏幕边缘连到手掌，危险色的描边光
+          const y0 = L.from > 0 ? LH + 40 : -40, ey = L.e.y + L.from * 30, wob = Math.sin(t * 6) * 6, ex = L.e.x;
+          const arm = () => { g.beginPath(); g.moveTo(L.x - 34, y0); g.quadraticCurveTo(L.x - 30 + wob, (y0 + ey) / 2, ex - 20, ey); g.lineTo(ex + 20, ey); g.quadraticCurveTo(L.x + 30 + wob, (y0 + ey) / 2, L.x + 34, y0); g.closePath(); };
+          g.save(); g.strokeStyle = hexA(HAZ, 0.75); g.lineWidth = 10; arm(); g.stroke(); g.restore();
+          g.fillStyle = I.color; g.strokeStyle = PAL.ink; g.lineWidth = 3; arm(); g.fill(); g.stroke();
+          g.strokeStyle = hexA('#ffffff', 0.4); g.lineWidth = 5; g.beginPath(); g.moveTo(L.x - 16, y0); g.quadraticCurveTo(L.x - 14 + wob, (y0 + ey) / 2, ex - 8, ey); g.stroke();
+          const edgeY = L.from > 0 ? BOTTOM : TOP;
+          g.fillStyle = L.look === 'tide' ? 'rgba(210,245,255,0.9)' : L.look === 'paper' ? 'rgba(255,248,232,0.95)' : 'rgba(255,215,106,0.9)';
+          for (let i = 0; i < 7; i++) { const a = Math.PI + (i / 6) * Math.PI, r = 44 + Math.sin(t * 8 + i) * 5; g.beginPath(); g.arc(L.x + Math.cos(a) * r, edgeY - L.from * Math.abs(Math.sin(a)) * 14, 7, 0, TAU); g.fill(); }
+          glowAt(g, L.e.x, L.e.y, 60, hexA(HAZ, 0.8), 0.45);
+        }
+      } else if (L.kind === 'wake' && L.st === 'omen') { // 先兆：装饰放大、抖动、发危险色的光、慢慢睁眼；危险色的箭头线标出扑咬路线
+        const ex = L.tx + (L.tx - L.x) * 0.15, ey = L.ty + (L.ty - L.y) * 0.15;
+        g.save(); g.strokeStyle = HAZ; g.globalAlpha = 0.5 + 0.5 * u; g.lineWidth = 6; g.setLineDash([16, 10]); g.lineDashOffset = -t * 70; g.beginPath(); g.moveTo(L.x, L.y); g.lineTo(ex, ey); g.stroke(); g.setLineDash([]);
+        const a = Math.atan2(ey - L.y, ex - L.x); g.fillStyle = HAZ; g.beginPath(); g.moveTo(ex + Math.cos(a) * 18, ey + Math.sin(a) * 18); g.lineTo(ex + Math.cos(a + 2.5) * 18, ey + Math.sin(a + 2.5) * 18); g.lineTo(ex + Math.cos(a - 2.5) * 18, ey + Math.sin(a - 2.5) * 18); g.closePath(); g.fill(); g.restore();
+        g.save(); g.translate(L.x + Math.sin(t * 40) * 3 * u, L.y); g.scale(1.6, 1.6);
+        glowAt(g, 0, 0, 44, hexA(HAZ, 0.85), 0.35 + 0.5 * u);
+        EnemyArt.lurk(g, { part: 'wake', look: L.look, eye: u, r: 26 }, t);
+        g.restore();
+        alert(clamp(L.x, 30, this.W - 30), L.y - TOP < 110 ? L.y + 72 : L.y - 72); // “！”挂在装饰头上，不压住它的脸
+      } else if (L.kind === 'close') { // 先兆：上下边缘起危险色折痕 + 闪“！”；合拢期间画两面墙（边缘危险色）
+        const d = L.st === 'omen' ? 0 : L.st === 'hold' ? Math.min(1, L.t / 0.6) * L.depth : Math.max(0, 1 - L.t / 0.8) * L.depth;
+        for (const s of [-1, 1]) {
+          const y0 = s < 0 ? TOP : BOTTOM, yw = s < 0 ? TOP + d : BOTTOM - d;
+          if (L.st === 'omen') { g.strokeStyle = hexA(HAZ, 0.5 + 0.5 * u); g.lineWidth = 4; g.beginPath(); for (let x = 0; x <= this.W; x += 40) { const yy = y0 - s * (10 + ((x / 40) % 2) * 14 * u); if (x === 0) g.moveTo(x, yy); else g.lineTo(x, yy); } g.stroke(); alert(this.W * 0.5, y0 - s * 34); continue; }
+          g.fillStyle = L.look === 'paper' ? 'rgba(250,236,210,0.92)' : 'rgba(120,70,40,0.92)'; g.fillRect(0, Math.min(y0, yw), this.W, Math.abs(yw - y0));
+          if (L.look === 'paper') { g.strokeStyle = 'rgba(180,150,120,0.6)'; g.lineWidth = 2; for (let x = 20; x < this.W; x += 60) { g.beginPath(); g.moveTo(x, y0); g.lineTo(x + 30, yw); g.stroke(); } }
+          else { g.fillStyle = '#ffcf7a'; for (let x = ((t * 60) % 40) - 40; x < this.W; x += 40) { g.beginPath(); g.moveTo(x, yw); g.lineTo(x + 12, yw + s * 14); g.lineTo(x + 24, yw); g.closePath(); g.fill(); } }
+          g.strokeStyle = HAZ; g.lineWidth = 4; g.beginPath(); g.moveTo(0, yw); g.lineTo(this.W, yw); g.stroke();
+        }
+      }
+    }
+  },
+});
+/* 受伤越重裂纹越多：看得出它打得碎、快碎了 */
+function lurkCracks(g, e, r) {
+  if (!e.maxHp || e.hp >= e.maxHp) return;
+  const n = Math.ceil((1 - Math.max(0, e.hp) / e.maxHp) * 4);
+  g.save(); g.strokeStyle = PAL.ink; g.lineWidth = 2.2; g.lineCap = 'round';
+  for (let i = 0; i < n; i++) { const a = i * 1.9 + 0.4; g.beginPath(); g.moveTo(Math.cos(a) * r * 0.15, Math.sin(a) * r * 0.15); g.lineTo(Math.cos(a + 0.35) * r * 0.5, Math.sin(a + 0.35) * r * 0.5); g.lineTo(Math.cos(a - 0.1) * r * 0.85, Math.sin(a - 0.1) * r * 0.85); g.stroke(); }
+  g.restore();
+}
+/* 手掌 / 扑咬的装饰 / 封印 */
+EnemyArt.lurk = (g, e, t) => {
+  const I = LURK_INFO[`${e.part === 'seal' ? 'close' : e.part === 'hand' ? 'hand' : 'wake'}:${e.look}`] || LURK_INFO['hand:tide'];
+  g.strokeStyle = PAL.ink; g.lineWidth = 2.4; g.lineJoin = 'round';
+  if (e.part === 'hand') { // 手掌：五指张开，抓住时收拢
+    const k = e.grip || 0, s = e.from > 0 ? 1 : -1; g.scale(1, s); // 从下面伸上来：手指朝上
+    g.save(); g.strokeStyle = hexA(HAZ, 0.85); g.lineWidth = 9; g.beginPath(); g.ellipse(0, 0, 31, 29, 0, 0, TAU); g.stroke(); g.restore(); // 手掌一圈危险色的光：一眼看出是敌人
+    g.fillStyle = I.color; g.lineWidth = 2.6;
+    for (let i = 0; i < 4; i++) { const a = (-0.62 + (i / 3) * 1.24) * (1 - k * 0.55), tip = -62 + k * 19; g.save(); g.rotate(a); g.beginPath(); g.ellipse(0, -40 + k * 12, 9, 22 - k * 7, 0, 0, TAU); g.fill(); g.stroke(); g.fillStyle = HAZ; g.beginPath(); g.moveTo(-6, tip + 3); g.lineTo(6, tip + 3); g.lineTo(0, tip - 10); g.closePath(); g.fill(); g.stroke(); g.fillStyle = I.color; g.restore(); } // 四根手指张开（指尖是危险色的爪），抓住时收拢
+    g.save(); g.rotate(-1.25 + k * 0.6); g.beginPath(); g.ellipse(0, -30, 8, 17, 0, 0, TAU); g.fill(); g.stroke(); g.restore(); // 拇指
+    g.beginPath(); g.ellipse(0, 0, 30, 28, 0, 0, TAU); g.fill(); g.stroke();
+    g.fillStyle = '#ffffff'; g.beginPath(); g.ellipse(0, 2 * s, 11, 9 * (1 - k * 0.5), 0, 0, TAU); g.fill(); g.stroke(); // 手心里一只眼睛
+    g.fillStyle = '#d23a52'; g.beginPath(); g.arc(0, 2 * s, 5 * (1 - k * 0.5), 0, TAU); g.fill(); // 红色的瞳孔
+    g.lineWidth = 3; g.beginPath(); g.moveTo(-13, -9 * s); g.lineTo(-2, -5 * s); g.moveTo(13, -9 * s); g.lineTo(2, -5 * s); g.stroke(); // 皱眉
+    lurkCracks(g, e, 30);
+    return;
+  }
+  if (e.part === 'seal') { // 封印 / 齿轮心：发光的结
+    glowAt(g, 0, 0, 54, hexA(HAZ, 0.9), 0.6 + Math.sin(t * 8) * 0.25); // 打得掉的点：发危险色的光
+    g.save(); g.strokeStyle = HAZ; g.lineWidth = 3.5; g.globalAlpha = 0.55 + 0.45 * Math.sin(t * 8); g.beginPath(); g.arc(0, 0, 31 + Math.sin(t * 8) * 4, 0, TAU); g.stroke(); g.restore(); // 一圈跳动的危险色：在米色纸页上也看得见
+    g.fillStyle = HAZ; g.beginPath(); for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU + t * 1.5, r = i % 2 ? 12 : 23; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); } g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.fill();
+    lurkCracks(g, e, 22);
+    return;
+  }
+  // 醒来的装饰：灯笼 / 纸船 / 小钟，睁眼、长牙
+  const eye = e.eye === undefined ? 1 : e.eye;
+  if (e.look === 'lantern') { g.fillStyle = '#ffb35c'; g.beginPath(); g.ellipse(0, 0, 20, 24, 0, 0, TAU); g.fill(); g.stroke(); g.fillStyle = '#7a3b1d'; g.fillRect(-10, -28, 20, 6); g.fillRect(-10, 22, 20, 6); }
+  else if (e.look === 'boat') { g.fillStyle = '#fff1d6'; g.beginPath(); g.moveTo(-30, -2); g.lineTo(30, -2); g.lineTo(20, 18); g.lineTo(-20, 18); g.closePath(); g.fill(); g.stroke(); g.beginPath(); g.moveTo(0, -2); g.lineTo(0, -28); g.lineTo(-18, -2); g.closePath(); g.fill(); g.stroke(); }
+  else { g.fillStyle = '#ffd9f2'; g.beginPath(); g.arc(0, 0, 24, 0, TAU); g.fill(); g.stroke(); g.strokeStyle = 'rgba(90,30,100,0.8)'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(t * 6) * 16, Math.sin(t * 6) * 16); g.stroke(); g.strokeStyle = PAL.ink; }
+  if (eye > 0.1) { g.fillStyle = '#ffffff'; for (const x of [-8, 8]) { g.beginPath(); g.ellipse(x, -4, 5, 5 * eye, 0, 0, TAU); g.fill(); g.stroke(); } g.fillStyle = '#d23a52'; for (const x of [-8, 8]) { g.beginPath(); g.arc(x - 1, -4, 2.2 * eye, 0, TAU); g.fill(); } }
+  if (eye > 0.6) { g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(-12, 8); for (let i = 0; i < 6; i++) g.lineTo(-12 + i * 4.8 + 2.4, i % 2 ? 8 : 15); g.lineTo(12, 8); g.closePath(); g.fill(); g.stroke(); }
+  lurkCracks(g, e, 24);
+};

@@ -179,9 +179,11 @@ class World {
     const d = this.m.dmgOut - (this._paceDmg || 0); this._paceDmg = this.m.dmgOut;
     const engaged = this.enemies.some((e) => e.alive && e.x - e.r < W && e.x + e.r > 0) || !!this.boss;
     const boss = this.wonRun ? 1 : 0;
-    const rewards = p.picks.length + p.res.chests + this.m.golds + (this.m.goalTimes || []).length + this.m.interacts + this.m.elites + (this.m.bossBreaks || 0) + boss;
+    const rewards = p.picks.length + p.res.chests + this.m.golds + (this.m.goalTimes || []).length + this.m.interacts + this.m.elites + (this.m.bossBreaks || 0) + (this.m.lurkKills || 0) + boss;
+    const sideSet = new Set((this.sideLog || []).filter((s) => this.t - s.t < 4).map((s) => s.side)); if (this.boss) sideSet.add('front'); // 最近 4 秒威胁从几个方向来（Boss 一直在前方）
+    const sides = sideSet.size, tens = this.D && this.tension ? this.tension() : null;
     const phase = this.worldRitual() ? 'upgrade' : this.boss ? 'boss' : this.goal ? this.goal.B.kind : this.D ? this.D.st : 'none';
-    return { intensity: I, rewards, over: !!this.done || this.state === 'dying' || this.state === 'victory', won: this.state === 'victory' || !!this.wonRun, phase, unfair: this.m.unfair, power: engaged && !this.worldRitual() ? d : 0 };
+    return { intensity: I, rewards, over: !!this.done || this.state === 'dying' || this.state === 'victory', won: this.state === 'victory' || !!this.wonRun, phase, unfair: this.m.unfair, power: engaged && !this.worldRitual() ? d : 0, sides, tens };
   }
 
   /* ================================================== main step ================================================== */
@@ -223,6 +225,7 @@ class World {
       else this.updatePreview(sdt);
       if (this.boss) { this._firer = 'boss'; this.boss.update(sdt); this._firer = null; if (this.bossProxy) { this.bossProxy.x = this.boss.x; this.bossProxy.y = this.boss.y; } }
       if (this.bossIntroT > 0) { this.bossIntroT -= sdt; if (this.bossIntroT <= 0) this.bossLand(); }
+      if (this.phase === 'boss' && this.mode === 'run' && !this.vs) this.bossFlanks(sdt);
     } else if (this.state === 'dying') {
       this.stateT -= dt; if (this.stateT <= 0 && !this.done) this.finish(false);
     } else if (this.state === 'victory') {
@@ -287,9 +290,9 @@ class World {
     else if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
     if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx) && this.mode === 'run') {
       for (const e of this.enemies) {
-        if (!e.alive || e.leaving || this.freshFoe(e)) continue; // 刚出现的敌人还不能撞人（先看见，再受伤）
+        if (!e.alive || e.leaving || e.nocontact || this.freshFoe(e)) continue; // 刚出现的敌人还不能撞人（先看见，再受伤）
         const rr = (e.isBoss ? 110 : e.r) + 8;
-        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { this._hitFresh = this.freshFoe(e); this.hurtPlayer(1, 'c:' + (e.chaser ? 'chaser' : e.isBoss ? 'boss' : e.type)); if (!e.elite && !e.isBoss && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
+        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { if (e.lurk && this.lurks) { const L = this.lurks.find((q) => q.id === e.lurk); if (L) L.hit = true; } this._hitFresh = this.freshFoe(e); this.hurtPlayer(1, 'c:' + (e.chaser ? 'chaser' : e.isBoss ? 'boss' : e.type)); if (!e.elite && !e.isBoss && !e.lurk && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
       }
     }
   }
@@ -605,6 +608,7 @@ class World {
     e.alive = false;
     const p = this.player, small = !e.elite && e.type !== 'mirror';
     this.m.kills++;
+    if (e.lurk) this.onLurkKilled(e); // 打碎了地图伸出来的东西：额外奖励
     if (this.m.firstKill === null) this.m.firstKill = this.runT;
     if (small && e.seenT !== null && !e.fodder) { this.m.killTimeSum += this.t - e.seenT; this.m.killTimeN++; }
     this.streak.n++; this.streak.t = 2.5;
@@ -1152,6 +1156,8 @@ class World {
   startBoss() {
     this.phase = 'boss'; this.bossEarly = false; this.m.route.push('boss'); this.m.segsDone = this.beatIdx;
     for (const q of this.players) q.ritualQueue = []; this.incoming = [];
+    if (this.lurks) { for (const L of this.lurks) { if (L.e) L.e.alive = false; if (L.seals) for (const s of L.seals) s.alive = false; } this.lurks = []; this.arenaTarget = { top: TOP, bottom: BOTTOM }; } // Boss 场：地图不再出手，合拢的墙退回去
+    if (this.props) this.props = []; // 之前的场景道具不带进 Boss 场（Boss 场里只有侧面小队的先兆道具）
     for (const e of this.enemies) if (e.alive) { e.leaving = true; e.vx = -380; e.path = 'line'; }
     this.clearBullets(true);
     this.seg = { type: 'boss', tier: Math.max(3, this.beatIdx + STAGE_ORDER.indexOf(this.stageId)), t: 0, dur: 0 };
@@ -1363,6 +1369,7 @@ class World {
     for (const w of this.walls) { g.globalCompositeOperation = 'lighter'; const gr = g.createLinearGradient(w.x - 40, 0, w.x + 10, 0); gr.addColorStop(0, 'rgba(201,168,255,0)'); gr.addColorStop(1, 'rgba(255,243,200,0.7)'); g.fillStyle = gr; g.fillRect(w.x - 40, this.arena.top, 50, this.arena.bottom - this.arena.top); g.globalCompositeOperation = 'source-over'; }
     for (const k of this.pickups) if (k.kind !== 'crystal' && this.seesPickup(k)) drawPickup(g, k, t); // 别人的掉落看不见
     for (const q of this.incoming) this.drawIncoming(g, q);
+    if (this.lurks) this.drawLurks(g); // 地图出手：先兆、手臂、合拢的墙（在敌人下面）
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.drawEnemy(g, e);
     if (this.boss) this.boss.draw(g);
     this.drawBeams(g);
@@ -1485,7 +1492,7 @@ class World {
     if (e.mark) { g.strokeStyle = `rgba(255,120,90,${0.7 + Math.sin(t * 10) * 0.3})`; g.lineWidth = 2.5; g.beginPath(); g.arc(0, 0, e.r + 8, 0, TAU); g.moveTo(-e.r - 12, 0); g.lineTo(-e.r - 4, 0); g.moveTo(e.r + 12, 0); g.lineTo(e.r + 4, 0); g.stroke(); }
     if (e.clockMark) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2.5; g.beginPath(); g.arc(0, 0, e.r + 10, 0, TAU); g.stroke(); g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -e.r); g.moveTo(0, 0); g.lineTo(e.r * 0.6, 0); g.stroke(); }
     g.restore();
-    if (e.elite) { const w = 80, y = e.y - e.r - 26; g.fillStyle = 'rgba(14,11,40,0.75)'; g.fillRect(e.x - w / 2, y, w, 7); g.fillStyle = '#ff9d8c'; g.fillRect(e.x - w / 2, y, (w * Math.max(0, e.hp)) / e.maxHp, 7); }
+    if (e.elite || (e.lurk && e.hp < e.maxHp)) { const w = e.elite ? 80 : 56, y = e.part === 'hand' && e.from > 0 ? e.y - 84 : e.y - e.r - 26; g.fillStyle = 'rgba(14,11,40,0.75)'; g.fillRect(e.x - w / 2, y, w, 7); g.fillStyle = '#ff9d8c'; g.fillRect(e.x - w / 2, y, (w * Math.max(0, e.hp)) / e.maxHp, 7); } // 地图伸出来的东西挨了打才显血条：看得出打得碎
     if (e.armorMax) drawArmorPips(g, e);
     if (e.goal && this.mode === 'run') drawGoalMark(g, e, t);
     // 第一只厚甲怪：一步一步教 —— 对准甲片 → 破甲 → 打核心
@@ -1572,6 +1579,7 @@ class World {
     const t = this.t;
     for (const w of this.warns) {
       const u = clamp(w.t / w.tWarn, 0, 1), bright = w.t > 0.3;
+      if (w.hidden) continue; // 地图出手的扑咬路线由 drawLurks 用危险色单独画
       if (w.kind === 'line') {
         const ex = w.x + Math.cos(w.a) * w.len, ey = w.y + Math.sin(w.a) * w.len;
         if (!w.fired) { g.strokeStyle = bright ? `rgba(255,255,255,${0.45 + 0.4 * u})` : 'rgba(255,255,255,0.14)'; g.lineWidth = bright ? 2 + u * 2 : 1.2; g.setLineDash(bright ? [14, 8] : []); g.lineDashOffset = -t * 120; g.beginPath(); g.moveTo(w.x, w.y); g.lineTo(ex, ey); g.stroke(); g.setLineDash([]); }
