@@ -78,8 +78,8 @@ class World {
     this.player = this.me; // 模拟之外（界面、HUD、渲染）读到的“当前飞机”就是本机这架
   }
   /* 一架飞机的全部局内状态（多人时每人一份） */
-  makePlayer(r, i) {
-    const planeId = r.plane || 'moon', P = PLANES[planeId], stats = r.stats || planeStats(null, planeId), cos = r.cos || {}, n = Math.max(1, this.np || 1);
+  makePlayer(r, i) { // stats 每架飞机复制一份：成型会改 dmgK，不能改到大厅资料（联机重算 / 重进会叠加）
+    const planeId = r.plane || 'moon', P = PLANES[planeId], stats = Object.assign({}, r.stats || planeStats(null, planeId)), cos = r.cos || {}, n = Math.max(1, this.np || 1);
     const expC = COSMETICS.exp.find((c) => c.id === cos.exp), trC = COSMETICS.trail.find((c) => c.id === cos.trail) || COSMETICS.trail[0];
     const y = (TOP + BOTTOM) / 2 + (i - (n - 1) / 2) * 90;
     return { idx: i, id: r.id || 'p' + i, name: r.name || '', planeId, P, stats, ultCap: r.ultCap || 1, expColors: (expC && expC.colors) || P.colors.exp, trailColors: trC.colors, trailId: trC.id,
@@ -143,6 +143,42 @@ class World {
   }
   /* 人数系数：主目标 / 精英 / Boss 按人数加厚，普通杂兵不变（一发一个的手感不丢） */
   teamK(per) { return 1 + per * Math.max(0, this.np - 1); }
+  /* Boss / 队长会自愈（每秒回 regen × 最大生命，回不过本阶段的上限）：火力不够就打不动，只有成型的火力压得住 */
+  bossRegen(b, cap, dt) {
+    const r = BUILD_CHECK.regen; if (!r || this.vs || b.dying || !(b.hp > 0) || b.hp >= cap) return;
+    b.hp = Math.min(cap, b.hp + r * b.maxHp * dt); b.regenAt = this.t; // 画面：血条发绿光、Boss 身边冒绿色“+”
+  }
+  /* 构筑考验看得见：自愈时身边冒绿色“+”，失控时一圈越来越红的光 */
+  drawBossCheck(g, b) {
+    if (b.dying || this.bossIntroT > 0) return;
+    const t = this.t;
+    if (b.rage > 0) {
+      const pu = 0.75 + 0.25 * Math.sin(t * 10);
+      g.save(); g.globalCompositeOperation = 'lighter'; drawGlow(g, b.x, b.y, 160 + 50 * b.rage, 'rgba(255,60,80,1)', (0.4 + 0.4 * b.rage) * pu); g.restore();
+      g.save(); g.strokeStyle = `rgba(255,80,100,${(0.5 + 0.4 * b.rage) * pu})`; g.lineWidth = 4 + 3 * b.rage; g.setLineDash([18, 10]); g.lineDashOffset = -t * 120; g.beginPath(); g.arc(b.x, b.y, 118 + 6 * Math.sin(t * 10), 0, TAU); g.stroke(); g.restore(); // 一圈转动的红色虚线：失控中
+    }
+    if (b.regenAt !== undefined && t - b.regenAt < 0.4) {
+      g.save(); g.strokeStyle = 'rgba(111,227,154,0.9)'; g.lineWidth = 4; g.lineCap = 'round';
+      for (let i = 0; i < 3; i++) { const k = (t * 0.8 + i / 3) % 1, x = b.x - 70 + i * 70, y = b.y - 60 - k * 60; g.globalAlpha = 1 - k; g.beginPath(); g.moveTo(x - 8, y); g.lineTo(x + 8, y); g.moveTo(x, y - 8); g.lineTo(x, y + 8); g.stroke(); }
+      g.restore();
+    }
+  }
+  /* Boss / 队长打太久会失控：攻击速度倍数（1 = 正常）；跨过预告和失控那一刻各喊一次 */
+  bossRageK(b) {
+    const R = BUILD_CHECK.rage, at = R.at[this.stageId]; if (!at || !b || this.vs) return 1;
+    const f = b.fightT || 0;
+    if (!b.rageCall && f >= at - R.warn) { b.rageCall = 1; this.emit('flag', { text: `${R.warn} 秒后失控 · 快打！`, color: 'gold', dur: 1.6 }); Sound.sfx('weakOpen'); }
+    if (b.rageCall === 1 && f >= at) { b.rageCall = 2; this.emit('flag', { text: '失控了 · 攻击越来越快', color: 'red', dur: 1.8 }); Sound.sfx('rewind'); this.shake(0.35); }
+    b.rage = f <= at ? 0 : Math.min(1, (f - at) / R.ramp); // 画面用：越失控越红
+    // 失控太久：每 pulse 秒一次全屏冲击（提前 1.5 秒预告），躲不掉——拖下去必输
+    const over = f - at - R.wipe;
+    if (over > 0) {
+      const n = Math.floor(over / R.pulse);
+      if (over - n * R.pulse >= R.pulse - 1.5 && b.pulseWarn !== n) { b.pulseWarn = n; this.emit('flag', { text: '失控冲击！', color: 'red', dur: 1.2 }); Sound.sfx('weakOpen'); }
+      if (b.pulseN !== n) { b.pulseN = n; if (n > 0) { for (const q of this.players) if (q.alive && !q.gone) { q.inv = 0; this.hurtPlayer(1, 'c:rage', q); } this.shake(0.5); } }
+    }
+    return 1 + Math.min(R.max, (Math.max(0, f - at)) / R.ramp);
+  }
   /* 模拟里默认的“当前飞机”：第一架还活着的（各端一致）；渲染 / HUD 用 this.me */
   anchor() { return this.players.find((q) => q.alive && !q.gone && !q.away) || this.players.find((q) => q.alive && !q.gone) || this.players.find((q) => !q.gone) || this.players[0]; }
   alivePlayers() { return this.players.filter((q) => q.alive && !q.gone && !q.away); } // 在线、能行动的（断线中的不算：救不了人，也不会被打）
@@ -299,8 +335,8 @@ class World {
   /* 主炮：固定向右；多重 = 并排多路；每颗弹带上当前穿透 / 追踪 / 爆破等级 */
   fireMain() {
     const p = this.player, d = this.P.dmg * this.stats.dmgK, x = p.x + 24, y = p.y + 2, n = 1 + this.gun.multi;
-    const lanes = [[0], [-9, 9], [-15, 0, 15], [-21, -7, 7, 21]][n - 1];
-    for (const off of lanes) this.gunShot(x, y + off, off * 0.004, d, { side: off !== 0 });
+    const lanes = [[0], [-9, 9], [-15, 0, 15], [-21, -7, 7, 21]][n - 1], dl = (d * BUILD_CHECK.multiK[n - 1]) / n; // 多重：多出来的几路扫得更宽，但打同一个大目标时总伤害只涨到 multiK 倍（不是路数倍）
+    for (const off of lanes) this.gunShot(x, y + off, off * 0.004, dl, { side: off !== 0 });
     p.muzzle = 1; // 画面：炮口闪一下
     if (this.hasSyn('homing', 'wing')) for (const w of this.wingmen) if (!w.burst) w.fireT = Math.min(w.fireT, 0.02);
     if (p === this.me && Math.random() < 0.3) Sound.sfx('shoot', { gap: 120 });
@@ -589,7 +625,7 @@ class World {
     this.m.dmgOut += dmg;
     if (e.isBoss) {
       if (!this.boss) return;
-      let k = this.stats.bossK / this.teamK(0.7); // 多人：Boss 按人数加厚（固定系数，不随成长变）
+      let k = this.stats.bossK / this.teamK(0.7) / (BUILD_CHECK.bossK[this.stageId] || 1); // 多人：Boss 按人数加厚（固定系数，不随成长变）；bossK：要成型的火力才打得动
       if (this.boss.conductive && o.kind === 'zap') k *= 1.3;
       if (this.boss.marked && o.kind === 'explosion') k *= 1.5;
       this.boss.hit({ dmg: dmg * k, x: o.x !== undefined ? o.x : e.x, y: o.y !== undefined ? o.y : e.y, kind: o.kind || 'shot' });
@@ -1371,7 +1407,7 @@ class World {
     for (const q of this.incoming) this.drawIncoming(g, q);
     if (this.lurks) this.drawLurks(g); // 地图出手：先兆、手臂、合拢的墙（在敌人下面）
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.drawEnemy(g, e);
-    if (this.boss) this.boss.draw(g);
+    if (this.boss) { this.boss.draw(g); this.drawBossCheck(g, this.boss); }
     this.drawBeams(g);
     this.shots.each((s) => this.drawShot(g, s));
     this.drawArcs(g);

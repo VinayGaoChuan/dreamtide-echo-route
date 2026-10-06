@@ -92,7 +92,8 @@ class ClockBoss {
     }
     // attack runner (generators yield wait times)
     if (!this.gen) this.nextAttack();
-    this.wait -= dt * this.tempo;
+    if (!(this.shield > 0) && !this.guard) w.bossRegen(this, [1000, 700, 350][this.phase - 1], dt); // 自愈：火力不够就打不动（护盾 / 散兵护着时不回）
+    this.wait -= dt * this.tempo * w.bossRageK(this); // 打太久会失控
     while (this.gen && this.wait <= 0) {
       const r = this.gen.next();
       if (r.done) { this.gen = null; break; }

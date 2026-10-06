@@ -10,6 +10,7 @@ function run(stage, plane, level, cap, pickIdx, godmode, world) {
   if (world && world.preferUpper) { const g0 = w.mapGoalPos.bind(w); w.mapGoalPos = (o) => (o.kind === 'wind' && o.upper && o.state === 'idle' ? { x: o.x + o.upper.dx, y: o.upper.y } : g0(o)); } // 测试：主动选上层风圈
   const goalLog = []; let lastGoal = null;
   w.pilotPick = pickIdx;
+  if (pickIdx === 1) w.pilotPickFn = (gs) => gs[w.recIndex(w.ritual)] || gs[0]; // 选法 1：照游戏推荐选（像按大招键的新手）；难度和构筑挂钩后，不成型的乱选打不过首领
   if (godmode) { w.player.hp = w.player.maxHp = 999; }
   const STEP = 1 / 120; let t = 0, frames = 0, maxE = 0, maxB = 0, pickLog = [];
   const _apply = w.applyOption.bind(w); w.applyOption = (o) => { pickLog.push(o.kind === 'link' ? SYNERGIES[o.id].name : (SKILLS[o.id] || BURST_MODS[o.id] || { name: o.id }).name + (o.to || '')); _apply(o); };

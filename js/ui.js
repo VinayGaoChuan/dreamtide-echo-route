@@ -689,7 +689,8 @@ const compName = (id) => (SKILLS[id] ? SKILLS[id].name : SYNERGIES[id] ? `「${S
 function compChip(P, id) {
   const own = P.have.includes(id) || (id === P.link && P.linkOwned), S = SKILLS[id], L = SYNERGIES[id];
   const ic = S ? icon(S.icon).replace('class="ic"', `class="ic" style="fill:${S.color}"`) : icon('i-dust').replace('class="ic"', 'class="ic" style="fill:#ffd76a"');
-  return `<span class="chip ${own ? 'owned' : ''}" style="color:${S ? S.color : '#ffd76a'}">${ic}${esc(S ? S.name : L ? L.name : id)}</span>`;
+  const lv = P.lv && S ? P.lv[id] || 0 : 0, prog = S && P.need && lv > 0 && lv < P.need ? ` ${lv}/${P.need}` : ''; // 联动要两件都到 need 级：已经有、还没到级的显示进度
+  return `<span class="chip ${own ? 'owned' : ''}" style="color:${S ? S.color : '#ffd76a'}">${ic}${esc(S ? S.name : L ? L.name : id)}${prog}</span>`;
 }
 function planHtml(P, now, noHead, noPath) {
   if (!P) return '';
@@ -1351,12 +1352,13 @@ function updateHud(force) {
   if (L.comp !== ck) { L.comp = ck; R.comps.innerHTML = (h.companions || []).map((id) => `<canvas width="64" height="64" data-npc="${id}" title="${NPCS[id].name}：${NPCS[id].effect}"></canvas>`).join(''); paintPlaneCanvases(R.comps); }
   if (h.boss) {
     if (L.bossOn !== true) { L.bossOn = true; R.boss.hidden = false; R.tc.hidden = true; R.bname.textContent = h.boss.name; R.bticks.innerHTML = (h.boss.ticks || [70, 35]).map((x) => `<span class="tick" style="left:${x}%"></span>`).join(''); }
-    setText(R.bphase, 'bph', h.boss.phaseName + (h.boss.weak ? ' · 弱点暴露' : ''));
+    const B = w.boss, at = BUILD_CHECK.rage.at[w.stageId], left = B && at && !w.vs && w.bossIntroT <= 0 ? Math.ceil(at - (B.fightT || 0)) : null; // 构筑考验：失控倒计时
+    setText(R.bphase, 'bph', h.boss.phaseName + (h.boss.weak ? ' · 弱点暴露' : '') + (left === null ? '' : left > 0 ? (left <= 15 ? ` · ${left} 秒后失控` : '') : ' · 失控中'));
     // 血条：入场蓄势时是空的，落地那一刻从空涨满（FP10）
     const intro = w.bossIntroT > 0, bw = intro ? '0%' : `${(h.boss.hp / h.boss.maxHp) * 100}%`;
     if (L.bw !== bw) { if (!intro && L.bw === '0%' && !L.bossFill) { L.bossFill = true; R.bf.style.transition = 'width 1s cubic-bezier(.2,.8,.2,1)'; setTimeout(() => { R.bf.style.transition = ''; }, 1100); } L.bw = bw; R.bf.style.width = bw; }
     const sw = h.boss.shield > 0 ? `${(h.boss.shield / h.boss.shieldMax) * 100}%` : '0%'; if (L.sw !== sw) { L.sw = sw; R.bs.style.width = sw; }
-    const pc = 'bar boss p' + h.boss.phase; if (L.bcls !== pc) { L.bcls = pc; R.bbar.className = pc; }
+    const pc = 'bar boss p' + h.boss.phase + (B && B.rage > 0 ? ' rage' : B && B.regenAt !== undefined && w.t - B.regenAt < 0.4 ? ' regen' : ''); if (L.bcls !== pc) { L.bcls = pc; R.bbar.className = pc; }
   } else {
     if (L.bossOn !== false) { L.bossOn = false; R.boss.hidden = true; L.bossFill = false; }
     updateGoalCard(h.goal, R, L);

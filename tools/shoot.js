@@ -108,6 +108,7 @@ const MOMENTS = [
   { name: 'core', until: "w.props && w.props.some((q) => q.kind === 'core')", max: 200, seq: { n: 16, every: 300 } },
   { name: 'chest', until: "w.pickups.some((k) => k.kind === 'chest' && k.near > 0.2)", max: 20, seq: { n: 8, every: 120 } },
   { name: 'lurk-close', start: '1-2', until: "w.lurks && w.lurks.some((L) => L.kind === 'close' && L.st === 'omen')", max: 200, seq: { n: 12, dt: 0.75 } },
+  { name: 'boss-rage', start: '1-1', setup: "G.world.beginBeat(G.world.plan.length - 1); __S.until('w.phase === \\'boss\\' && w.boss && w.bossIntroT <= 0', 30); G.world.boss.fightT = BUILD_CHECK.rage.at[G.world.stageId] - 7", until: 'w.boss && w.boss.fightT > BUILD_CHECK.rage.at[w.stageId] - 6', max: 5, seq: { n: 10, dt: 0.9 } }, // 构筑考验：自愈的绿光、失控倒计时、失控后的红光
   { name: 'boss-in', start: '1-3', setup: 'G.world.beginBeat(G.world.plan.length - 1)', until: 'w.phase === "boss" && w.bossIntroT > 2.4', max: 20, seq: { n: 12, every: 280 } },
   { name: 'boss-down', setup: 'const b = G.world.boss; if (b) { b.phase = 3; b.nextPhase = 3; b.transT = 0; b.shield = 0; b.hp = 25; }', until: 'w.boss && w.boss.dying > 0', max: 60, seq: { n: 16, every: 260 } },
 ];

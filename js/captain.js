@@ -37,8 +37,10 @@ class CaptainBoss {
     this.fightT += dt;
     if (this.transT > 0) { this.transT -= dt; if (this.transT <= 0) { this.phase = this.nextPhase; w.onBossPhase(2); } return; }
     if (this.stunT > 0) { this.stunT -= dt; return; }
-    if (this.gen) { const r = this.gen.next(dt); if (r.done) this.gen = null; return; }
-    this.atkT -= dt;
+    if (!this.guard) w.bossRegen(this, this.phase === 1 ? this.maxHp : this.maxHp * 0.5, dt); // 自愈：火力不够就打不动（散兵护着时不回，纯比火力）
+    const rk = w.bossRageK(this); // 打太久会失控：攻击一路加快
+    if (this.gen) { const r = this.gen.next(dt * rk); if (r.done) this.gen = null; return; }
+    this.atkT -= dt * rk;
     if (this.atkT <= 0) {
       const list = this.phase === 1 ? this.C.cycle : this.C.cycle2, name = list[this.idx++ % list.length];
       this.gen = this.attack(name); this.atkT = this.phase === 1 ? 1.5 : 1.0;

@@ -283,6 +283,9 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .bar.boss > i{background:linear-gradient(180deg,#d9c4ff,#9d7bff 60%,#7458e0)}
 .bar.boss.p2 > i{background:linear-gradient(180deg,#ffc7a0,#ff8a5c 60%,#e8613e)}
 .bar.boss.p3 > i{background:linear-gradient(90deg,#fff3c8,#ffe08a,#b89cff)}
+.bar.boss.regen{box-shadow:0 0 0 2px rgba(111,227,154,.55),0 0 12px rgba(111,227,154,.6)}
+.bar.boss.rage{animation:rageBar .5s ease-in-out infinite alternate}
+@keyframes rageBar{from{box-shadow:0 0 0 2px rgba(255,80,100,.5)}to{box-shadow:0 0 0 3px rgba(255,80,100,.95),0 0 16px rgba(255,80,100,.8)}}
 .bar.boss .tick{position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,.7)}
 .bar.boss .shield{position:absolute;top:0;left:0;height:38%;border-radius:999px;background:repeating-linear-gradient(90deg,#fff 0 3px,rgba(255,240,190,.75) 3px 6px);box-shadow:0 0 6px rgba(255,243,200,.9)}
 .hud-tr{position:absolute;top:calc(10px*var(--u));right:calc(14px*var(--u));display:flex;gap:8px;align-items:center}

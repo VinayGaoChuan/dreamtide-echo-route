@@ -131,7 +131,7 @@ function fxHtml(fx) { return fx && fx.length ? `<span class="fxs">${fx.map(([w, 
 function fxOf(kind, id, lv) { // 某个能力在某一级的箭头
   if (kind === 'gun' || kind === 'support') return (SKILLS[id].fx || [])[Math.max(0, (lv || 1) - 1)] || [];
   if (kind === 'bmod') return (BURST_MODS[id].fx || [])[Math.max(0, (lv || 1) - 1)] || [];
-  if (kind === 'link') return SYNERGIES[id].fx || [];
+  if (kind === 'link') return [...(SYNERGIES[id].fx || []), ['火力', 2]]; // 联动是倍增件：成型后所有攻击大涨
   return [];
 }
 /* 飞机之间的差别：和标准机（5 颗心、标准速度）比 */
@@ -232,6 +232,13 @@ const BUILD_PATHS = [
   { name: '雷爆流', path: ['bomb', 'thunder', 'bomb+thunder'], hint: '雷击标记目标，爆炸再放电' },
   { name: '星砂散射流', path: ['multi', 'magnet', 'multi+magnet'], hint: '吸到星砂就射出一把星弹' },
 ];
+/* 难度和构筑挂钩（docs/design.md §3.5）：
+   成型 = 一个流派的启动件和回报件都升到 needLv 级，再接上它们的联动（倍增件）；成型后所有攻击 × formK（各联动的倍率见 formKOf：爆炸类对单个 Boss 吃亏，倍率高一点，让每条流派成型后都打得过）。
+   Boss / 队长打了 rage.at 秒还没倒就失控：攻击一路加快（rage.ramp 秒加满 rage.max），提前 rage.warn 秒预告。
+   失控 wipe 秒后每 pulse 秒一次全屏冲击（先预告，躲不掉）：拖下去必输，不会无限打下去。
+   只有成型的火力能在失控前打完；没成型的局要靠操作硬扛失控段 */
+const BUILD_CHECK = { needLv: 2, formK: 2, formKOf: { 'pierce+bomb': 2.25, 'bomb+rainbow': 2.3, 'homing+thunder': 2.3, 'bomb+thunder': 2.05, 'homing+wing': 1.8, 'multi+ice': 1.75, 'multi+magnet': 1.8 }, bossK: { '1-1': 1.3, '1-2': 1.1, '1-3': 1.2 }, regen: 0.008, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35, pulse: 5 } };
+function buildLv(b, id) { if (!b) return 0; return (b.gun && b.gun[id]) || (b.support && b.support.id === id ? b.support.lv : 0); }
 function buildOwned(b, id) { if (!b) return false; if (id.includes('+')) return (b.links || []).includes(id); return !!((b.gun && b.gun[id] > 0) || (b.support && b.support.id === id)); }
 /* 目标流派：和当前 Build 最接近、还没做完的那条；一样接近时按局数轮换 */
 function pickTarget(b, rot) {
@@ -248,7 +255,8 @@ function buildPlan(b, targetName, rot) {
   b = b || { gun: {}, support: null, links: [] };
   const P = BUILD_PATHS.find((x) => x.name === targetName) || pickTarget(b, rot);
   const comps = P.path.filter((x) => !x.includes('+')), link = P.path.find((x) => x.includes('+')) || null;
-  const have = comps.filter((id) => buildOwned(b, id)), miss = comps.filter((id) => !buildOwned(b, id)), linkOwned = !!(link && buildOwned(b, link));
+  const ready = (id) => buildLv(b, id) >= BUILD_CHECK.needLv; // 联动要两件都到 needLv 级
+  const have = comps.filter(ready), miss = comps.filter((id) => !ready(id)), linkOwned = !!(link && buildOwned(b, link));
   const next = miss[0] || (link && !linkOwned ? link : null);
   const swap = next && SKILLS[next] && SKILLS[next].slot === 'support' && b.support && b.support.id !== next ? b.support.id : null;
   let alt = null;
@@ -257,7 +265,8 @@ function buildPlan(b, targetName, rot) {
     const [x, y] = L.need; if (buildOwned(b, x) === buildOwned(b, y)) continue;
     alt = { key: k, have: buildOwned(b, x) ? x : y, miss: buildOwned(b, x) ? y : x }; break;
   }
-  return { name: P.name, hint: P.hint, path: P.path, comps, link, linkOwned, have, miss, next, swap, done: !next, alt };
+  const lv = {}; for (const id of comps) lv[id] = buildLv(b, id);
+  return { name: P.name, hint: P.hint, path: P.path, comps, link, linkOwned, have, miss, next, swap, done: !next, alt, lv, need: BUILD_CHECK.needLv };
 }
 
 /* 失败复盘：按实际受伤来源归类，结算只挑最常见的一类给一条能照做的建议 */
@@ -271,6 +280,7 @@ const HURT_TIPS = {
   laser: { label: '白线激光', tip: '灯塔眼先画白线再射：看到白线就离开那条线' },
   drop: { label: '纸船投下的弹', tip: '纸船灯往下投弹：别待在它们正下方' },
   boss: { label: 'Boss 的弹幕', tip: '先对准正面护甲打；弹幕来时只小幅移动找空隙，别大范围乱飞' },
+  rage: { label: 'Boss 失控冲击', tip: '首领打太久会失控、再拖就全屏冲击：先凑齐流派、接上联动（成型后火力翻倍），在失控前打完' },
   lurk: { label: '地图伸出来的手 / 醒来的装饰', tip: '先看先兆：冒泡、抽动、睁眼、折痕出现时，离开那一列 / 那条白线，再回头打碎它拿奖励' },
   surprise: { label: '惊喜怪的攻击', tip: '它咬过来前会先画出航道：离开那条航道再回头打' },
   shot: { label: '敌弹', tip: '被击中后有一小段无敌：趁这段时间换到安全的高度' },
@@ -279,6 +289,7 @@ function hurtCat(src) {
   if (!src) return 'shot';
   if (src === 'c:armor' || src === 'c:wreck') return 'armorC';
   if (src === 'c:lurk') return 'lurk';
+  if (src === 'c:rage') return 'rage';
   if (src === 'c:chaser' || src === 'b:chaser') return 'rear';
   if (['c:mimic', 'c:hmimic', 'c:mcore', 'c:mtooth', 'b:bite', 'b:mimic', 'b:hmimic', 'b:moonArm'].includes(src)) return 'surprise';
   if (src === 'c:boss' || src === 'b:boss') return 'boss';

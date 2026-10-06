@@ -50,11 +50,11 @@ Object.assign(World.prototype, {
     if (cur && cur.id === id) return cur.lv >= 2 ? null : { kind: 'bmod', id, from: cur.lv, to: 2 };
     return { kind: 'bmod', id, from: 0, to: 1, replace: cur ? { id: cur.id, lv: cur.lv } : null };
   },
-  optLink(key) { if (this.links.has(key)) return null; return SYNERGIES[key].need.every((n) => this.ownLv(n) > 0) ? { kind: 'link', id: key } : null; },
+  optLink(key) { if (this.links.has(key)) return null; return SYNERGIES[key].need.every((n) => this.ownLv(n) >= BUILD_CHECK.needLv) ? { kind: 'link', id: key } : null; }, // 两件都到 needLv 级才能接
   enablesLink(o) {
     if (o.kind === 'link') return true;
     if (o.kind !== 'gun' && o.kind !== 'support') return false;
-    return Object.entries(SYNERGIES).some(([k, L]) => !this.links.has(k) && L.need.includes(o.id) && L.need.every((n) => n === o.id || this.ownLv(n) > 0) && !(o.replace && L.need.includes(o.replace.id)));
+    return Object.entries(SYNERGIES).some(([k, L]) => !this.links.has(k) && L.need.includes(o.id) && L.need.every((n) => (n === o.id ? o.to : this.ownLv(n)) >= BUILD_CHECK.needLv) && !(o.replace && L.need.includes(o.replace.id)));
   },
   /* 这一局在追的流派：单人时大厅的目标流派优先（还没走到别的流派上时），否则是离当前 Build 最近、还没做完的那条。
      联机不用本机的目标，只看自己的 Build（各端一致） */
@@ -99,10 +99,10 @@ Object.assign(World.prototype, {
     // 另一个候选照常随机：玩家永远可以换方向，换了以后引导跟着他的 Build 走
     let a = null;
     if (this.offerN >= 1) {
-      const P = this.aimPlan(), steer = P.next ? pool.find((o) => o.id === P.next && (o.kind === 'gun' || o.kind === 'support') && !(o.from > 0)) || null : null;
+      const P = this.aimPlan(), steer = P.next ? pool.find((o) => o.id === P.next && (o.kind === 'gun' || o.kind === 'support')) || null : null; // 缺的那件（这个装置的池子里有的话）：没有就给，有了没到级就给升级
       a = lk.find((o) => o.id === P.link) || lk[0] || null;
       if (a && steer && a.id !== P.link) return [a, steer]; // 别的流派的联动现在就能拿 vs 接着凑自己流派的下一件：真正的取舍
-      if (!a) a = steer;
+      if (!a) a = steer && steer.from > 0 && steer.to >= BUILD_CHECK.needLv ? Object.assign({}, steer, { why: `到 ${BUILD_CHECK.needLv} 级就能接联动` }) : steer;
     }
     if (!a && this.offerN === 1 && upgrades.length && fresh.length) a = spick(upgrades);
     else if (!a && (this.offerN === 2 || rare || source === 'core' || source === 'moon')) { const L = pool.filter((o) => this.enablesLink(o)); if (L.length) a = spick(L); }
@@ -311,7 +311,7 @@ Object.assign(World.prototype, {
         if (o.replace && o.replace.id === 'thunder') this.storm = null;
         break;
       case 'bmod': this.bmod = { id: o.id, lv: o.to }; break;
-      case 'link': this.links.add(o.id); p.res.syns++; if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); if (mine) { this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); } break;
+      case 'link': this.links.add(o.id); p.res.syns++; if (this.links.size === 1) { this.stats.dmgK *= BUILD_CHECK.formKOf[o.id] || BUILD_CHECK.formK; this.text('成型！火力大涨', p.x, p.y - 70, '#ffd76a', 24, 5); } // 第一个联动 = 成型：之后所有攻击 × formK if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); if (mine) { this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); } break;
       case 'res': if (o.id === 'charge') this.addCharge(0.5, true); else if (p.hp < p.maxHp) p.hp++; break;
     }
     if (o.bonus) this.addCharge(o.bonus, true);
