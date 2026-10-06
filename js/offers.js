@@ -311,7 +311,8 @@ Object.assign(World.prototype, {
         if (o.replace && o.replace.id === 'thunder') this.storm = null;
         break;
       case 'bmod': this.bmod = { id: o.id, lv: o.to }; break;
-      case 'link': this.links.add(o.id); p.res.syns++; if (this.links.size === 1) { this.stats.dmgK *= BUILD_CHECK.formKOf[o.id] || BUILD_CHECK.formK; this.text('成型！火力大涨', p.x, p.y - 70, '#ffd76a', 24, 5); } // 第一个联动 = 成型：之后所有攻击 × formK if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); if (mine) { this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); } break;
+      // 第一个联动 = 成型：之后所有攻击 × formK
+      case 'link': this.links.add(o.id); p.res.syns++; if (this.links.size === 1) { this.stats.dmgK *= BUILD_CHECK.formKOf[o.id] || BUILD_CHECK.formK; this.text('成型！火力大涨', p.x, p.y - 70, '#ffd76a', 24, 5); } if (this.m.firstSyn === null) this.m.firstSyn = this.runT; this.highlight(); if (mine) { this.remember(`完成了「${SYNERGIES[o.id].name}」`, 4); if (this.cb.onSynergy) this.cb.onSynergy(o.id); } break;
       case 'res': if (o.id === 'charge') this.addCharge(0.5, true); else if (p.hp < p.maxHp) p.hp++; break;
     }
     if (o.bonus) this.addCharge(o.bonus, true);

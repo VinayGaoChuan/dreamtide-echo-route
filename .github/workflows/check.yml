@@ -19,6 +19,8 @@ jobs:
           node-version: 22
       - name: 语法检查
         run: for f in js/*.js tools/*.js; do node --check "$f" || exit 1; done
+      - name: 行尾注释吞代码检查（脚本改代码时注释插进一行中间，后半行变成注释，语法检查发现不了）
+        run: node tools/lint-comments.js
       - name: 三关无头通关模拟
         run: node tools/smoke-sim.js js
       - name: 家园规则（第一小时因果链 + 存档安全）
