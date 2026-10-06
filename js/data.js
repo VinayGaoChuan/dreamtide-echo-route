@@ -181,11 +181,11 @@ const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 /* 章节 / 关卡：一关 = 一次完整出击（约 6~8 分钟），只在出击结束时结算。难度固定，不跟随玩家成长抬高。
    v0.8 起关卡按目标链推进（STAGE_PLANS），fill = 背景杂兵的出兵速度（只/秒）。 */
 const STAGES = {
-  '1-1': { id: '1-1', ch: 1, name: '梦灯海湾', segs: 6, segDur: 54, hpK: 1, avg: 5, peak: 9, fill: 2.3, elites: ['jellyE'], boss: 'captain', bossName: '泡泡小队长', bossHp: 6000, rec: 1, reward: 120, fail: [30, 90], ult: 1,
+  '1-1': { id: '1-1', ch: 1, name: '梦灯海湾', theme: 'bay', segs: 6, segDur: 54, hpK: 1, avg: 5, peak: 9, fill: 2.3, elites: ['jellyE'], boss: 'captain', bossName: '泡泡小队长', bossHp: 6000, rec: 1, reward: 120, fail: [30, 90], ult: 1,
     map: ['house', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '第一次出击：开局只会直射；先清普通怪群，再对付越来越硬的厚甲怪。' },
-  '1-2': { id: '1-2', ch: 1, name: '纸船灯河', segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, elites: ['tickE', 'jellyE'], boss: 'captain2', bossName: '裂纹闹钟队长', bossHp: 9000, rec: 2, reward: 150, fail: [40, 100], ult: 2,
+  '1-2': { id: '1-2', ch: 1, name: '纸船灯河', theme: 'river', segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, elites: ['tickE', 'jellyE'], boss: 'captain2', bossName: '裂纹闹钟队长', bossHp: 9000, rec: 2, reward: 150, fail: [40, 100], ult: 2,
     map: ['house', 'bridge', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '敌人会从裂缝、上下方钻出来；途中要护送一位伙伴。' },
-  '1-3': { id: '1-3', ch: 1, name: '失眠钟塔', segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, elites: ['starE', 'tickE', 'jellyE'], boss: 'clock', bossName: '失控闹钟', bossHp: 1000, rec: 3, reward: 190, fail: [50, 120], ult: 2,
+  '1-3': { id: '1-3', ch: 1, name: '失眠钟塔', theme: 'tower', segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, elites: ['starE', 'tickE', 'jellyE'], boss: 'clock', bossName: '失控闹钟', bossHp: 1000, rec: 3, reward: 190, fail: [50, 120], ult: 2,
     map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'], intro: '后方追兵和空间裂缝一起出现，最后是第一章 Boss：失控闹钟。' },
 };
 const STAGE_ORDER = ['1-1', '1-2', '1-3'];
@@ -198,7 +198,7 @@ const HOME = { cycle: 240, recipe: 8, sell: 20, startStardust: 120, plots: 8, co
 const beatPay = (S) => Math.round(S.reward / 12);
 const endPay = (S, first) => Math.round(S.reward * (first ? 0.5 : 0.3));
 /* 地图装置给的梦木（每次出击 18~26 左右） */
-const WOOD_DROP = { house: 4, wind: 4, mine: 8, npc: 4, cmdr: 3 };
+const WOOD_DROP = { house: 4, wind: 4, mine: 8, npc: 4, cmdr: 3, bridge: 5, giant: 7 };
 /* 常驻 NPC：一个主职 + 一个副职（成为“伙伴”后开放），职责免费改，每次回家最多改一项 */
 const HOME_NPCS = {
   bunny: { bld: 'rescue', main: { id: 'clue', name: '整理救援线索', line: '下一局要救的伙伴更早出现，一路有箭头' }, side: { id: 'beacon', name: '准备救援信标', line: '修理点更大，吊舱更耐打' }, bond: '救回云朵爷爷' },
@@ -305,7 +305,7 @@ const STAGE_PLANS = {
   ],
   '1-2': [
     { id: 'crowd', goal: '清掉普通怪群', kind: 'crowd', n: 38, map: 'house', mapAt: 15 },
-    { id: 'armor1', goal: '击破从裂缝钻出的厚甲怪', kind: 'armor1', from: 'rift', reward: 'wind' },
+    { id: 'armor1', goal: '击破从裂缝钻出的厚甲怪', kind: 'armor1', from: 'rift', reward: 'bridge' },
     { id: 'pack', goal: '处理上下钻出的厚甲编队', kind: 'pack', from: 'drop', map: 'npc', mapAt: 3 },
     { id: 'spawner', goal: '摧毁残骸里的刷怪核心', kind: 'spawner', reward: 'mine' },
     { id: 'cmdr', goal: '击败带队精英', kind: 'cmdr', from: 'crack', reward: 'core' },
@@ -315,7 +315,7 @@ const STAGE_PLANS = {
   '1-3': [
     { id: 'crowd', goal: '清掉普通怪群', kind: 'crowd', n: 40, map: 'house', mapAt: 15 },
     { id: 'armor1', goal: '击破后方绕来的厚甲怪', kind: 'armor1', from: 'rear', reward: 'wind' },
-    { id: 'pack', goal: '处理从远处推近的厚甲编队', kind: 'pack', from: 'push', reward: 'mine' },
+    { id: 'pack', goal: '处理从远处推近的厚甲编队', kind: 'pack', from: 'push', reward: 'giant' },
     { id: 'rift', goal: '清掉空间裂缝里的来敌', kind: 'chase', event: 'rift', waves: 4, map: 'npc', mapAt: 2 },
     { id: 'cmdr', goal: '击败带队精英', kind: 'cmdr', from: 'front', reward: 'core' },
     { id: 'hmimic', goal: '这间梦灯屋怪怪的', kind: 'surprise', surprise: 'houseMimic' },
@@ -418,10 +418,10 @@ const MAP_OBJECTS = {
     hint: ['碰一下发光的矿核，把它拖到标记的岩壁', '矿核会跟着你飞，碰到岩壁就炸开'], desc: '把矿核拖到岩壁，炸开新航道' },
   npc: { id: 'npc', name: '救援吊舱', verb: '救出', how: 'escort', tag: '支援', color: '#ff9fcf', icon: 'heart',
     hint: ['碰一下伙伴的吊舱，沿光带护送到修理点', '吊舱挨几下也不怕，送到后伙伴加入'], desc: '把吊舱送到修理点，伙伴加入' },
-  bridge: { id: 'bridge', name: '断桥', verb: '修复', how: 'path', tag: '捷径', color: '#9fe3f0', icon: 'wing',
-    hint: ['穿过三个灯环，把断桥接起来', '尾流会把灯环连成桥。'], desc: '（旧版装置，当前航线不再出现）' },
-  giant: { id: 'giant', name: '巨型梦境生物', verb: '唤醒', how: 'eye', tag: '清场', color: '#6ff0ff', icon: 'crown',
-    hint: ['飞到它的眼睛旁边', '它不会攻击你。'], desc: '（旧版装置，当前航线不再出现）' },
+  bridge: { id: 'bridge', name: '断桥', verb: '修复', how: 'path', tag: '安全航道', color: '#9fe3f0', icon: 'wing',
+    hint: ['依次穿过三个灯环', '尾流把灯环连成一座桥，桥上一段时间敌弹会化掉'], desc: '穿过三个灯环接起断桥：一段安全航道 + 二选一' },
+  giant: { id: 'giant', name: '沉睡巨鲸', verb: '唤醒', how: 'eye', tag: '清场', color: '#6ff0ff', icon: 'crown',
+    hint: ['飞到巨鲸的眼睛旁边停一下', '它醒来会把附近的敌人一口吞掉，不会伤到你'], desc: '飞到眼睛旁边叫醒巨鲸：吞掉附近的敌人 + 稀有二选一' },
 };
 const MAP_ORDER = ['house', 'wind', 'mine', 'npc'];
 /* 伙伴：救出后跟着飞机，自动射击，并各有一个效果；Boss 出现前各帮一次忙 */

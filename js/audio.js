@@ -277,7 +277,7 @@ const Sound = (() => {
     arrow: (o) => { noise({ f: 2400, f2: 900, q: 2, dur: 0.18, vol: 0.08, pan: o.pan }); tone({ f: 880, f2: 1320, dur: 0.1, vol: 0.04 }); },
     bellnote: (o) => bell(ctx.currentTime, 84 + randi(0, 2) * 3, 0.1, bus),
     boomNote: () => { bell(ctx.currentTime, 79, 0.14, bus); noise({ f: 500, f2: 120, q: 0.7, dur: 0.25, vol: 0.12 }); },
-    hit: (o) => tone({ f: 660 + rand(120), f2: 400, dur: 0.05, vol: 0.05, type: 'square', lp: 2400, pan: o.pan }),
+    hit: (o) => { noise({ f: 1700 + rand(300), f2: 700, q: 1, dur: 0.04, vol: 0.06, pan: o.pan }); tone({ f: 320 + rand(40), f2: 160, dur: 0.05, vol: 0.05, type: 'triangle', pan: o.pan }); }, // 没打死：闷一点的“噗”，和击杀的碎裂声分开
     armor: (o) => tone({ f: 1800, f2: 1400, dur: 0.04, vol: 0.035, type: 'triangle', pan: o.pan }),
     kill: (o) => { const k = o.k || 0; tone({ f: 620 * Math.pow(2, k / 12), f2: 220, dur: 0.07, vol: 0.1, type: 'triangle', pan: o.pan }); noise({ f: 2600 + k * 200, f2: 1200, q: 1.2, dur: 0.05, vol: 0.05, pan: o.pan }); }, // 短促的碎裂声，连杀音高上升（最多 +6 半音）
     clink: (o) => { const k = o.k || 0; tone({ f: 2400 + k * 300 + rand(200), f2: 1800, dur: 0.05, vol: 0.06, type: 'triangle', pan: o.pan }); tone({ f: 5200 + rand(400), dur: 0.03, vol: 0.025, pan: o.pan }); },
@@ -328,7 +328,7 @@ const Sound = (() => {
     hurt: () => { tone({ f: 240, f2: 90, dur: 0.28, vol: 0.28, type: 'triangle' }); tone({ f: 370, f2: 150, dur: 0.22, vol: 0.12, type: 'square', lp: 1200 }); noise({ f: 600, q: 0.5, dur: 0.12, vol: 0.12 }); },
     shieldPop: () => { noise({ f: 2600, f2: 600, q: 1, dur: 0.3, vol: 0.18 }); tone({ f: 900, f2: 300, dur: 0.25, vol: 0.08, type: 'triangle' }); },
     heart: () => { const t = ctx.currentTime; bell(t, 76, 0.2, bus); bell(t + 0.08, 83, 0.18, bus); },
-    dust: (o) => tone({ f: 1900 + rand(700), f2: 2600, dur: 0.06, vol: 0.035, pan: o.pan }),
+    dust: (o) => { const k = o.k || 0; tone({ f: (1700 + rand(200)) * Math.pow(2, k / 12), f2: 2600 * Math.pow(2, k / 12), dur: 0.06, vol: 0.035 + k * 0.003, pan: o.pan }); }, // 连着捡音高一颗颗往上走（最多 +10 半音）
     bubble: (o) => { tone({ f: 500, f2: 1400, dur: 0.1, vol: 0.09, pan: o.pan }); tone({ f: 900, f2: 1900, dur: 0.08, vol: 0.05, delay: 0.05 }); },
     warn: (o) => tone({ f: 700, f2: 1400, dur: 0.35, vol: 0.05, type: 'sine', slide: 0.3, pan: o.pan }),
     laser: (o) => { tone({ f: 1800, f2: 500, dur: 0.22, vol: 0.07, type: 'sawtooth', lp: 3000, pan: o.pan }); },

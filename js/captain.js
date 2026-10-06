@@ -93,6 +93,7 @@ class CaptainBoss {
       this.hp = this.maxHp * 0.5; this.transT = 1.4; this.nextPhase = 2; this.gen = null;
       w.clearEnemyBullets(true); w.shake(0.6); w.hitStop(0.05); Sound.sfx('phase', { prio: true });
       w.emit('phase', { n: 2, name: `${this.C.name} · 怒气`, captain: true });
+      w.bossBreak(this.x, this.y);
       w.onBossPhase(0);
     } else if (this.hp <= 0) { this.hp = 0; this.die(); }
   }
@@ -104,7 +105,7 @@ class CaptainBoss {
   }
   updateDeath(dt) {
     const w = this.w;
-    this.dying -= dt; this.hitFlash = 0.6 + Math.sin(this.t * 30) * 0.4;
+    this.dying -= dt; this.hitFlash = 0.6 + Math.sin(this.t * 30) * 0.4; w.bossDyingPops(this, 1.6);
     if (Math.random() < 0.6) w.part(pick(['petal', 'shard', 'dot']), this.x + rand(-80, 80), this.y + rand(-80, 80), rand(-260, 260), rand(-300, 100), 1.1, rand(4, 9), pick([this.C.color, '#fff3c8', '#c9a8ff']));
     if (this.dying <= 0) { this.alive = false; Sound.sfx('win'); w.onBossDead(); }
   }

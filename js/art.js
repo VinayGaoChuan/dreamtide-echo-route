@@ -447,15 +447,50 @@ function gear(g, x, y, r, teeth, rot, color) {
 }
 
 /* ---------- scenes: 失眠之海 (parallax), 梦灯大厅, 航海图 ---------- */
+/* 每关的场景身份（v0.12）：同一套海面分层，换天色、整体色相、地标和飘浮物。
+   bay 梦灯海湾：紫夜、浮岛城堡、月亮（原样）；river 纸船灯河：青蓝夜河、升起的孔明灯、成串的纸船；
+   tower 失眠钟塔：洋红紫夜、远处一排钟塔、月亮换成会走的大钟面 */
+const SEA_THEMES = {
+  bay: { sky: ['#110c30', '#271f63', '#40358a', '#2b2470', '#171247'], hue: null, fog: '160,140,240' },
+  river: { sky: ['#06182a', '#0d3350', '#1c5a74', '#11395a', '#061628'], hue: '#2aa6c8', fog: '120,200,230', skyLanterns: 26, boats: 12 },
+  tower: { sky: ['#170824', '#36114c', '#6a2770', '#3a144f', '#140820'], hue: '#c24ab0', fog: '220,150,230', clockMoon: true, towers: true },
+};
+/* 给分层画布换色相（保留透明度和明暗），每关只算一次 */
+function hueCanvas(c, color) {
+  const t = makeCanvas(c.width, c.height), g = t.getContext('2d');
+  g.drawImage(c, 0, 0); g.globalCompositeOperation = 'hue'; g.fillStyle = color; g.fillRect(0, 0, c.width, c.height);
+  g.globalCompositeOperation = 'destination-in'; g.drawImage(c, 0, 0);
+  return t;
+}
 class SeaScene {
   constructor() {
     this.scroll = 0; this.t = 0; this.W = 0; this.H = 720; this.speed = 36; this.dir = 1; this.hold = 0;
     this.stars = []; const r = mulberry32(12);
     for (let i = 0; i < 140; i++) this.stars.push({ x: r() * 1600, y: r() * 420, s: 0.5 + r() * 1.4, p: r() * TAU });
     this.motes = []; for (let i = 0; i < 46; i++) this.motes.push({ x: r() * 1600, y: 80 + r() * 560, s: 1 + r() * 2.4, v: 12 + r() * 26, p: r() * TAU, paper: r() < 0.25 });
-    this.boats = []; for (let i = 0; i < 6; i++) this.boats.push({ x: r() * 1600, y: 0.78 + r() * 0.16, s: 0.6 + r() * 0.5 });
+    this.boats = []; for (let i = 0; i < 12; i++) this.boats.push({ x: r() * 1600, y: 0.78 + r() * 0.16, s: 0.6 + r() * 0.5 });
     this.windows = [];
+    this.themeId = 'bay'; this.th = SEA_THEMES.bay;
     this.build();
+  }
+  setTheme(id) {
+    const th = SEA_THEMES[id] || SEA_THEMES.bay; if (this.themeId === id && this.farT) return;
+    this.themeId = id; this.th = th;
+    this.farT = th.hue ? hueCanvas(this.far, th.hue) : this.far; this.midT = th.hue ? hueCanvas(this.mid, th.hue) : this.mid;
+    this.towers = th.towers ? this.buildTowers() : null;
+    const r = mulberry32(31); this.skyL = []; for (let i = 0; i < (th.skyLanterns || 0); i++) this.skyL.push({ x: r() * 1600, y: 80 + r() * 520, v: 8 + r() * 14, s: 0.6 + r() * 0.7, p: r() * TAU });
+  }
+  /* 失眠钟塔：远景一排细高的钟塔剪影，钟面会亮 */
+  buildTowers() {
+    const TW = this.TW, c = makeCanvas(TW, 720), g = c.getContext('2d'), r = mulberry32(77), faces = [];
+    for (let i = 0; i < 6; i++) {
+      const x = 90 + i * 270 + r() * 60, w = 46 + r() * 30, h = 250 + r() * 170, base = 470;
+      g.fillStyle = 'rgba(46,18,70,0.92)'; g.fillRect(x - w / 2, base - h, w, h);
+      g.beginPath(); g.moveTo(x - w / 2 - 8, base - h); g.lineTo(x, base - h - 60 - r() * 40); g.lineTo(x + w / 2 + 8, base - h); g.closePath(); g.fill();
+      g.fillStyle = 'rgba(30,10,48,0.95)'; for (let k = 0; k < 4; k++) g.fillRect(x - w / 2 + 6, base - h + 70 + k * 46, w - 12, 5);
+      faces.push({ x, y: base - h + 34, r: w * 0.36 });
+    }
+    return { c, faces };
   }
   build() {
     const TW = 1600, H = 720, r = mulberry32(99);
@@ -539,7 +574,7 @@ class SeaScene {
     const t = this.t;
     // sky
     const sky = g.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#110c30'); sky.addColorStop(0.45, '#271f63'); sky.addColorStop(0.7, '#40358a'); sky.addColorStop(0.72, '#2b2470'); sky.addColorStop(1, '#171247');
+    const S = (this.th || SEA_THEMES.bay).sky; sky.addColorStop(0, S[0]); sky.addColorStop(0.45, S[1]); sky.addColorStop(0.7, S[2]); sky.addColorStop(0.72, S[3]); sky.addColorStop(1, S[4]);
     g.fillStyle = sky; g.fillRect(0, 0, W, H);
     // stars
     const sx = this.layerX(0.05, W);
@@ -551,8 +586,9 @@ class SeaScene {
     }
     g.globalAlpha = 1;
     // moon + halo (kept soft so it never outshines bullets)
-    const mx = W * 0.4, my = H * 0.2, F = this.moonFx;
-    if (!(F && F.gone)) {
+    const mx = W * 0.4, my = H * 0.2, F = this.moonFx, th = this.th || SEA_THEMES.bay;
+    if (th.clockMoon && !F) this.drawClockMoon(g, mx, my, t);
+    else if (!(F && F.gone)) {
       g.globalCompositeOperation = 'lighter'; drawGlow(g, mx, my, 150, 'rgba(190,175,255,0.5)', 0.55); g.globalCompositeOperation = 'source-over';
       const mg = g.createRadialGradient(mx - 14, my - 14, 8, mx, my, 62); mg.addColorStop(0, '#f6f0ff'); mg.addColorStop(1, '#cfc2ff');
       g.fillStyle = mg; g.globalAlpha = 0.72; g.beginPath(); g.arc(mx, my, 60, 0, TAU); g.fill();
@@ -571,15 +607,18 @@ class SeaScene {
       g.fillStyle = '#0a0620'; g.strokeStyle = '#ffd76a'; g.lineWidth = 3; g.beginPath(); g.moveTo(-10, -70); g.lineTo(12, -30); g.lineTo(-6, 0); g.lineTo(16, 34); g.lineTo(0, 72); g.lineTo(-18, 30); g.lineTo(2, 0); g.lineTo(-20, -34); g.closePath(); g.fill(); g.stroke(); g.restore();
     }
     // far layer (25%)
-    const fx = this.layerX(0.25, W);
-    g.drawImage(this.far, fx, 0); g.drawImage(this.far, fx + this.TW, 0);
+    if (this.towers) { const tx = this.layerX(0.15, W); g.drawImage(this.towers.c, tx, 0); g.drawImage(this.towers.c, tx + this.TW, 0);
+      g.globalCompositeOperation = 'lighter'; for (const f of this.towers.faces) for (const off of [tx, tx + this.TW]) { const x = f.x + off; if (x < -40 || x > W + 40) continue; drawGlow(g, x, f.y, f.r * 2.4, 'rgba(255,190,240,0.6)', 0.35 + 0.15 * Math.sin(t * 1.3 + f.x)); } g.globalCompositeOperation = 'source-over';
+      for (const f of this.towers.faces) for (const off of [tx, tx + this.TW]) { const x = f.x + off; if (x < -40 || x > W + 40) continue; g.fillStyle = 'rgba(255,226,246,0.42)'; g.beginPath(); g.arc(x, f.y, f.r, 0, TAU); g.fill(); g.strokeStyle = 'rgba(60,20,80,0.9)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x, f.y); g.lineTo(x + Math.cos(t * 0.5 + f.x) * f.r * 0.8, f.y + Math.sin(t * 0.5 + f.x) * f.r * 0.8); g.moveTo(x, f.y); g.lineTo(x + Math.cos(t * 0.04 + f.x) * f.r * 0.5, f.y + Math.sin(t * 0.04 + f.x) * f.r * 0.5); g.stroke(); } }
+    const fx = this.layerX(0.25, W), far = this.farT || this.far;
+    g.drawImage(far, fx, 0); g.drawImage(far, fx + this.TW, 0);
     for (const w of this.windows) {
       if (!w.on) continue;
       for (const off of [fx, fx + this.TW]) { const x = w.x + off; if (x < -10 || x > W + 10) continue; g.fillStyle = 'rgba(255,214,120,0.85)'; g.fillRect(x, w.y, w.w, w.h); }
     }
     // horizon fog
     const fog = g.createLinearGradient(0, H * 0.58, 0, H * 0.8);
-    fog.addColorStop(0, 'rgba(160,140,240,0)'); fog.addColorStop(0.5, `rgba(160,140,240,${0.18 + Math.sin(t * 0.5) * 0.04})`); fog.addColorStop(1, 'rgba(160,140,240,0)');
+    const fc = th.fog; fog.addColorStop(0, `rgba(${fc},0)`); fog.addColorStop(0.5, `rgba(${fc},${0.18 + Math.sin(t * 0.5) * 0.04})`); fog.addColorStop(1, `rgba(${fc},0)`);
     g.fillStyle = fog; g.fillRect(0, H * 0.58, W, H * 0.22);
     // glass sea: moon reflection + shimmer lines
     const seaY = H * 0.72;
@@ -593,8 +632,9 @@ class SeaScene {
     for (let i = 0; i < 26; i++) { const x = ((i * 97 + shx * 1.0) % (W + 200) + W + 200) % (W + 200) - 100, y = seaY + 14 + ((i * 53) % 170); g.fillRect(x, y, 50 + (i % 4) * 20, 1.6); }
     g.globalCompositeOperation = 'source-over';
     // mid layer (60%)
-    const mdx = this.layerX(0.6, W);
-    g.drawImage(this.mid, mdx, 0); g.drawImage(this.mid, mdx + this.TW, 0);
+    const mdx = this.layerX(0.6, W), mid = this.midT || this.mid;
+    g.drawImage(mid, mdx, 0); g.drawImage(mid, mdx + this.TW, 0);
+    if (this.skyL && this.skyL.length) this.drawSkyLanterns(g, W, t);
     g.globalCompositeOperation = 'lighter';
     for (const l of this.lanterns) for (const off of [mdx, mdx + this.TW]) {
       const x = l.x + off; if (x < -20 || x > W + 20) continue;
@@ -606,8 +646,10 @@ class SeaScene {
       const y = l.y + Math.sin(t * 2 + l.p) * 2; g.fillStyle = '#ffcf6a'; g.fillRect(x - 2.5, y - 3, 5, 6);
     }
     // paper boats on the sea (70%)
-    for (const b of this.boats) {
+    for (let bi = 0; bi < this.boats.length; bi++) {
+      const b = this.boats[bi]; if (bi >= (th.boats || 6)) break;
       const x = ((b.x + shx) % 1700 + 1700) % 1700 - 50; if (x > W + 40) continue;
+      if (th.boats) { g.globalCompositeOperation = 'lighter'; drawGlow(g, x, H * b.y - 10 * b.s, 16 * b.s, GLOW.gold, 0.6); g.globalCompositeOperation = 'source-over'; }
       const y = H * b.y + Math.sin(t * 1.6 + b.x) * 2.5;
       g.save(); g.translate(x, y); g.scale(b.s, b.s); g.rotate(Math.sin(t * 1.4 + b.x) * 0.06);
       g.fillStyle = 'rgba(220,210,255,0.55)'; g.beginPath(); g.moveTo(-16, 0); g.lineTo(16, 0); g.lineTo(10, 8); g.lineTo(-10, 8); g.closePath(); g.fill();
@@ -621,6 +663,30 @@ class SeaScene {
       else { g.fillStyle = `rgba(201,168,255,${(0.3 + 0.2 * Math.sin(t * 2 + m.p)) * (this.dim ? 0.45 : 1)})`; g.beginPath(); g.arc(x, y, m.s, 0, TAU); g.fill(); }
     }
     if (!o.noForeground) this.drawForeground(g, W, H);
+  }
+  /* 纸船灯河：孔明灯从海面慢慢升起（暖橙色，比敌弹暗、比背景亮一点，不抢战斗） */
+  drawSkyLanterns(g, W, t) {
+    for (const L of this.skyL) {
+      const y = ((L.y - t * L.v) % 600 + 600) % 600 + 40, x = ((L.x - this.scroll * 0.4) % 1640 + 1640) % 1640 - 20 + Math.sin(t * 0.7 + L.p) * 8;
+      if (x > W + 20) continue;
+      const a = (this.dim ? 0.5 : 0.85) * Math.min(1, (600 - y) / 120);
+      g.globalCompositeOperation = 'lighter'; drawGlow(g, x, y, 18 * L.s, 'rgba(255,170,90,0.7)', a * 0.6); g.globalCompositeOperation = 'source-over';
+      g.globalAlpha = a; g.fillStyle = '#ffb35c'; g.beginPath(); g.moveTo(x - 6 * L.s, y - 8 * L.s); g.lineTo(x + 6 * L.s, y - 8 * L.s); g.lineTo(x + 5 * L.s, y + 7 * L.s); g.lineTo(x - 5 * L.s, y + 7 * L.s); g.closePath(); g.fill();
+      g.fillStyle = '#fff1c9'; g.fillRect(x - 2 * L.s, y + 2 * L.s, 4 * L.s, 4 * L.s); g.globalAlpha = 1;
+    }
+  }
+  /* 失眠钟塔：月亮的位置挂着一面大钟，分针走得太快 */
+  drawClockMoon(g, mx, my, t) {
+    g.globalCompositeOperation = 'lighter'; drawGlow(g, mx, my, 160, 'rgba(255,170,230,0.5)', 0.5); g.globalCompositeOperation = 'source-over';
+    g.save(); g.translate(mx, my); g.globalAlpha = 0.55; // 背景的钟比敌人和 Boss 暗：不会被当成要打的东西
+    const fg = g.createRadialGradient(-14, -14, 8, 0, 0, 66); fg.addColorStop(0, '#fff2fb'); fg.addColorStop(1, '#f0bfe6');
+    g.fillStyle = fg; g.beginPath(); g.arc(0, 0, 64, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(90,30,100,0.85)'; g.lineWidth = 4; g.stroke();
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU; g.lineWidth = i % 3 ? 2 : 4; g.beginPath(); g.moveTo(Math.cos(a) * 52, Math.sin(a) * 52); g.lineTo(Math.cos(a) * 60, Math.sin(a) * 60); g.stroke(); }
+    g.lineCap = 'round'; g.lineWidth = 5; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(t * 0.12 - 1.4) * 30, Math.sin(t * 0.12 - 1.4) * 30); g.stroke();
+    g.lineWidth = 3; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(t * 1.6) * 48, Math.sin(t * 1.6) * 48); g.stroke();
+    g.fillStyle = 'rgba(90,30,100,0.9)'; g.beginPath(); g.arc(0, 0, 5, 0, TAU); g.fill();
+    g.restore();
   }
   drawForeground(g, W, H) {
     const t = this.t, fx = this.layerX(1.15, W);
@@ -1014,8 +1080,9 @@ function drawPickup(g, k, t) {
     g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 24, 'rgba(111,227,154,0.8)', 0.8); g.globalCompositeOperation = 'source-over';
     heartPath(g, 0, 0, 10); g.fillStyle = '#ff8f80'; g.fill(); g.strokeStyle = PAL.ink; g.lineWidth = 1.8; g.stroke(); g.restore();
   } else if (k.kind === 'chest') {
-    g.save(); g.translate(k.x, k.y); g.rotate(Math.sin(t * 3) * 0.08);
-    g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 34, GLOW.gold, 0.8); g.globalCompositeOperation = 'source-over';
+    const nr = k.near || 0; // 越靠近越抖、越亮：要开了
+    g.save(); g.translate(k.x, k.y + (nr > 0.5 ? Math.sin(t * 40) * 2 * nr : 0)); g.rotate(Math.sin(t * (3 + nr * 28)) * (0.08 + nr * 0.16)); g.scale(1 + nr * 0.15, 1 + nr * 0.15);
+    g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 34 + nr * 18, GLOW.gold, 0.8 + nr * 0.2); g.globalCompositeOperation = 'source-over';
     g.fillStyle = '#c98a4a'; g.strokeStyle = PAL.ink; g.lineWidth = 2;
     g.beginPath(); g.rect(-16, -4, 32, 18); g.fill(); g.stroke();
     g.fillStyle = '#e0a860'; g.beginPath(); g.moveTo(-16, -4); g.quadraticCurveTo(0, -18, 16, -4); g.closePath(); g.fill(); g.stroke();

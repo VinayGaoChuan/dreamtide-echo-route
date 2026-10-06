@@ -2,7 +2,7 @@
 
 Q 版手绘风的横版自动射击 Roguelite（HTML / Canvas Demo，目标平台 Steam：键鼠 + 手柄 / Steam Deck）。
 一关是一串主目标：普通怪群 → 厚甲怪 → 厚甲编队 → 带队精英 → 多方向来敌 → 场景惊喜 → Boss；升级靠地图装置和精英核心的升级仪式。
-出击之间回到家园（浮空港）：救回的伙伴住进来开放建筑，修好的东西会改变下一局的地图（策划 docs/09，已做第一阶段）。
+出击之间回到家园（浮空港）：救回的伙伴住进来开放建筑，修好的东西会改变下一局的地图（策划 [docs/design.md](docs/design.md) §8，已做第一阶段）。
 
 在线游玩：https://vinaygaochuan.github.io/dreamtide-echo-route/
 
@@ -47,14 +47,16 @@ Q 版手绘风的横版自动射击 Roguelite（HTML / Canvas Demo，目标平�
 | `js/net.js` | 联机：帧同步会话 `LockstepSession`、操作编码、转发层（Claude 房间 / 本机多窗口）、联机房间 `Lobby` |
 | `js/ui.js` | 菜单、大厅、联机房间、HUD、结算、设置、图鉴 |
 | `js/main.js` | 启动、自适应舞台、固定步长主循环、联机主循环 |
-| `tools/smoke-sim.js` | 无头冒烟测试（假画布跑三关） |
+| `tools/smoke-sim.js` · `tools/sim-env.js` | 无头冒烟测试（假画布跑三关）；`sim-env.js` 是共用的无头环境和自动驾驶 `pilot`（报告工具、截图工具也用它） |
+| `tools/report-sim.js` | 构筑报告 + 节奏报告：机器人按 7 个流派各打三关，量胜率差、成型件、只加数字的选择、强度曲线、平静 / 高压 / 无奖励时长、不公平受击、火力成长（目标在 docs/design.md §14） |
+| `tools/shoot.js` | 真实画面截图：无头 Chrome 打真实关卡，截商店主图、5 张截图、预告片 9 帧（`--moments` 改拍标志时刻的连续帧） |
 | `tools/home-sim.js` | 家园规则自测：按第一小时的顺序走因果链，查重复发放、负库存、职责限制、老存档迁移 |
 | `tools/mp-sim.js` | 联机同步测试：几个独立 JS 环境各跑一份同一局，逐帧比对状态 |
 | `server/relay.js` | 联机中转服务器（零依赖 Node）：同一个端口提供游戏网页和 WebSocket `/mp` |
 | `tools/relay-test.js` · `tools/deploy-server.js` | 中转服务器自测；一键部署到 Debian / Ubuntu 主机 |
 | `tools/net-bot.js` | 真联机测试：几个无头客户端经真实 WebSocket 连服务器打一局（和网页同一份联机主循环 `MpDriver`），报告同步、卡顿、延迟、操作帧到达余量、收发流量 |
 | `build.py` | 把 js 内联成单个 HTML |
-| `docs/` | 全部策划文档和美术规范；先看 [docs/README.md](docs/README.md)（阅读顺序、冲突时以哪份为准、哪些部分已不做） |
+| `docs/design.md` | 唯一的策划文档（2026-10-06 由 01–10 合并；改设计就改它，旧原文在提交 ba27caf 的 docs/）：玩法、Build、节奏、手感、家园、联机、美术、测量目标、用户裁定原话 |
 
 所有代码都是浏览器原生 JS，多个文件共享全局作用域；`World` 的方法分散在几个文件里，用 `Object.assign(World.prototype, {...})` 挂上去。
 
@@ -74,6 +76,8 @@ node tools/net-bot.js ws://39.106.153.154:8080/mp 2 1-1 300  # 真联机：2 个
 node tools/net-bot.js ws://39.106.153.154:8080/mp 2 vs 420   # 真联机对抗
 node tools/net-bot.js ws://39.106.153.154:8080/mp 3 1-1 300 --host-leave=40  # 房主第 40 秒断线：其余人必须继续打完
 python3 build.py dist/dreamtide.html                       # 打包单文件（dist/ 不入库）
+node tools/report-sim.js js 4                              # 构筑 + 节奏报告（84 局，约 5 分钟）；有 WARN 就按报告改，--gate 时 WARN 退出码为 1
+node tools/shoot.js .ai/shots                              # 截图（需要本机装 Chrome；输出在 .ai/，不入库）
 ```
 
 冒烟测试里“不会受伤”的两局必须通关，脚本不能报错；会被击中的普通机器人输了不算失败，只用来看胜率和节奏数据。
@@ -99,7 +103,7 @@ GitHub Actions（`.github/workflows/check.yml`）会在每次推送到 main 和�
 
 ## 联机（2–4 人：合作 / 对抗）
 
-依据是 [docs/10](docs/10-Steam联机新增需求与决策方案-v0.11.md)（v0.11）。**联机优先级高于策划文档**：哪份文档缺了联机部分，实现时自己补全。
+依据是 [docs/design.md](docs/design.md) §9（原 v0.11）。**联机优先级高于策划文档**：哪份文档缺了联机部分，实现时自己补全。
 
 **玩法**：大厅点「联机」→ 创建房间或加入别人的房间 → 房主选「合作」（再选关）或「对抗」、点开始。房间里每人显示真实成长（♥ / 攻击倍率 / 大招容量 / 等级）。每人开自己的飞机、带自己的天赋和共享等级，**局内各有一套**：
 - **升级**：同一轮升级全队同时开始（v0.11 §7）：全场进入安全减速（敌弹化掉、贴脸的敌人推开、不刷怪、敌人不开火、计时停住），各选各的（主炮 / 支援 / 大招改造 / 联动 / 流派都是自己的），候选只在自己屏幕上；选好的人停在“✓ 选好了 · 等队友”，在线的都选好了一起继续。选的时候按大招键 = 选推荐（能凑联动 > 升级已有的 > 第一个；不会自动替你选）。倒下的人等救起后再补选；离开的人不拖住全队。

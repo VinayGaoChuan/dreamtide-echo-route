@@ -1,47 +1,8 @@
 // 无头冒烟测试：用假画布加载游戏脚本，让一个简单的自动驾驶按推荐等级打完第一章三关，输出验收指标。
 // 用法：node tools/smoke-sim.js [js 目录] [关卡，如 1-2]；有失败项时退出码为 1（GitHub Actions 用它挡住坏提交）
-const fs = require('fs'), vm = require('vm'), path = require('path');
-const dir = process.argv[2] || path.join(__dirname, '..', 'js');
-const noop = () => {};
-const fakeCtx = new Proxy({}, { get: (t, k) => {
-  if (k === 'createLinearGradient' || k === 'createRadialGradient') return () => ({ addColorStop: noop });
-  if (k === 'createPattern') return () => ({});
-  if (k === 'createImageData') return (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
-  if (k === 'measureText') return () => ({ width: 10 });
-  if (k in t) return t[k];
-  return noop;
-}, set: (t, k, v) => { t[k] = v; return true; } });
-const fakeCanvas = () => ({ width: 0, height: 0, getContext: () => fakeCtx, toDataURL: () => 'data:,' });
-const ctx = {
-  console, Math, Date, JSON, performance: { now: () => ctx.__now }, __now: 0, setTimeout, clearTimeout, setInterval: () => 0,
-  window: { addEventListener: noop, matchMedia: () => ({ matches: false }) },
-  document: { createElement: fakeCanvas, addEventListener: noop },
-  navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
-};
-ctx.globalThis = ctx; vm.createContext(ctx);
-for (const f of ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
-const R = (code) => vm.runInContext(code, ctx);
+const { load } = require('./sim-env');
+const { R } = load(process.argv[2]);
 R(`
-var settings = DEFAULT_SETTINGS();
-function pilot(w) {
-  const p = w.player, mid = (TOP + BOTTOM) / 2; let tx = w.W * 0.22, ty = mid, busy = false;
-  // 子弹只会直飞：优先对准主目标（带队精英举旗时更优先），否则对准前方最近敌人的高度
-  let best = null, bd = 1e9;
-  for (const e of w.enemies) { if (!e.alive || e.x < p.x + 30 || e.x > w.W) continue; const d = e.x - p.x + Math.abs(e.y - p.y) * 0.6 - (e.goal ? 260 : 0) - (e.type === 'cmdr' && e.rally > 0 ? 300 : 0) - (e.guarded ? -400 : 0); if (d < bd) { bd = d; best = e; } }
-  if (best) ty = best.y;
-  // Boss 正面护甲：像玩家一样对准还在的甲片（没有散兵时）
-  if (w.boss && w.boss.plates && !w.enemies.some((e) => e.alive && e.bossAdd)) { const pl = w.boss.plates.find((q) => q.alive); if (pl) ty = w.boss.y + pl.dy; }
-  const k = w.pickups.find((q) => q.kind === 'gold' || q.kind === 'chest' || q.kind === 'heart'); if (k && k.x > p.x - 40) { tx = Math.max(k.x - 10, w.W * 0.15); ty = k.y; busy = true; }
-  const gt = w.guideTarget && w.guideTarget(); if (gt && !(w.ritual && w.ritual.st === 'choose')) { tx = clamp(gt.x - 6, 40, w.W * 0.8); ty = gt.y; busy = true; }
-  if (w.ritual && w.ritual.st === 'choose') {
-    // 选法 0：总选第一个；选法 1：像玩家一样优先升级已有的 / 联动，不随手换掉支援
-    const gs = w.ritual.gates, score = (o) => (o.kind === 'link' ? 3 : o.from > 0 ? 2 : o.replace ? -1 : 1);
-    const G = w.pilotPick === 0 ? gs[0] : (score(gs[1].opt) > score(gs[0].opt) ? gs[1] : gs[0]); tx = G.x; ty = G.y; busy = true;
-  }
-  let dodge = 0; if (!busy || w.pilotDodge) w.bullets.each((b) => { const dx = b.x - p.x, dy = b.y - p.y; if (dx > -20 && dx < 160 && Math.abs(dy) < 50) dodge += dy > 0 ? -1 : 1; });
-  for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
-  w.setInput(p.idx, { mx: Math.sign(tx - p.x) * Math.min(1, Math.abs(tx - p.x) / 60), my: dodge ? Math.sign(dodge) : Math.sign(ty - p.y) * Math.min(1, Math.abs(ty - p.y) / 40), burst: p.stock >= 1 && !w.ritual });
-}
 function run(stage, plane, level, cap, pickIdx, godmode, world) {
   let res = null; const meta = freshMeta(); meta.shared.level = level; meta.planes[plane] = newPlaneRecord(plane);
   const w = new World({ mode: 'run', W: 1280, plane, stage, ultCap: cap, stats: planeStats(meta, plane), first: stage === '1-1' && level === 1, settings, world, cb: { onEnd: (r) => res = r, onRescue: (id) => rescues.push(id) } });

@@ -91,12 +91,49 @@
         G.hub.draw(ctx, W, LH); if (G.screen === 'hub') { drawTrail(W / 2, LH * 0.4, t); drawHero(cur, W / 2, LH * 0.4, 2.2, t); } break;
       case 'map':
         G.map.draw(ctx, W, LH); break;
+      case 'keyart': drawKeyArt(W, t); break; // 商店主图（截图工具用；游戏里不会进这一屏）
       default:
         G.sea.draw(ctx, W, LH);
     }
     overlay(W);
   }
 
+  /* ---------- 商店主图：用游戏自己的画法拼一张关键美术（920×430 主图从 16:9 画面中间裁出来） ----------
+     左边：标题 + 月兔号带着刚长出来的穿透光轨冲出去；中间：一群泡泡水母被打散；右边：失控闹钟；右下：沉睡巨鲸浮上来 */
+  function drawKeyArt(W, t) {
+    G.sea.setTheme('bay'); G.sea.dim = 0; G.sea.draw(ctx, W, LH);
+    const px = W * 0.3, py = LH * 0.6;
+    drawGiant(ctx, W * 0.6, LH * 0.86, 0.8, { kind: 'whale', eye: 1, act: 1, mouth: 0.5 }, t);
+    ctx.save(); ctx.translate(W * 0.83, LH * 0.36); ctx.scale(1.05, 1.05); drawClockBoss(ctx, { x: 0, y: 0, phase: 2, minA: t * 2 + 1, hourA: 2.2, weakT: 0, mouth: 0.7, lookA: Math.PI, shield: 0, hitFlash: 0 }, t); ctx.restore();
+    // 四路穿透光轨（金色长尾），尖头打进水母群
+    ctx.globalCompositeOperation = 'lighter';
+    for (const dy of [-42, -14, 14, 42]) {
+      for (let k = 0; k < 4; k++) {
+        const x = px + 120 + k * 150 + (dy * 0.3), y = py + dy * (1 + k * 0.08), L = 110, gr = ctx.createLinearGradient(x - L, y, x, y);
+        gr.addColorStop(0, 'rgba(255,227,138,0)'); gr.addColorStop(1, 'rgba(255,250,225,0.95)');
+        ctx.strokeStyle = gr; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x - L, y); ctx.lineTo(x, y); ctx.stroke();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    for (const dy of [-42, -14, 14, 42]) for (let k = 0; k < 4; k++) BulletArt.draw(ctx, 'crescent', px + 120 + k * 150 + dy * 0.3, py + dy * (1 + k * 0.08), 0, 1.25);
+    // 被打散的水母：几只完整的、几团爆开的碎片
+    const C = ['#fff3c8', '#c9a8ff', '#ffffff', '#9fe3f0'];
+    [[0.62, 0.5], [0.66, 0.66], [0.58, 0.74], [0.7, 0.54], [0.55, 0.42]].forEach(([fx, fy], i) => {
+      const x = W * fx, y = LH * fy;
+      if (i % 2) { ctx.save(); ctx.translate(x, y); ctx.scale(1.4, 1.4); EnemyArt.jelly(ctx, { r: 20, hitFlash: 0, base: 'jelly', type: 'jelly' }, t + i); ctx.restore(); }
+      else { ctx.globalCompositeOperation = 'lighter'; drawGlow(ctx, x, y, 60, 'rgba(255,243,200,0.9)', 0.8); ctx.globalCompositeOperation = 'source-over'; for (let k = 0; k < 14; k++) { const a = (k / 14) * TAU + i, r = 20 + (k % 3) * 16; ctx.fillStyle = C[k % 4]; ctx.beginPath(); ctx.arc(x + Math.cos(a) * r, y + Math.sin(a) * r, 4 + (k % 3), 0, TAU); ctx.fill(); } }
+    });
+    drawTrail(px, py, t); drawHero('moon', px, py, 2.3, t);
+    // 标题：中文大字 + 英文副标题（左上，避开主角和 Boss）
+    ctx.save(); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    const lx = W * 0.055, ly = LH * 0.36;
+    ctx.font = '400 170px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineJoin = 'round';
+    ctx.lineWidth = 16; ctx.strokeStyle = '#3a2c72'; ctx.strokeText('梦潮', lx, ly);
+    ctx.shadowColor = 'rgba(255,201,74,0.75)'; ctx.shadowBlur = 36; ctx.fillStyle = '#fff6ee'; ctx.fillText('梦', lx, ly); ctx.fillStyle = '#ffd76a'; ctx.fillText('潮', lx + ctx.measureText('梦').width, ly); ctx.shadowBlur = 0;
+    ctx.font = '400 54px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineWidth = 8; ctx.strokeText('回声航线', lx + 8, ly + 66); ctx.fillStyle = '#e4d8ff'; ctx.fillText('回声航线', lx + 8, ly + 66);
+    ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('DREAMTIDE · ECHO ROUTE', lx + 10, ly + 112); ctx.fillStyle = '#9fe3f0'; ctx.fillText('DREAMTIDE · ECHO ROUTE', lx + 10, ly + 112);
+    ctx.restore();
+  }
   /* ---------- 联机主循环：按真实时间推进；本机每 1/30 秒采一帧操作，凑齐所有人的这一帧才往下模拟 ---------- */
   // 每个操作帧 = 4 个模拟步；步按真实时间一个个跑（画面平滑），只在帧的第一步换上新操作。暂停菜单不冻结联机战斗，只是本机不操作。
   // 浏览器会在标签页后台、窗口被遮住、游戏框滚出视野时停掉或降频 requestAnimationFrame（不一定伴随 document.hidden），

@@ -7,7 +7,7 @@
 const ADV_T = 7;       // 升级后的优势窗口（5~8 秒）
 const PREVIEW_T = 2.4; // 下一个威胁先预告，真正的压力等它结束
 const PORTRAIT_OF = { crowd: 'jelly', armor1: 'armor', pack: 'armor', cmdr: 'cmdr', chase: 'moth', spawner: 'wreck', boss: 'boss' };
-const REWARD_GOAL = { wind: '穿过风车前的风环', mine: '碰一下矿核，拖到岩壁上', house: '碰一下梦灯屋的铃铛', npc: '碰一下吊舱，护送到修理点', core: '碰一下精英掉下的核心' };
+const REWARD_GOAL = { wind: '穿过风车前的风环', mine: '碰一下矿核，拖到岩壁上', house: '碰一下梦灯屋的铃铛', npc: '碰一下吊舱，护送到修理点', core: '碰一下精英掉下的核心', bridge: '依次穿过三个灯环', giant: '飞到巨鲸的眼睛旁边' };
 
 Object.assign(World.prototype, {
   initDirector() {
@@ -168,8 +168,15 @@ Object.assign(World.prototype, {
     if (D.st === 'preview') rate *= 0.35;
     else if (D.st === 'goal' && this.goal && this.goal.kind !== 'crowd') rate *= this.goal.kind === 'surprise' ? 0.3 : 0.5;
     else if (D.st === 'reward') rate *= 0.6;
+    rate *= 1 + 0.06 * Math.max(0, this.beatIdx); // 越往后的目标，背景杂兵越密
+    // 推压与喘息（v0.12）：主目标进行中隔一阵来一波“鱼群潮”——一大群一发就散的杂兵，右边先起一道波光预告。
+    // 数量跟着这一局拿到的能力变多（越强越能割草，不加血）；杂兵不开火，只会撞人
     let alive = 0, active = 0, onScreen = false;
-    for (const e of this.enemies) { if (!e.alive || e.isBoss) continue; alive++; if (e.x < this.W + 60) active++; if (e.x - e.r < this.W) onScreen = true; }
+    for (const e of this.enemies) { if (!e.alive || e.isBoss) continue; if (!e.swell) alive++; if (e.x < this.W + 60) active++; if (e.x - e.r < this.W) onScreen = true; } // 鱼群潮是给你割的，不算“积压”
+    if (D.st === 'goal' && this.goal && this.goal.kind !== 'boss') {
+      D.swellT = (D.swellT === undefined ? 12 : D.swellT) - dt;
+      if (D.swellT <= 0) { D.swellT = 16 - Math.min(6, this.beatIdx); if (!this.focusBusy() && active < 24) this.swell(); } // 屏幕上已经很满就跳过这一波（同屏上限）
+    }
     if (alive > 24) D.backlogT += dt; else D.backlogT = 0;
     if (D.backlogT >= 3) { D.backlogT = 0; D.delay = 3; this.m.backlogs++; this.emit('backlog'); }
     if (D.delay > 0) { D.delay -= dt; return; }
@@ -186,6 +193,20 @@ Object.assign(World.prototype, {
       D.budget = Math.max(0, D.budget - size); D.next = null;
     }
   },
+  swell() {
+    const W = this.W, top = this.arena.top + 50, bot = this.arena.bottom - 50, picks = Math.max(...this.players.map((q) => (q.gone ? 0 : q.picks.length)));
+    const n = Math.min(30, 12 + picks * 3), h = Math.min(bot - top, 200 + picks * 18), cy = srand(top + h / 2, bot - h / 2), rows = 6;
+    this.addWarn({ kind: 'swell', x: W - 80, y: cy - h / 2, w: 80, h, tWarn: 0.9, silent: true, onFire: () => {
+      for (let i = 0; i < n; i++) {
+        const col = Math.floor(i / rows), row = i % rows;
+        const y = clamp(cy - h / 2 + (row + 0.5) * (h / rows) + srand(-8, 8), top, bot);
+        // 后面的目标里，鱼群后排混几条会开火的星星鱼：割草的同时要留神（出现 0.5 秒后才开火）
+        if (this.beatIdx >= 3 && col >= 3 && row % 2 === 0 && i % 4 === 0) this.addEnemy('star', { x: W + 30 + col * 38, y, path: 'sine', amp: 10, freq: 1.6, phase: srand(TAU), vx: -120, swell: true });
+        else this.addEnemy(i % 3 ? 'jelly' : 'moth', { x: W + 30 + col * 38 + srand(0, 14), y, path: 'sine', amp: 12, freq: 2.2, phase: srand(TAU), vx: -150 - srand(0, 30), fodder: true, swell: true });
+      }
+    } });
+    Sound.sfx('wind', { pan: 0.8 });
+  },
   formationPool(tier) {
     const L = ['line', 'vee', 'snake', 'wall'];
     if (tier >= 2) L.push('boats', 'stars');
@@ -200,11 +221,16 @@ Object.assign(World.prototype, {
     const W = this.W, p = this.player, top = this.arena.top + 60, bot = this.arena.bottom - 60, y = clamp(p.y, top + 20, bot - 20);
     const id = opt.kind === 'link' ? SYNERGIES[opt.id].need[0] : opt.id;
     let label = '';
-    if (id === 'pierce') { for (let i = 0; i < 7; i++) this.addEnemy('jelly', { x: W + 20 + i * 44, y, path: 'line', vx: -140 }); label = '一整列：一发穿过去'; }
-    else if (id === 'homing') { for (let i = 0; i < 8; i++) this.addEnemy('moth', { x: W + 20 + srand(0, 200), y: srand(top, bot), path: 'sine', vx: -120, amp: 30, freq: 1.5, phase: i }); label = '四散的敌人：子弹会拐弯'; }
-    else if (id === 'multi') { for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: W + 20 + (i % 2) * 30, y: clamp(y + (i - 2.5) * 30, top, bot), path: 'line', vx: -130 }); label = '一面墙：几路子弹一起扫'; }
-    else if (id === 'bomb') { for (let i = 0; i < 10; i++) this.addEnemy('moth', { x: W + 30 + srand(-30, 30), y: clamp(y + srand(-50, 50), top, bot), path: 'line', vx: -120 }); label = '挤成一团：一炸一片'; }
-    else { this.spawnFormation('swarm'); label = '一群蛾子：试试新支援'; }
+    // 验证编队来两波（第二波 1.6 秒后）：新能力要有足够的东西打，力量感才落地
+    const wave = (yy) => {
+      if (id === 'pierce') { for (let i = 0; i < 7; i++) this.addEnemy('jelly', { x: W + 20 + i * 44, y: yy, path: 'line', vx: -140 }); label = '一整列：一发穿过去'; }
+      else if (id === 'homing') { for (let i = 0; i < 8; i++) this.addEnemy('moth', { x: W + 20 + srand(0, 200), y: srand(top, bot), path: 'sine', vx: -120, amp: 30, freq: 1.5, phase: i }); label = '四散的敌人：子弹会拐弯'; }
+      else if (id === 'multi') { for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: W + 20 + (i % 2) * 30, y: clamp(yy + (i - 2.5) * 30, top, bot), path: 'line', vx: -130 }); label = '一面墙：几路子弹一起扫'; }
+      else if (id === 'bomb') { for (let i = 0; i < 10; i++) this.addEnemy('moth', { x: W + 30 + srand(-30, 30), y: clamp(yy + srand(-50, 50), top, bot), path: 'line', vx: -120 }); label = '挤成一团：一炸一片'; }
+      else { this.spawnFormation('swarm'); label = '一群蛾子：试试新支援'; }
+    };
+    wave(y);
+    this.later(1.6, () => { if (this.phase === 'fight') wave(clamp(this.player.y, top + 20, bot - 20)); });
     // 刚拿到打厚甲的能力：再来一只单独的厚甲怪，看看现在几秒能敲碎
     if ((src === 'wind' || src === 'armor') && this.goal && this.goal.kind === 'armor1') { this.later(1.2, () => { if (this.phase === 'fight') { this.addArmor({ x: W + 60, ty: clamp(p.y + 60, top, bot), verify: true }); this.text('同样的厚甲怪：看看现在几秒敲碎', W * 0.72, clamp(p.y, top, bot), '#e6ecff', 17, 4); } }); }
     const armorCheck = (src === 'wind' || src === 'armor') && this.goal && this.goal.kind === 'armor1';
@@ -409,6 +435,8 @@ Object.assign(World.prototype, {
     if (!o) return REWARD_GOAL[k] || '拿奖励';
     const st = o.state;
     if (k === 'wind') return st === 'idle' ? '穿过风车前的风环' : st === 'blow' ? '风环已激活 · 一排敌人被推到炮口前' : '选择强化';
+    if (k === 'bridge') return st === 'idle' ? `穿过灯环 ${o.lit.filter(Boolean).length}/3` : st === 'build' ? '断桥接上了' : '选择强化';
+    if (k === 'giant') return st === 'idle' ? '飞到巨鲸的眼睛旁边' : st === 'wake' || st === 'gulp' ? '巨鲸醒了 · 把附近的敌人一口吞掉' : '选择强化';
     if (k === 'mine') return st === 'idle' ? '碰一下发光的矿核' : st === 'tow' ? '把矿核拖到发光的岩壁' : '岩壁炸开了 · 选择强化';
     if (k === 'npc') return st === 'idle' ? '碰一下伙伴的吊舱' : st === 'tow' ? `沿光带护送到修理点 · 耐久 ${o.pod.hp}/3` : st === 'bail' ? '伙伴自己跳伞去修理点了' : '选择支援';
     if (k === 'house') return st === 'idle' ? '碰一下梦灯屋的铃铛' : '选择主炮改造';

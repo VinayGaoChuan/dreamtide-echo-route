@@ -56,6 +56,13 @@ Object.assign(World.prototype, {
     if (o.kind !== 'gun' && o.kind !== 'support') return false;
     return Object.entries(SYNERGIES).some(([k, L]) => !this.links.has(k) && L.need.includes(o.id) && L.need.every((n) => n === o.id || this.ownLv(n) > 0) && !(o.replace && L.need.includes(o.replace.id)));
   },
+  /* 这一局在追的流派：单人时大厅的目标流派优先（还没走到别的流派上时），否则是离当前 Build 最近、还没做完的那条。
+     联机不用本机的目标，只看自己的 Build（各端一致） */
+  aimPlan() {
+    const b = this.buildSummary(), near = buildPlan(b, null, 0);
+    if (!this.mp && this.targetName) { const T = buildPlan(b, this.targetName); if (!T.done && T.have.length >= near.have.length) return T; }
+    return near;
+  },
   optWeight(o) {
     if (o.kind === 'link') return 2.4;
     if (o.from > 0) return 1.7;
@@ -76,7 +83,8 @@ Object.assign(World.prototype, {
     if ((source === 'wind' || source === 'armor') && this.goal && this.goal.kind === 'armor1') {
       const focus = [this.optGun('multi', rare), this.gun.homing ? this.optGun('homing', rare) : null].filter(Boolean);
       const crowd = [this.gun.pierce ? this.optGun('pierce', rare) : null, this.optGun('bomb', rare)].filter(Boolean);
-      if (focus.length && crowd.length) return [Object.assign({}, focus[0], { why: '集中火力 · 敲甲更快' }), Object.assign({}, spick(crowd), { why: '一次清一大片' })];
+      const P = this.aimPlan(), pref = (L) => L.find((o) => o.id === P.next) || L.find((o) => P.comps.includes(o.id)) || spick(L);
+      if (focus.length && crowd.length) return [Object.assign({}, pref(focus), { why: '集中火力 · 敲甲更快' }), Object.assign({}, pref(crowd), { why: '一次清一大片' })];
     }
     let pool;
     if (source === 'house') pool = gun;
@@ -87,12 +95,21 @@ Object.assign(World.prototype, {
     if (pool.length < 2) pool = everything;
     if (pool.length < 2) return [{ kind: 'res', id: 'charge' }, { kind: 'res', id: 'heal' }];
     const upgrades = pool.filter((o) => o.from > 0), fresh = pool.filter((o) => !(o.from > 0) && o.kind !== 'link');
+    // 引导（v0.12）：能凑的联动一出现就给（哪个装置都给）；否则给本局流派还缺的那一件（这个装置的池子里有的话）。
+    // 另一个候选照常随机：玩家永远可以换方向，换了以后引导跟着他的 Build 走
     let a = null;
-    if (this.offerN === 1 && upgrades.length && fresh.length) a = spick(upgrades);
-    else if (this.offerN === 2 || rare || source === 'core' || source === 'moon') { const L = pool.filter((o) => this.enablesLink(o)); if (L.length) a = spick(L); }
+    if (this.offerN >= 1) {
+      const P = this.aimPlan(), steer = P.next ? pool.find((o) => o.id === P.next && (o.kind === 'gun' || o.kind === 'support') && !(o.from > 0)) || null : null;
+      a = lk.find((o) => o.id === P.link) || lk[0] || null;
+      if (a && steer && a.id !== P.link) return [a, steer]; // 别的流派的联动现在就能拿 vs 接着凑自己流派的下一件：真正的取舍
+      if (!a) a = steer;
+    }
+    if (!a && this.offerN === 1 && upgrades.length && fresh.length) a = spick(upgrades);
+    else if (!a && (this.offerN === 2 || rare || source === 'core' || source === 'moon')) { const L = pool.filter((o) => this.enablesLink(o)); if (L.length) a = spick(L); }
     if (!a && this.dryOffers >= 2 && upgrades.length) a = spick(upgrades);
     const rest = pool.filter((o) => !a || o.id !== a.id);
-    const second = this.offerN === 1 && a ? fresh.filter((o) => o.id !== a.id) : rest;
+    // 第二次选择：一个已有方向的升级 + 一个新方向
+    const second = this.offerN === 1 && a ? (a.from > 0 ? fresh : upgrades).filter((o) => o.id !== a.id) : rest;
     const b = this.weightedPick(second.length ? second : rest);
     if (!a) a = this.weightedPick(rest.filter((o) => o.id !== b.id)) || spick(everything.filter((o) => o.id !== b.id));
     return [a, b];
@@ -172,10 +189,18 @@ Object.assign(World.prototype, {
         R.spin = lerp(R.q.full ? 20 : 12, 0.6, Ease.outCubic(u)); // 快 → 慢
         if (R.qAt.length && u >= R.qAt[0]) { R.qAt.shift(); this.qualityUp(R); }
         R.tick = (R.tick || 0) - dt * R.spin; if (R.tick <= 0) { R.tick = 3; Sound.sfx('rollTick', { ui: true, k: u, gap: 20 }); }
-        if (R.t >= T.roll) this.ritStep('reveal');
+        if (R.t >= T.roll) { if (this.mine()) { Sound.sfx('slotLand', { ui: true }); this.part('ring', R.x, R.y, 0, 0, 0.3, 110, hexA(QUALITY[R.qNow].color, 0.95)); } R.rot += 0.18; this.ritStep('reveal'); } // 落格：顿一下、闪一圈，候选从这里弹出
         break;
       }
-      case 'reveal': for (const G of R.gates) { G.x = lerp(G.x, G.tx, 1 - Math.pow(0.0005, dt / T.reveal)); G.y = lerp(G.y, G.ty, 1 - Math.pow(0.0005, dt / T.reveal)); G.alpha = Math.min(1, G.alpha + dt * 4); } if (R.t >= T.reveal) this.ritStep('choose'); break;
+      case 'reveal': { // 两张候选从装置里一张接一张弹出来，越过头一点再落位（每张一声、落点一圈火花）
+        R.gates.forEach((G, i) => {
+          const u = clamp((R.t - i * T.reveal * 0.28) / (T.reveal * 0.7), 0, 1), e = Ease.outBack(u);
+          if (u > 0 && !G.popped) { G.popped = true; if (this.mine()) { Sound.sfx('card', { ui: true, gap: 0 }); for (let k = 0; k < 12; k++) this.part('spark', G.tx, G.ty, rand(-260, 260), rand(-260, 260), 0.4, 3, G.info.color); if (R.q.device === 'crystal') { if (i === 0) Sound.sfx('shatter', { ui: true }); for (let k = 0; k < 10; k++) this.part('shard', R.x, R.y, (G.tx - R.x) / 0.32 + rand(-60, 60), (G.ty - R.y) / 0.32 + rand(-60, 60), 0.32, rand(5, 9), k % 2 ? '#fff3c8' : QUALITY[R.qNow].color); } } } // 技能水晶：揭晓时碎开，碎片飞向两张卡
+          G.x = lerp(R.x, G.tx, e); G.y = lerp(R.y, G.ty, e); G.alpha = Math.min(1, u * 3); G.pop = u < 1 ? 0.55 + 0.45 * e : 1;
+        });
+        if (R.t >= T.reveal) { for (const G of R.gates) { G.x = G.tx; G.y = G.ty; G.alpha = 1; G.pop = 1; } this.ritStep('choose'); }
+        break;
+      }
       case 'choose': {
         R.chooseT += dt;
         // 只有这场仪式的主人能选：飞进圆圈停住
@@ -189,11 +214,11 @@ Object.assign(World.prototype, {
         if (R.st === 'choose' && this.chooseLimit() && R.chooseT >= this.chooseLimit()) this.chooseRecommended(); // 到时间：自动选推荐
         break;
       }
-      case 'show': {
+      case 'show': { // 联动多留 0.45 秒给“两件相撞”
         const G = R.gates[R.pick], u = clamp(R.t / 0.25, 0, 1);
         G.x = lerp(G.x, this.W / 2, u); G.y = lerp(G.y, LH * 0.42, u);
         R.gates.forEach((g2, i) => { if (i !== R.pick) { g2.alpha = Math.max(0, g2.alpha - dt * 4); g2.x = lerp(g2.x, R.x, dt * 4); g2.y = lerp(g2.y, R.y, dt * 4); } });
-        if (R.t >= T.show) { this.ritStep('fly'); R.from = { x: this.W / 2, y: LH * 0.42 }; R.to = this.slotTarget(R.gates[R.pick].opt); if (this.mine()) Sound.sfx('flyIn', { ui: true }); }
+        if (R.t >= T.show + (G.opt.kind === 'link' ? 0.45 : 0)) { this.ritStep('fly'); R.from = { x: this.W / 2, y: LH * 0.42 }; R.to = this.slotTarget(R.gates[R.pick].opt); if (this.mine()) Sound.sfx('flyIn', { ui: true }); }
         break;
       }
       case 'fly': {
@@ -256,6 +281,7 @@ Object.assign(World.prototype, {
     const G = R.gates[R.pick];
     this.hudBuild = this.buildSummary();
     if (this.mine()) {
+      if (G.opt.kind === 'link') { this.player.linkFx = 2.5; this.part('ring', this.player.x, this.player.y, 0, 0, 0.5, 140, 'rgba(255,215,106,0.95)'); } // 组合完成：飞机周围亮一圈金色光环
       this.emit('slotLand', { slot: SLOT_OF[G.opt.kind] || 'gun', kind: G.opt.kind, id: G.opt.id, lv: G.info.lv, name: G.info.name, desc: G.info.desc, color: G.info.color, tag: G.info.tag, replace: G.opt.replace || null, word: R.word, first: this.picks.length === 1 });
       Sound.sfx('slotLand', { ui: true });
     }
@@ -265,7 +291,7 @@ Object.assign(World.prototype, {
   },
   /* 大招键 = 选推荐（不会自动替玩家选）：能凑联动 > 升级已有的 > 第一个；单人时“目标流派”优先（联机不用本机的目标，保证各端一致） */
   recIndex(R) {
-    const sc = (G) => (!this.mp && G.info.target ? 4 : 0) + (G.info.link ? 2 : 0) + (G.opt.from > 0 ? 1 : 0);
+    const sc = (G) => (G.opt.kind === 'link' ? 8 : 0) + (G.info.target ? 4 : 0) + (G.info.link ? 2 : 0) + (G.opt.from > 0 ? 1 : 0);
     let best = 0; R.gates.forEach((G, i) => { if (sc(G) > sc(R.gates[best])) best = i; }); return best;
   },
   chooseLimit() { return this.mp ? (this.vs ? CHOOSE_LIMIT.vs : CHOOSE_LIMIT.coop) : 0; },
@@ -360,11 +386,11 @@ Object.assign(World.prototype, {
     } else if (R.st === 'resume' && p.alive) { const a = 1 - R.t / T.resume; g.save(); g.globalAlpha = a; g.strokeStyle = '#dff2ff'; g.lineWidth = 3; g.beginPath(); g.arc(p.x, p.y, 36 + (1 - a) * 20, 0, TAU); g.stroke(); g.restore(); }
     if (R.st === 'wait') { const W2 = this.players.filter((q) => q !== p && !q.gone && !q.away && q.ritual && q.ritual.st !== 'wait' && q.ritual.st !== 'resume'), who = W2.map((q) => q.name || `${q.idx + 1}P`), lefts = W2.map((q) => q.ritual.st === 'choose' ? this.chooseLeft(q.ritual) : null).filter((x) => x !== null); drawStepPill(g, this.W / 2, this.arena.bottom - 18, `✓ 选好了 · 等 ${who.join('、') || (this.vs ? '对手' : '队友')}${lefts.length ? `（最多 ${Math.max(...lefts)} 秒）` : ''}`, '#9ff2c8', 1); }
     if (R.st === 'show') this.drawCentral(g, R);
-    if (R.st === 'fly') { const G = R.gates[R.pick]; glowAt(g, R.fx, R.fy, 46, hexA(G.info.color, 0.9), 0.9); drawIcon(g, G.info.icon, R.fx, R.fy, 40, G.info.color); }
+    if (R.st === 'fly') { const G = R.gates[R.pick]; (R.trail = R.trail || []).push(R.fx, R.fy); if (R.trail.length > 24) R.trail.splice(0, 2); for (let i = 0; i < R.trail.length; i += 2) { const k = i / R.trail.length; glowAt(g, R.trail[i], R.trail[i + 1], 6 + 14 * k, hexA(G.info.color, 0.8), 0.6 * k); } glowAt(g, R.fx, R.fy, 46, hexA(G.info.color, 0.9), 0.9); drawIcon(g, G.info.icon, R.fx, R.fy, 40, G.info.color); }
   },
   /* 候选卡：确认圈在卡片外侧（朝飞机那一边），圈里只放图标；卡片按 标签 / 名称 / 效果 / 和当前 Build 的关系 分行 */
   drawGate(g, G, R, i) {
-    const I = G.info, t = this.t, qc = QUALITY[R.qNow].color, side = G.side || 1, s = 1 + G.near * 0.06;
+    const I = G.info, t = this.t, qc = QUALITY[R.qNow].color, side = G.side || 1, s = (1 + G.near * 0.06) * (G.pop || 1);
     const note = I.replace || I.link || '', w = 250, h = 128 + (note ? 22 : 0), cx = G.x + side * (GATE_R + 12 + w / 2), cy = G.y;
     g.save(); g.globalAlpha = G.alpha;
     glowAt(g, G.x, G.y, 110, hexA(I.color, 0.7), 0.3 + G.near * 0.3);
@@ -391,14 +417,14 @@ Object.assign(World.prototype, {
     g.strokeStyle = I.color; g.lineWidth = 3; g.setLineDash([8, 7]); g.lineDashOffset = -t * 30; g.beginPath(); g.arc(0, 0, GATE_R - 4, 0, TAU); g.stroke(); g.setLineDash([]);
     drawIcon(g, I.icon, 0, 0, 40, I.color);
     if (G.dwell > 0) { g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.arc(0, 0, GATE_R - 4, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(G.dwell / GATE_DWELL, 0, 1)); g.stroke(); }
-    if (R.st === 'choose') { g.textAlign = 'center'; g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.7)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : i === this.recIndex(R) ? '推荐（不强制）· 按大招也能选' : '飞进圆圈', 0, GATE_R + 16); }
+    if (R.st === 'choose') { g.textAlign = 'center'; g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.7)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : i === this.recIndex(R) ? '推荐 · 按大招键选它（不耗大招）' : '飞进圆圈', 0, GATE_R + 16); }
     g.restore();
     g.restore();
   },
   /* 这张卡和当前 Build 的关系，只用一个标记表达：★ 目标流派 / 能和已有的谁凑联动 / 对付厚甲的箭头 */
   fitNote(o) {
-    const b = this.buildSummary(), P = buildPlan(b, this.targetName), own = (id) => buildOwned(b, id);
-    const hasAim = !!this.targetName || P.have.length > 0; // 第一次选择前还没有方向，不硬塞一个“目标流派”
+    const b = this.buildSummary(), P = this.aimPlan(), own = (id) => buildOwned(b, id);
+    const hasAim = (!this.mp && !!this.targetName) || P.have.length > 0; // 第一次选择前还没有方向，不硬塞一个“目标流派”
     const target = hasAim && (o.kind === 'link' ? o.id === P.link : P.comps.includes(o.id) && !own(o.id)) ? P.name : null;
     let link = '';
     if (o.kind === 'gun' || o.kind === 'support') {
@@ -412,8 +438,22 @@ Object.assign(World.prototype, {
   /* 中央展示：大图标 + 名字 + 等级变化 + 一小段演示；0.8~1.2 秒 */
   drawCentral(g, R) {
     const G = R.gates[R.pick], I = G.info, o = G.opt, t = this.t, cx = this.W / 2, cy = LH * 0.42;
-    const u = clamp(R.t / 0.25, 0, 1), s = Ease.outBack ? Ease.outBack(u) : u;
-    g.save(); g.translate(cx, cy); g.scale(s, s);
+    const u = clamp((R.t - (o.kind === 'link' ? 0.45 : 0)) / 0.25, 0, 1), s = Ease.outBack ? Ease.outBack(u) : u; // 联动：先演两件相撞，卡片再弹出来
+    g.save(); g.translate(cx, cy);
+    // 背后一圈慢慢转的光芒：联动 / 升过品质的更金、更多（v0.12 仪式加强）
+    const big = o.kind === 'link' || R.qNow > 0, rays = big ? 16 : 10, rc = big ? '#ffe38a' : I.color;
+    if (big) { g.save(); g.rotate(t * 0.6); g.globalCompositeOperation = 'lighter'; // 光芒只给联动和升过品质的（大时刻）；普通升级一局好几次，只留卡片和小闪光
+    const rg = g.createRadialGradient(0, 0, 40, 0, 0, 380 * Math.max(0.01, s)); rg.addColorStop(0, hexA(rc, (big ? 0.42 : 0.3) * u)); rg.addColorStop(1, hexA(rc, 0));
+    for (let i = 0; i < rays; i++) { g.rotate(TAU / rays); g.fillStyle = rg; g.beginPath(); g.moveTo(0, -6); g.quadraticCurveTo(190 * s, -30, 380 * s, -18); g.quadraticCurveTo(400 * s, 0, 380 * s, 18); g.quadraticCurveTo(190 * s, 30, 0, 6); g.closePath(); g.fill(); } // 柔和的光瓣：奖励的颜色，越往外越淡
+    g.restore(); }
+    if (o.kind === 'link' && R.t < 0.45) { // 组合完成：两件部件从两边飞进来撞在一起
+      const need = SYNERGIES[o.id].need, k = Ease.inCubic ? Ease.inCubic(clamp(R.t / 0.4, 0, 1)) : clamp(R.t / 0.4, 0, 1);
+      need.forEach((id, j) => { const S = SKILLS[id], x = (j ? 1 : -1) * 320 * (1 - k); glowAt(g, x, 0, 50, hexA(S.color, 0.9), 0.8); drawIcon(g, S.canvas, x, 0, 54, S.color); });
+      g.restore(); return;
+    }
+    if (o.kind === 'link' && !R.linkHit) { R.linkHit = true; if (this.mine()) { Sound.sfx('synergy', { ui: true }); this.shake(0.3); } }
+    if (u >= 1 && !R.showBurst) { R.showBurst = true; for (let i = 0; i < (big ? 36 : 20); i++) this.part(i % 2 ? 'confetti' : 'spark', cx, cy, rand(-520, 520), rand(-420, 260), 0.9, rand(4, 8), pick([I.color, '#fff6c8', rc])); }
+    g.scale(s, s);
     glowAt(g, 0, 0, 260, hexA(I.color, 0.6), 0.5);
     const w = 460, h = 200;
     g.fillStyle = 'rgba(20,15,56,0.96)'; g.strokeStyle = I.color; g.lineWidth = 4;
@@ -427,6 +467,9 @@ Object.assign(World.prototype, {
     g.font = '500 15px "Noto Sans SC", sans-serif'; g.fillStyle = 'rgba(236,230,255,0.96)'; g.fillText(I.desc, -w / 2 + 150, -h / 2 + 142);
     drawFx(g, I.fx, -w / 2 + 150, -h / 2 + 170, 15);
     drawDemo(g, o, R.t, w / 2 - 120, -h / 2 + 22, 100, 64, I.color);
+    // 卡面掠过一道高光
+    const sw = clamp((R.t - 0.15) / 0.5, 0, 1);
+    if (sw > 0 && sw < 1) { g.save(); g.beginPath(); g.roundRect ? g.roundRect(-w / 2, -h / 2, w, h, 24) : g.rect(-w / 2, -h / 2, w, h); g.clip(); const x = lerp(-w, w, sw), gr = g.createLinearGradient(x - 80, 0, x + 80, 0); gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.globalCompositeOperation = 'lighter'; g.fillRect(-w / 2, -h / 2, w, h); g.restore(); }
     g.restore();
   },
 });
@@ -447,16 +490,25 @@ function drawFx(g, fx, x, y, size = 14) {
 function wrapText(str, n) { const out = []; for (let i = 0; i < str.length; i += n) out.push(str.slice(i, i + n)); return out; }
 
 /* 水晶转盘（精英核心 / 月光碎片变成的奖励装置） */
+/* 精英核心 → 技能水晶（v0.12）：中间一颗多面宝石，外圈六块晶片绕着转（先快后慢，跟着滚动），三道折射光，品质越高颜色越金 */
 function drawCrystalWheel(g, rot, qc, t) {
-  g.save(); g.rotate(rot);
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * TAU;
-    g.save(); g.rotate(a); g.fillStyle = i % 2 ? '#fff3c8' : hexA(qc, 0.9); g.strokeStyle = PAL.ink; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(0, -18); g.lineTo(14, -56); g.lineTo(0, -66); g.lineTo(-14, -56); g.closePath(); g.fill(); g.stroke(); g.restore();
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    g.save(); g.rotate(rot * 0.25 + (i * TAU) / 3);
+    const gr = g.createLinearGradient(0, 0, 140, 0); gr.addColorStop(0, ['rgba(255,159,207,0.55)', 'rgba(111,240,255,0.55)', 'rgba(255,227,138,0.55)'][i]); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.beginPath(); g.moveTo(0, -4); g.lineTo(140, -16); g.lineTo(140, 16); g.lineTo(0, 4); g.closePath(); g.fill(); g.restore();
   }
   g.restore();
-  g.fillStyle = '#fff6c8'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4; g.beginPath(); g.arc(0, 0, 20, 0, TAU); g.fill(); g.stroke();
-  glowAt(g, 0, 0, 40, GLOW.gold, 0.6 + Math.sin(t * 9) * 0.2);
+  const shard = (w, h, c) => { g.fillStyle = c; g.strokeStyle = PAL.ink; g.lineWidth = 1.8; g.beginPath(); g.moveTo(0, -h); g.lineTo(w, 0); g.lineTo(0, h * 0.6); g.lineTo(-w, 0); g.closePath(); g.fill(); g.stroke(); g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.moveTo(0, -h); g.lineTo(w * 0.35, -h * 0.2); g.lineTo(0, 0); g.closePath(); g.fill(); };
+  for (let i = 0; i < 6; i++) { const a = rot * 0.5 + (i / 6) * TAU, r = 60 + Math.sin(t * 3 + i) * 4; g.save(); g.translate(Math.cos(a) * r, Math.sin(a) * r); g.rotate(a + Math.PI / 2); shard(8, 17, i % 2 ? '#fff3c8' : hexA(qc, 0.95)); g.restore(); }
+  // 中心宝石：上尖下尖，左面暗、右面亮，一道高光
+  const w = 28, h = 44, top = [0, -h], ul = [-w, -h * 0.22], ll = [-w * 0.7, h * 0.45], bot = [0, h], lr = [w * 0.7, h * 0.45], ur = [w, -h * 0.22], c = [0, -h * 0.05];
+  const face = (pts, col) => { g.fillStyle = col; g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) g.lineTo(q[0], q[1]); g.closePath(); g.fill(); };
+  glowAt(g, 0, 0, 70, hexA(qc, 0.8), 0.55 + Math.sin(t * 9) * 0.15);
+  face([top, ul, c], hexA(qc, 0.75)); face([top, c, ur], '#ffffff'); face([ul, ll, bot, c], hexA(qc, 0.95)); face([c, bot, lr, ur], hexA(qc, 0.55));
+  g.strokeStyle = PAL.ink; g.lineWidth = 2.4; g.beginPath(); g.moveTo(top[0], top[1]); for (const q of [ur, lr, bot, ll, ul]) g.lineTo(q[0], q[1]); g.closePath(); g.stroke();
+  g.lineWidth = 1.2; g.beginPath(); for (const q of [top, ul, ur, bot]) { g.moveTo(c[0], c[1]); g.lineTo(q[0], q[1]); } g.stroke();
+  g.fillStyle = 'rgba(255,255,255,0.8)'; g.beginPath(); g.ellipse(w * 0.3, -h * 0.45, 3, 9, 0.5, 0, TAU); g.fill();
 }
 /* 浮空小机器（风车 / 矿脉动力装置 / 伙伴修理台变成的奖励装置） */
 function drawFloatMachine(g, rot, qc, t) {

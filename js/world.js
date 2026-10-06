@@ -67,7 +67,7 @@ class World {
     this.tutorCharge = false;
     // 全队共用的统计；星砂 / 宝箱 / 碎片 / 升级次数这些“自己的资源”在每架飞机的 res 里
     this.m = { kills: 0, bursts: 0, maxStreak: 0, elites: 0, highlights: 0, firstKill: null, firstSkill: null, firstSyn: null, firstBurst: null,
-      killTimeSum: 0, killTimeN: 0, gapMax: 0, gapT: 0, talent: 0, route: [], streak100: 0, hitsTaken: 0, leaks: 0, offerMiss: 0, stockIdle: 0, segsDone: 0, workT: 0, rescuedNow: [], upperRoute: 0 };
+      killTimeSum: 0, killTimeN: 0, gapMax: 0, gapT: 0, talent: 0, route: [], streak100: 0, hitsTaken: 0, leaks: 0, offerMiss: 0, stockIdle: 0, segsDone: 0, workT: 0, rescuedNow: [], upperRoute: 0, unfair: 0, dmgOut: 0, golds: 0 };
     this.hintStep = this.first ? 0 : -1; this.hintShown = null;
     this.initMap(o);
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
@@ -154,6 +154,35 @@ class World {
   emit(type, data) { this.events.push(Object.assign({}, data || {}, { type })); } // 事件名永远不被数据里的同名字段覆盖
   later(t, fn) { this.timers.push({ t, fn }); }
   highlight() { this.m.highlights++; }
+  /* Boss 打掉一段血（换阶段）：星砂从它身上喷出来飞回飞机、大招充一截。Boss 战中途也有奖励节拍（不回血：Boss 仍是这一关最难的一段） */
+  bossBreak(x, y) {
+    this.m.bossBreaks = (this.m.bossBreaks || 0) + 1;
+    for (let i = 0; i < 12; i++) this.dropPickup('dust', x + srand(-30, 30), y + srand(-30, 30), { value: 3, big: i < 5, vx: srand(-260, 120), vy: srand(-420, -120) });
+    for (const q of this.players) if (!q.gone && q.alive) this.withPlayer(q, () => this.addCharge(0.3));
+    this.text('Boss 掉了一块！', x, y - 120, '#ffe38a', 22, 5);
+  }
+  /* 攻击者刚出现 0.5 秒内（入场演出开始算出现）或还在屏幕外：这一下玩家来不及反应（节奏报告记为不公平受击） */
+  freshFoe(e) { if (!e) return false; if (e.isBoss) return this.bossIntroT > 0; const s = e.shownT != null ? e.shownT : e.seenT; return s === null || s === undefined || this.t - s < 0.5 || e.x - e.r > this.W; }
+  /* 节奏采样（金牌制作人节奏报告，每秒一次）：intensity 屏幕上的威胁、rewards 累计奖励、unfair 不公平受击、power 有敌人在场时每秒打出的伤害 */
+  pacing() {
+    const p = this.me, W = this.W; let I = 0;
+    if (this.state === 'play' && !this.worldRitual()) {
+      for (const e of this.enemies) {
+        if (!e.alive || e.x - e.r > W || e.x + e.r < 0) continue;
+        const w = e.isBoss ? 10 : e.elite || e.type === 'cmdr' ? 4 : e.type === 'armor' || e.type === 'mirror' ? 3 : e.type === 'beacon' || e.type === 'wreck' ? 2 : e.type === 'jelly' || e.type === 'moth' || e.fodder ? 1 : 1.5;
+        I += w * (1 + Math.max(0, 1 - Math.hypot(e.x - p.x, e.y - p.y) / 600));
+      }
+      if (this.boss && !this.enemies.includes(this.boss)) I += 10;
+      this.bullets.each((b) => { if (b.ghost > 0) return; I += Math.abs(b.x - p.x) < 220 && Math.abs(b.y - p.y) < 160 ? 0.6 : 0.2; });
+      I += this.warns.filter((w) => !w.fired).length * 2;
+    }
+    const d = this.m.dmgOut - (this._paceDmg || 0); this._paceDmg = this.m.dmgOut;
+    const engaged = this.enemies.some((e) => e.alive && e.x - e.r < W && e.x + e.r > 0) || !!this.boss;
+    const boss = this.wonRun ? 1 : 0;
+    const rewards = p.picks.length + p.res.chests + this.m.golds + (this.m.goalTimes || []).length + this.m.interacts + this.m.elites + (this.m.bossBreaks || 0) + boss;
+    const phase = this.worldRitual() ? 'upgrade' : this.boss ? 'boss' : this.goal ? this.goal.B.kind : this.D ? this.D.st : 'none';
+    return { intensity: I, rewards, over: !!this.done || this.state === 'dying' || this.state === 'victory', won: this.state === 'victory' || !!this.wonRun, phase, unfair: this.m.unfair, power: engaged && !this.worldRitual() ? d : 0 };
+  }
 
   /* ================================================== main step ================================================== */
   step(dt) {
@@ -167,11 +196,11 @@ class World {
     const sdt = dt * this.timeScale * this.focusK;
     this.t += sdt;
     if (this.state === 'play' && this.mode === 'run' && !this.worldRitual()) { this.runT += sdt; this.m.workT += sdt; } // 仪式期间关卡计时暂停（单人）；有效战斗时间推进家园工作
-    this.trauma = Math.max(0, this.trauma - dt * 1.8);
+    this.trauma = Math.max(0, this.trauma - dt * 6);
     this.flash = Math.max(0, this.flash - dt * 2.2); this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2);
     this.arena.top = approach(this.arena.top, this.arenaTarget.top, 60 * dt); this.arena.bottom = approach(this.arena.bottom, this.arenaTarget.bottom, 60 * dt);
     this.scene.dir = this.boss && this.boss.phase === 3 ? -1 : 1;
-    this.scene.speed = this.bursting ? 30 : this.worldRitual() ? 20 : 90;
+    this.scene.speed = this.bursting ? 30 : this.worldRitual() ? 20 : this.phase === 'boss' && this.bossIntroT > 0 ? 12 : 90;
     this.scene.update(this.timeStop > 0 ? 0 : sdt);
     for (const tm of this.timers) { tm.t -= sdt; if (tm.t <= 0 && !tm.done) { tm.done = true; tm.fn(); } }
     this.timers = this.timers.filter((tm) => !tm.done);
@@ -193,7 +222,7 @@ class World {
       if (this.mode === 'run') { if (this.vs) this.updateVs(sdt); else { this.updateDirector(sdt); this.updateSurprise(sdt); } }
       else this.updatePreview(sdt);
       if (this.boss) { this._firer = 'boss'; this.boss.update(sdt); this._firer = null; if (this.bossProxy) { this.bossProxy.x = this.boss.x; this.bossProxy.y = this.boss.y; } }
-      if (this.bossIntroT > 0) this.bossIntroT -= sdt;
+      if (this.bossIntroT > 0) { this.bossIntroT -= sdt; if (this.bossIntroT <= 0) this.bossLand(); }
     } else if (this.state === 'dying') {
       this.stateT -= dt; if (this.stateT <= 0 && !this.done) this.finish(false);
     } else if (this.state === 'victory') {
@@ -230,7 +259,7 @@ class World {
   /* ================================================== player ================================================== */
   updatePlayer(dt) {
     const p = this.player, I = this.inputs[p.idx] || NEUTRAL_INPUT;
-    p.inv = Math.max(0, p.inv - dt); p.hurtT = Math.max(0, p.hurtT - dt * 3); p.cloudCd = Math.max(0, p.cloudCd - dt); p.candy = Math.max(0, p.candy - dt);
+    p.inv = Math.max(0, p.inv - dt); p.hurtT = Math.max(0, p.hurtT - dt * 3); if (p.muzzle) p.muzzle = Math.max(0, p.muzzle - dt * 16); if (p.linkFx) p.linkFx = Math.max(0, p.linkFx - dt); p.cloudCd = Math.max(0, p.cloudCd - dt); p.candy = Math.max(0, p.candy - dt);
     p.blinkT -= dt; if (p.blinkT <= 0) { p.blink = 1; p.blinkT = 2 + Math.random() * 3; } p.blink = Math.max(0, p.blink - dt * 8); // 眨眼只是表现
     if (!p.alive) { this.downTick(p, dt); I.burst = false; return; }
     if (p.away) { p.inv = Math.max(p.inv, 0.2); p.vx = p.vy = 0; I.burst = false; I.dx = I.dy = 0; return; } // 断线占位：原地不动、不开火
@@ -258,9 +287,9 @@ class World {
     else if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
     if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx) && this.mode === 'run') {
       for (const e of this.enemies) {
-        if (!e.alive || e.leaving) continue;
+        if (!e.alive || e.leaving || this.freshFoe(e)) continue; // 刚出现的敌人还不能撞人（先看见，再受伤）
         const rr = (e.isBoss ? 110 : e.r) + 8;
-        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { this.hurtPlayer(1, 'c:' + (e.chaser ? 'chaser' : e.isBoss ? 'boss' : e.type)); if (!e.elite && !e.isBoss && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
+        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { this._hitFresh = this.freshFoe(e); this.hurtPlayer(1, 'c:' + (e.chaser ? 'chaser' : e.isBoss ? 'boss' : e.type)); if (!e.elite && !e.isBoss && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
       }
     }
   }
@@ -269,6 +298,7 @@ class World {
     const p = this.player, d = this.P.dmg * this.stats.dmgK, x = p.x + 24, y = p.y + 2, n = 1 + this.gun.multi;
     const lanes = [[0], [-9, 9], [-15, 0, 15], [-21, -7, 7, 21]][n - 1];
     for (const off of lanes) this.gunShot(x, y + off, off * 0.004, d, { side: off !== 0 });
+    p.muzzle = 1; // 画面：炮口闪一下
     if (this.hasSyn('homing', 'wing')) for (const w of this.wingmen) if (!w.burst) w.fireT = Math.min(w.fireT, 0.02);
     if (p === this.me && Math.random() < 0.3) Sound.sfx('shoot', { gap: 120 });
   }
@@ -277,7 +307,7 @@ class World {
     const s = this.addShot(o.from === 'wing' ? 'wingDart' : kind, x, y, a, 1150, { dmg, r: o.from === 'wing' ? 7 : 10, from: o.from || 'main', life: 1.25, knock: this.planeId === 'cloud' && !o.from ? 18 : 0, gold: o.gold });
     if (!s) return null;
     const pl = this.gun.pierce;
-    s.gun = true; s.pierce = pl ? pl + this.stats.pierceX : 0; s.pierceMax = s.pierce; s.side = !!o.side;
+    s.gun = true; s.pierce = pl ? pl + this.stats.pierceX : 0; s.pierceMax = s.pierce; s.side = !!o.side; s.bombLv = this.gun.bomb; s.pierceLv = pl; s.hist = null;
     const hl = Math.min(3, this.gun.homing + (o.homBonus || 0));
     s.homLv = hl; s.target = null; s.lost = false;
     if (hl) { s.homTurn = (HOMING.turn[hl] * (1 + this.stats.homingX) * Math.PI) / 180; s.homCone = (HOMING.cone[hl] * Math.PI) / 180; }
@@ -303,13 +333,14 @@ class World {
     s.vx = Math.cos(na) * sp; s.vy = Math.sin(na) * sp;
   }
   hurtPlayer(n, src, who) {
-    const p = who || this.player;
+    const p = who || this.player, fresh = this._hitFresh; this._hitFresh = false;
     if (!p.alive || p.away || p.inv > 0 || this.state !== 'play' || this.mode === 'preview') return;
     const inRit = !!(p.ritual && p.ritual.st !== 'resume');
     if (!inRit && p === this.me) { const c = hurtCat(src); this.m.hurt = this.m.hurt || {}; this.m.hurt[c] = (this.m.hurt[c] || 0) + 1; this.m.lastHurt = c; } // 受伤来源：结算复盘用（本机这架）
     if (inRit) return; // 升级仪式期间不会受伤
     if (p.cloudShield) { p.cloudShield = false; p.inv = 0.8; Sound.sfx('shieldPop'); this.text('缓冲云挡住了', p.x, p.y - 40, '#dcefff', 16, 4); for (let i = 0; i < 10; i++) this.part('puff', p.x, p.y, rand(-160, 160), rand(-160, 160), 0.6, rand(8, 14), 'rgba(255,255,255,0.9)'); return; }
     p.hp -= n; p.inv = 1.4; p.hurtT = 1; this.m.hitsTaken++;
+    if (fresh) this.m.unfair++; // 节奏报告：攻击者刚出现（或在屏幕外）就打中了
     this.hitStop(0.05); // 受击：红色暗角 + 顿帧 + 手柄震，不晃镜头（暗角和震动只给被打的那位）
     if (p === this.me) { this.hurtFlash = 1; this.rumble(0.7, 0.9, 160); Sound.sfx('hurt', { prio: true }); }
     for (let i = 0; i < 12; i++) this.part('dot', p.x, p.y, rand(-220, 220), rand(-220, 220), 0.45, 3.5, 'rgba(255,122,107,0.95)');
@@ -366,6 +397,7 @@ class World {
     s.dmg = o.dmg || 8; s.r = o.r || 6; s.life = o.life || 1.6; s.pierce = o.pierce || 0; s.hits = []; s.homing = o.homing || 0;
     s.from = o.from || 'skill'; s.knock = o.knock || 0; s.wave = o.wave || 0; s.freeze = o.freeze || 0; s.gold = !!o.gold;
     s.hitCd = null; s.chain = o.chain || 0; s.y0 = y; s.ty = o.ty || 0;
+    s.gun = false; s.homLv = 0; s.pierceMax = 0; s.pierceLv = 0; s.bombLv = 0; s.side = false; s.target = null; s.lost = false; s.hist = null; s.histT = 0; // 对象池复用：上一发主炮弹的改造不能带到技能弹上
     s.owner = o.owner !== undefined ? o.owner : this.player.idx; // 谁打的：击杀充能记给谁
     return s;
   }
@@ -393,7 +425,7 @@ class World {
       if (s.kind === 'wheel') return this.updateWheel(s, dt);
       if (s.kind === 'wheelS') return this.updateWheelS(s, dt);
       if (s.kind === 'candyBomb') return this.updateCandyBomb(s, dt);
-      if (s.homLv) this.steerGunShot(s, dt);
+      if (s.homLv) { this.steerGunShot(s, dt); s.histT = (s.histT || 0) - dt; if (s.histT <= 0) { s.histT = 0.022; (s.hist = s.hist || []).push(s.x, s.y); if (s.hist.length > 16) s.hist.splice(0, 2); } } // 追踪弹的尾迹（画面用）
       else if (s.homing && s.t > 0.08) {
         const tg = this.homingTarget(s);
         if (tg) { const a = Math.atan2(s.vy, s.vx), ta = angTo(s.x, s.y, tg.x, tg.y), na = a + clamp(angDiff(a, ta), -s.homing * dt, s.homing * dt), sp = Math.hypot(s.vx, s.vy); s.vx = Math.cos(na) * sp; s.vy = Math.sin(na) * sp; }
@@ -483,7 +515,7 @@ class World {
     for (const e of this.enemies) {
       const p = this.np > 1 ? this.nearestPlayer(e.x, e.y) : this.player; // 多人：每个敌人盯离自己最近的飞机
       if (!e.alive || e.isBoss) continue;
-      e.t += dt; e.hitFlash = Math.max(0, e.hitFlash - dt * 6);
+      e.t += dt; e.hitFlash = Math.max(0, e.hitFlash - dt * 6); if (e.kick) e.kick = Math.max(0, e.kick - dt * 9);
       if (e.seenT === null && e.x < this.W - 10) e.seenT = this.t;
       if (frozenWorld) continue;
       if (e.frozen > 0) e.frozen -= dt;
@@ -491,12 +523,12 @@ class World {
       if (e.pull) { const a = angTo(e.x, e.y, e.pull.x, e.pull.y); e.x += Math.cos(a) * e.pull.v * dt; e.y += Math.sin(a) * e.pull.v * dt; continue; }
       const mdt = dt * (e.frozen > 0 ? 0.3 : 1);
       if (!this.moveFoe(e, mdt, p)) this.moveEnemy(e, mdt, p);
-      this._firer = e.chaser ? 'chaser' : e.type;
-      if (e.frozen <= 0 && this.mode === 'run' && this.state === 'play' && !e.fodder && !quiet && !this.foeFire(e, dt, p)) this.enemyFire(e, dt, p); // 仪式期间敌人不发起新攻击
+      this._firer = e.chaser ? 'chaser' : e.type; this._firerE = e;
+      if (e.frozen <= 0 && this.mode === 'run' && this.state === 'play' && !e.fodder && !quiet && !this.freshFoe(e) && !this.foeFire(e, dt, p)) this.enemyFire(e, dt, p); // 仪式期间、刚出现 0.5 秒内敌人不发起新攻击
       if (e.life && e.t > e.life && !e.leaving) { e.leaving = true; e.vx = -320; if (e.path !== 'line') e.path = 'line'; }
       if (e.x < -80 || e.x > this.W + 400 || e.y < -120 || e.y > LH + 120) { e.alive = false; if (e.x < -80 && !e.fodder && !e.escort && this.mode === 'run') this.m.leaks++; } // 漏过只影响额外评分
     }
-    this._firer = null;
+    this._firer = null; this._firerE = null;
     this.enemies = this.enemies.filter((e) => e.alive);
   }
   moveEnemy(e, dt, p) {
@@ -551,6 +583,7 @@ class World {
   }
   damageEnemy(e, dmg, o = {}) {
     if (!e.alive) return;
+    this.m.dmgOut += dmg;
     if (e.isBoss) {
       if (!this.boss) return;
       let k = this.stats.bossK / this.teamK(0.7); // 多人：Boss 按人数加厚（固定系数，不随成长变）
@@ -565,6 +598,7 @@ class World {
     if (e.armorHp > 0) { dmg = this.armorDamage(e, dmg, o); if (dmg <= 0) return; } // 厚甲：先敲甲，碎了多出来的伤害才打到核心
     e.hp -= dmg * (e.frozen > 0 ? 1.25 : 1); e.hitFlash = 1;
     if (e.hp <= 0) this.killEnemy(e, o);
+    else { e.kick = 1; e.kickA = o.dir !== undefined ? o.dir : 0; if (this.mine()) Sound.sfx('hit', { pan: this.pan(e.x), gap: e.elite || e.type === 'cmdr' ? 70 : 45 }); }
   }
   killEnemy(e, o = {}) {
     if (!e.alive) return;
@@ -585,14 +619,14 @@ class World {
     if (this.recentKills.length >= 4 && this.chainCd <= 0) { this.chainCd = 0.5; this.fx(e.x, e.y, 2, 90); if (this.chainHiCd <= 0) { this.chainHiCd = 8; this.highlight(); } }
     if (e.elite) {
       this.m.elites++; this.highlight();
-      for (let i = 0; i < 14; i++) this.dropPickup('dust', e.x + srand(-30, 30), e.y + srand(-30, 30), { value: 2, big: i < 4 });
+      for (let i = 0; i < 14; i++) this.dropPickup('dust', e.x + srand(-30, 30), e.y + srand(-30, 30), { value: 2, big: i < 4, vx: srand(-200, 140), vy: srand(-460, -160) }); // 喷泉一样喷出来
       this.addCharge(0.15); this.shake(0.4);
     } else if (armored) {
       for (let i = 0; i < 4; i++) this.dropPickup('dust', e.x, e.y, { value: 1, big: i === 0 });
     } else if (e.type === 'mirror' || e.type === 'wreck') {
       for (let i = 0; i < 6; i++) this.dropPickup('dust', e.x, e.y, { value: 2 });
     } else {
-      const n = e.fodder ? 3 : e.base === 'moth' ? 2 : srnd() < 0.6 ? 1 : 0;
+      const n = e.swell ? 1 : e.fodder ? 3 : e.base === 'moth' ? 2 : srnd() < 0.6 ? 1 : 0;
       for (let i = 0; i < n; i++) this.dropPickup('dust', e.x, e.y, { value: 1 });
       if (this.planeId === 'candy' && srnd() < 0.08) this.dropPickup('candy', e.x, e.y, this.mineDrop()); // 自己机型 / 技能带来的掉落只给自己
       if (o.src === 'beam' && this.lvOf('rainbow') >= 3 && srnd() < 0.35) this.dropPickup('candy', e.x, e.y, this.mineDrop());
@@ -623,10 +657,12 @@ class World {
   /* ================================================== enemy bullets ================================================== */
   fire(type, x, y, ang, spd, o = {}) {
     if (this.mode === 'preview') return null;
+    if (x > this.W + 4) return null; // 屏幕外生成的子弹不算数：攻击必须看得见
+    if (this._firer === 'boss' && this.boss && dist2(x, y, this.boss.x, this.boss.y) < 40 * 40) { x += Math.cos(ang) * 96; y += Math.sin(ang) * 96; } // Boss 从中心放的弹从表盘边缘出来：表盘始终看得清
     const b = this.bullets.get(); if (!b) return null;
     b.on = true; b.type = type; b.x = x; b.y = y; b.vx = Math.cos(ang) * spd; b.vy = Math.sin(ang) * spd;
     b.r = B_RADIUS[type] || 7; b.t = 0; b.life = o.life || 12; b.rot = ang; b.spin = type === 'blue' ? srand(-3, 3) : 0; b.ghost = o.ghost || 0;
-    b.src = o.noRepeat ? null : { x, y, a: ang, s: spd, type }; b.pull = null; b.from = o.from || this._firer || 'shot';
+    b.src = o.noRepeat ? null : { x, y, a: ang, s: spd, type }; b.pull = null; b.from = o.from || this._firer || 'shot'; b.fresh = this.freshFoe(this._firerE) || x > this.W + 5;
     if (!o.silent) Sound.sfx({ pink: 'spawnPink', blue: 'spawnBlue', gold: 'spawnGold', white: 'laser' }[type], { pan: this.pan(x), gap: 110 });
     return b;
   }
@@ -652,7 +688,7 @@ class World {
       for (const q of this.players) {
         if (!q.alive || q.gone || q.inv > 0) continue;
         if (this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === q.idx) continue;
-        if (dist2(b.x, b.y, q.x, q.y) < (q.r + b.r) * (q.r + b.r)) { b.on = false; this.hurtPlayer(1, 'b:' + (b.from || 'shot'), q); return; }
+        if (dist2(b.x, b.y, q.x, q.y) < (q.r + b.r) * (q.r + b.r)) { b.on = false; this._hitFresh = !!b.fresh; this.hurtPlayer(1, 'b:' + (b.from || 'shot'), q); return; }
       }
     });
     if (wall) { wall.t -= dt; if (wall.t <= 0) this.cloudWall = null; }
@@ -1041,6 +1077,7 @@ class World {
       const R = radius[p.idx];
       if (k.gather && k.gatherT > 0) { k.gatherT -= dt; k.x = smooth(k.x, k.gather.x, 6, dt); k.y = smooth(k.y, k.gather.y, 6, dt); if (k.gatherT <= 0) { k.gather = null; if (k.kind !== 'crystal') k.attract = true; } continue; }
       const d = Math.sqrt(dist2(k.x, k.y, p.x, p.y));
+      if (k.kind === 'chest') k.near = clamp(1 - (d - 30) / 260, 0, 1);
       const pull = (k.kind !== 'crystal' || k.bunny) && (k.attract || (d < R && k.t > 0.25) || this.state === 'victory');
       if (pull && p.alive) { const a = angTo(k.x, k.y, p.x, p.y), sp = 560 + k.t * 120; k.vx = smooth(k.vx, Math.cos(a) * sp, 12, dt); k.vy = smooth(k.vy, Math.sin(a) * sp, 12, dt); }
       else if (k.kind === 'crystal' || k.kind === 'gold' || k.kind === 'chest') { k.vx = smooth(k.vx, -55, 2, dt); k.vy = smooth(k.vy, Math.sin(k.t * 2 + k.seed) * 20, 2, dt); }
@@ -1058,7 +1095,8 @@ class World {
     const p = this.player; k.done = true;
     switch (k.kind) {
       case 'dust': {
-        p.res.dust += k.value; this.addCharge(0.0008); if (p === this.me) Sound.sfx('dust', { gap: 45 });
+        p.res.dust += k.value; this.addCharge(0.0008);
+        if (p === this.me) { this.dustChain = this.t - (this.dustT || -9) < 0.35 ? Math.min(10, (this.dustChain || 0) + 1) : 0; this.dustT = this.t; Sound.sfx('dust', { gap: 30, k: this.dustChain }); }
         const ml = this.lvOf('magnet');
         if (ml && this.pickCd.bolt <= 0) { this.pickCd.bolt = 0.05; this.addShot('starbolt', p.x, p.y, srand(-0.5, 0.5), 700, { dmg: (8 + 3 * ml) * (ml >= 4 ? 1.5 : 1), r: 6, homing: 7, life: 1.4 }); }
         if (this.hasSyn('bomb', 'magnet') && this.pickCd.mine <= 0) { this.pickCd.mine = 0.1; this.explode(p.x + 30, p.y, 45 * this.stats.blastK, 14, { level: 1 }); }
@@ -1069,15 +1107,21 @@ class World {
       case 'candy': p.candy = 5; p.res.candies++; if (p === this.me) Sound.sfx('candy'); this.text('糖果强化！', p.x, p.y - 40, '#ff9fcf', 16, 3); if (this.planeId === 'paper') this.addClone(10); break;
       case 'heart': if (p.hp < p.maxHp) p.hp++; if (p === this.me) Sound.sfx('heart'); this.text('+1', p.x, p.y - 40, '#9ff2c8', 18, 4); break;
       case 'chest': {
-        p.res.dust += 30; p.res.chests++;
+        // 开箱仪式（不打断操作）：靠近时越抖越厉害（画面）→ 盖子弹开、金光一圈 → 6 颗大星砂喷出来再一颗颗飞回（音高逐个升高）→ 最后碎片
+        p.res.chests++;
         const pl = spick(PLANE_ORDER); p.res.frags[pl] = (p.res.frags[pl] || 0) + 3;
-        if (p === this.me) Sound.sfx('chest'); this.text(`宝箱：星砂 +30 · ${PLANES[pl].name}碎片 +3`, p.x, p.y - 44, '#ffe38a', 16, 4); this.fx(p.x, p.y, 2, 80, ['#ffd76a', '#ffb347', '#fff6c8']);
+        for (let i = 0; i < 6; i++) this.dropPickup('dust', k.x, k.y - 6, Object.assign({ value: 5, big: true, vx: srand(-170, 170), vy: srand(-420, -240) }, this.np > 1 ? { owner: p.idx } : {}));
+        if (p === this.me) { Sound.sfx('chest'); this.flash = Math.max(this.flash, 0.18 * this.flashK()); this.flashColor = '255,226,150'; }
+        this.part('plate', k.x, k.y - 10, rand(-60, 60), -320, 0.9, 16, '#e0a860');
+        this.part('ring', k.x, k.y, 0, 0, 0.35, 70, 'rgba(255,215,106,0.95)');
+        this.fx(k.x, k.y, 2, 80, ['#ffd76a', '#ffb347', '#fff6c8']);
+        this.later(0.55, () => this.text(`宝箱 · 星砂 +30 · ${PLANES[pl].name}碎片 +3`, p.x, p.y - 48, '#ffe38a', 18, 4));
         break;
       }
       case 'gold':
         if (p === this.me) { Sound.sfx('gold'); this.flash = 0.35; this.flashColor = '255,236,170'; } this.highlight();
-        this.addCharge(1); p.res.dust += 60;
-        p.candy = 8; this.emit('gold'); if (this.planeId === 'paper') this.addClone(10);
+        const full = p.stock >= p.ultCap; this.addCharge(1); p.res.dust += 60;
+        p.candy = 8; this.m.golds++; this.emit('gold', { full }); this.text(full ? '金色强化 · 大招满了，星砂 +60' : '金色强化 · 大招 +1', p.x, p.y - 52, '#ffe38a', 18, 4); if (this.planeId === 'paper') this.addClone(10);
         break;
     }
   }
@@ -1121,6 +1165,23 @@ class World {
     this.onMapBoss();
     if (this.cb.onPortal) this.cb.onPortal('boss');
   }
+  /* Boss 入场仪式（v0.12）：2.8 秒蓄势（画面压暗、上下警示带滑过、背景停住、警报）→ 落地（冲击波、小震、名牌）→ 血条从空涨满 */
+  bossLand() {
+    const b = this.boss; if (!b) return;
+    this.shake(0.6); this.flash = Math.max(this.flash, 0.35 * this.flashK()); this.flashColor = '255,226,236'; this.hitStop(0.06); this.rumble(0.8, 0.6, 220);
+    Sound.sfx('phase'); this.part('ring', b.x, b.y, 0, 0, 0.5, 260, 'rgba(255,240,250,0.95)'); this.part('ring', b.x, b.y, 0, 0, 0.7, 380, 'rgba(255,170,200,0.7)');
+    for (let i = 0; i < 24; i++) this.part(i % 2 ? 'petal' : 'shard', b.x, b.y, rand(-420, 420), rand(-360, 260), 0.9, rand(5, 9), pick(['#ffcf7a', '#ff9fcf', '#fff3c8']));
+    this.emit('bossLand');
+  }
+  /* Boss 倒下的过程：三下越来越大的爆点（音高往上走），最后整只炸开 */
+  bossDyingPops(b, total) {
+    const left = b.dying, k = Math.floor((1 - left / total) * 4); // 0..3
+    if (k > (b.popK || 0) && k <= 3) {
+      b.popK = k; const x = b.x + rand(-70, 70), y = b.y + rand(-70, 70);
+      this.fx(x, y, Math.min(4, 1 + k), 70 + k * 50, ['#fff3c8', '#ffcf7a', '#ff9fcf']); this.shake(0.2 + 0.15 * k); this.hitStop(0.04);
+      Sound.sfx('kill', { k: 2 + k * 3, gap: 0 }); Sound.sfx('armorBreak', { gap: 0 });
+    }
+  }
   /* n = 0：阶段切换瞬间（闹钟号被动充能）；n = 2：第二乐章开始（Boss 回应 Build） */
   onBossPhase(n) {
     if (n === 0 && this.planeId === 'clock') { const p = this.player; this.addCharge(0.5); this.text('准点充能', p.x, p.y - 44, '#ffd76a', 16, 4); }
@@ -1147,12 +1208,16 @@ class World {
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.killEnemy(e, {});
     this.clearBullets(true); this.warns = [];
     this.fx(this.boss.x, this.boss.y, 5, 900);
+    const bc = this.stage.boss === 'clock' ? ['#f4ecff', '#c9a8ff', '#ffcf7a', '#fff6c8'] : [(this.boss.C && this.boss.C.color) || '#ff9fcf', '#fff6c8', '#c9a8ff'];
+    for (let i = 0; i < 14; i++) this.part('plate', this.boss.x + rand(-60, 60), this.boss.y + rand(-60, 60), rand(-520, 520), rand(-560, 200), 1.4, rand(22, 44), pick(bc)); // 整只碎成几大块飞开
+    this.hitStop(0.1);
     this.highlight(); this.victoryT = 0;
     this.shake(1); this.flash = 0.8 * this.flashK(); this.flashColor = '255,243,200'; this.rumble(1, 1, 400);
   }
   finish(win) {
     this.done = true; this.phase = 'end';
     if (this.vs) { const v = this.vsResult(); win = v.rank === 1 && !v.draw; } // 对抗：赢 = 本机这架排第一（平局不算）
+    this.wonRun = !!win;
     if (this.cb.onEnd) this.cb.onEnd(this.result(win));
   }
   result(win) { return this.withPlayer(this.me, () => this.resultOf(win)); }
@@ -1271,7 +1336,7 @@ class World {
   render(g, o = {}) {
     const W = this.W, t = this.t, p = this.me, cb = this.settings.colorblind;
     g.save();
-    if (this.trauma > 0) { const s = this.trauma * this.trauma * 16; g.translate(rand(-s, s), rand(-s, s)); }
+    if (this.trauma > 0) { const s = Math.min(6, this.trauma * 6); g.translate(rand(-s, s), rand(-s, s)); } // 一下小震：最多 6 像素、约 0.15 秒（FP2）
     if (this.mapObjs) this.applyCam(g);
     if (o.simpleBg) { const gr = g.createLinearGradient(0, 0, 0, LH); gr.addColorStop(0, '#1b1548'); gr.addColorStop(1, '#2e2670'); g.fillStyle = gr; g.fillRect(-20, -20, W + 40, LH + 40); }
     else this.scene.draw(g, W, LH);
@@ -1286,6 +1351,11 @@ class World {
       g.fillStyle = 'rgba(255,138,92,0.14)'; g.fillRect(0, 0, W, this.arena.top); g.fillRect(0, this.arena.bottom, W, LH - this.arena.bottom);
       g.strokeStyle = 'rgba(255,190,150,0.55)'; g.setLineDash([10, 8]); g.lineWidth = 2; g.lineDashOffset = -t * 30;
       g.beginPath(); g.moveTo(0, this.arena.top); g.lineTo(W, this.arena.top); g.moveTo(0, this.arena.bottom); g.lineTo(W, this.arena.bottom); g.stroke(); g.setLineDash([]);
+      const moving = Math.abs(this.arena.top - this.arenaTarget.top) > 1 || Math.abs(this.arena.bottom - this.arenaTarget.bottom) > 1;
+      if (moving) { // 正在收缩：上下边缘一排往里压的箭头
+        g.fillStyle = 'rgba(255,170,130,0.85)';
+        for (let x = ((t * 120) % 80) - 80; x < W + 80; x += 80) { const y1 = this.arena.top, y2 = this.arena.bottom; g.beginPath(); g.moveTo(x, y1 - 14); g.lineTo(x + 14, y1 - 14); g.lineTo(x + 7, y1 - 2); g.closePath(); g.fill(); g.beginPath(); g.moveTo(x, y2 + 14); g.lineTo(x + 14, y2 + 14); g.lineTo(x + 7, y2 + 2); g.closePath(); g.fill(); }
+      }
     }
     if (this.vs) this.drawVsUnder(g);
     if (this.mapObjs) this.drawMap(g);
@@ -1390,13 +1460,26 @@ class World {
       g.globalCompositeOperation = 'source-over';
     }
     if (!blink) drawPlane(g, this.planeId, p.x, p.y, 1, t, { tilt: p.tilt, blink: p.blink, hurt: p.hurtT > 0.3, happy: this.state === 'victory', bright: !!this.bursting || p.candy > 0 });
+    if (p.linkFx > 0) { // 组合完成：飞机周围转一圈金色光环（2.5 秒）
+      const k = Math.min(1, p.linkFx), r = 46 + (2.5 - p.linkFx) * 6; g.save(); g.globalCompositeOperation = 'lighter'; drawGlow(g, p.x, p.y, r * 1.6, GLOW.gold, 0.35 * k);
+      g.strokeStyle = `rgba(255,227,138,${0.8 * k})`; g.lineWidth = 3; g.setLineDash([10, 8]); g.lineDashOffset = -t * 60; g.beginPath(); g.arc(p.x, p.y, r, 0, TAU); g.stroke(); g.setLineDash([]);
+      for (let i = 0; i < 4; i++) { const a = t * 3 + (i * TAU) / 4; g.fillStyle = `rgba(255,246,200,${k})`; g.beginPath(); g.arc(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, 4, 0, TAU); g.fill(); } g.restore();
+    }
+    if (p.muzzle > 0 && this.state === 'play') { // 炮口闪光：改造越多越亮，颜色是最高级那项改造的颜色
+      const top = GUN_ORDER.filter((id) => p.gun[id]).sort((a, b) => p.gun[b] - p.gun[a])[0], c = top ? SKILLS[top].glow : 'rgba(255,246,220,0.9)', k = p.muzzle, sz = 10 + 3 * (top ? p.gun[top] : 0);
+      g.globalCompositeOperation = 'lighter'; drawGlow(g, p.x + 30, p.y + 2, sz * 2.2, c, 0.75 * k);
+      g.fillStyle = `rgba(255,255,255,${0.9 * k})`; g.beginPath(); g.moveTo(p.x + 22, p.y + 2 - sz * 0.35); g.lineTo(p.x + 30 + sz * 1.4 * k, p.y + 2); g.lineTo(p.x + 22, p.y + 2 + sz * 0.35); g.closePath(); g.fill();
+      g.globalCompositeOperation = 'source-over';
+    }
   }
   drawEnemy(g, e) {
     const t = this.t;
-    g.save(); g.translate(e.x, e.y);
+    const k = e.kick || 0; // 被打中：顺着子弹方向退一点、压扁一下（只是画面）
+    g.save(); g.translate(e.x + Math.cos(e.kickA || 0) * 5 * k, e.y + Math.sin(e.kickA || 0) * 5 * k);
+    if (k > 0) g.scale(1 - 0.14 * k, 1 + 0.1 * k);
     if (e.type === 'mirror') { g.globalAlpha = 0.8; g.scale(0.3, 0.3); drawClockBoss(g, { x: 0, y: 0, phase: 2, minA: t * 2, hourA: t * 0.3, weakT: 0, mouth: 0, lookA: Math.PI, shield: 0, hitFlash: e.hitFlash }, t + e.seed); g.restore(); return; }
     (EnemyArt[e.type] || EnemyArt.jelly)(g, e, t + e.seed);
-    if (e.hitFlash > 0) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, e.r * 1.6, GLOW.white, e.hitFlash * 0.55); g.globalCompositeOperation = 'source-over'; }
+    if (e.hitFlash > 0) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, e.r * 1.25, GLOW.white, e.hitFlash > 0.75 ? 0.95 : e.hitFlash * 0.45); g.globalCompositeOperation = 'source-over'; } // 前两帧整只发白，再淡出
     if (e.frozen > 0) { g.fillStyle = 'rgba(200,240,255,0.45)'; g.strokeStyle = 'rgba(232,251,255,0.9)'; g.lineWidth = 2; g.beginPath(); for (let i = 0; i < 6; i++) { const a = (i * TAU) / 6 + 0.3; g.lineTo(Math.cos(a) * (e.r + 6), Math.sin(a) * (e.r + 6)); } g.closePath(); g.fill(); g.stroke(); }
     if (e.stun > 0) { g.strokeStyle = '#bfe9ff'; g.lineWidth = 1.6; for (let i = 0; i < 3; i++) { const a = t * 8 + i * 2; g.beginPath(); g.moveTo(Math.cos(a) * 12, -e.r - 6); g.lineTo(Math.cos(a) * 12 + 4, -e.r - 12); g.stroke(); } }
     if (e.mark) { g.strokeStyle = `rgba(255,120,90,${0.7 + Math.sin(t * 10) * 0.3})`; g.lineWidth = 2.5; g.beginPath(); g.arc(0, 0, e.r + 8, 0, TAU); g.moveTo(-e.r - 12, 0); g.lineTo(-e.r - 4, 0); g.moveTo(e.r + 12, 0); g.lineTo(e.r + 4, 0); g.stroke(); }
@@ -1418,6 +1501,7 @@ class World {
   }
   drawShot(g, s) {
     const a = Math.atan2(s.vy, s.vx), t = this.t;
+    if (s.gun) this.drawGunMods(g, s, a, t);
     switch (s.kind) {
       case 'moon': BulletArt.draw(g, 'crescent', s.x, s.y, 0, 0.8); break;
       case 'puff': g.globalCompositeOperation = 'lighter'; drawGlow(g, s.x, s.y, 22, 'rgba(220,240,255,0.7)', 0.8); g.globalCompositeOperation = 'source-over'; g.fillStyle = '#ffffff'; for (const [dx, dy, r] of [[-4, 0, 9], [4, -3, 8], [4, 4, 7]]) { g.beginPath(); g.arc(s.x + dx, s.y + dy, r, 0, TAU); g.fill(); } break;
@@ -1437,6 +1521,28 @@ class World {
       }
       case 'candyBomb': g.save(); g.translate(s.x, s.y); g.rotate(t * 6); g.fillStyle = ['#ff9fcf', '#9fe3f0', '#ffe38a', '#c9a8ff'][(s.x | 0) % 4]; g.strokeStyle = PAL.ink; g.lineWidth = 1.6; g.beginPath(); g.arc(0, 0, 9, 0, TAU); g.fill(); g.stroke(); g.beginPath(); g.moveTo(9, 0); g.lineTo(15, -5); g.lineTo(15, 5); g.closePath(); g.fill(); g.stroke(); g.restore(); break;
     }
+  }
+  /* 主炮弹上的改造：拿到什么，子弹就长什么样（每一发都看得见 Build） */
+  drawGunMods(g, s, a, t) {
+    const ux = Math.cos(a), uy = Math.sin(a), own = this.players[s.owner];
+    g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+    if (own && own.linkFx > 0) drawGlow(g, s.x, s.y, 22, GLOW.gold, 0.6 * Math.min(1, own.linkFx)); // 组合刚完成：这几秒的子弹都带金光
+    if (s.pierceLv) { // 穿透：金色长光轨，越高级越长；3 级是一道白金光枪
+      const L = 22 + 18 * s.pierceLv, x0 = s.x - ux * L, y0 = s.y - uy * L, gr = g.createLinearGradient(x0, y0, s.x, s.y);
+      gr.addColorStop(0, 'rgba(255,227,138,0)'); gr.addColorStop(1, s.pierceLv >= 3 ? 'rgba(255,250,225,0.95)' : 'rgba(255,227,138,0.85)');
+      g.strokeStyle = gr; g.lineWidth = s.pierceLv >= 3 ? 7 : 4.5; g.beginPath(); g.moveTo(x0, y0); g.lineTo(s.x, s.y); g.stroke();
+      if (s.pierceLv >= 3) { g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 2; g.beginPath(); g.moveTo(s.x - ux * L * 0.6, s.y - uy * L * 0.6); g.lineTo(s.x + ux * 6, s.y + uy * 6); g.stroke(); }
+    }
+    if (s.homLv && s.hist && s.hist.length >= 4) { // 追踪：青色尾迹沿真实飞行路线弯过去；3 级带星屑
+      const H = s.hist; g.strokeStyle = s.homLv >= 3 ? 'rgba(170,250,255,0.85)' : 'rgba(111,240,255,0.6)'; g.lineWidth = 2 + s.homLv;
+      g.beginPath(); g.moveTo(H[0], H[1]); for (let i = 2; i < H.length; i += 2) g.lineTo(H[i], H[i + 1]); g.lineTo(s.x, s.y); g.stroke();
+      if (s.homLv >= 3) { g.fillStyle = '#e8fdff'; for (let i = 0; i < H.length; i += 4) g.fillRect(H[i] - 1.5 + Math.sin(t * 20 + i) * 2, H[i + 1] - 1.5, 3, 3); }
+    }
+    if (s.bombLv) { // 爆破：橙色引信圈，越高级越大、闪得越快
+      const r = 9 + s.bombLv * 2.5; drawGlow(g, s.x, s.y, r * 1.8, 'rgba(255,154,107,0.85)', 0.35 + 0.25 * Math.sin(t * (10 + s.bombLv * 6)));
+      g.strokeStyle = 'rgba(255,170,120,0.9)'; g.lineWidth = 2; g.beginPath(); g.arc(s.x, s.y, r, t * 8, t * 8 + Math.PI * 1.3); g.stroke();
+    }
+    g.globalCompositeOperation = 'source-over';
   }
   drawBeams(g) {
     const cols = ['#ff7eb6', '#ffb347', '#ffe38a', '#9ff2c8', '#6fc8ff', '#c9a8ff'];
@@ -1475,6 +1581,13 @@ class World {
         g.save(); g.beginPath(); g.rect(w.x, w.y, w.w, w.h); g.clip(); g.strokeStyle = `rgba(255,255,255,${bright ? 0.25 + 0.35 * u : 0.1})`; g.lineWidth = 3;
         for (let x = w.x - w.h; x < w.x + w.w; x += 36) { const o2 = (t * 60) % 36; g.beginPath(); g.moveTo(x + o2, w.y + w.h); g.lineTo(x + o2 + w.h, w.y); g.stroke(); }
         g.restore(); g.strokeStyle = `rgba(255,255,255,${0.4 + 0.5 * u})`; g.lineWidth = 3; g.strokeRect(w.x, w.y, w.w, w.h);
+      } else if (w.kind === 'swell' && !w.fired) { // 鱼群潮：右边缘一道往里推的波光
+        g.globalCompositeOperation = 'lighter';
+        const gr = g.createLinearGradient(w.x + w.w, 0, w.x - 40 * u, 0); gr.addColorStop(0, `rgba(159,227,240,${0.35 + 0.3 * u})`); gr.addColorStop(1, 'rgba(159,227,240,0)');
+        g.fillStyle = gr; g.fillRect(w.x - 40 * u, w.y, w.w + 40 * u, w.h);
+        g.strokeStyle = `rgba(220,250,255,${0.3 + 0.5 * u})`; g.lineWidth = 2;
+        for (let k = 0; k < 4; k++) { const x = w.x + w.w - ((t * 140 + k * 26) % w.w); g.beginPath(); g.moveTo(x, w.y + 6); g.quadraticCurveTo(x - 10, w.y + w.h / 2, x, w.y + w.h - 6); g.stroke(); }
+        g.globalCompositeOperation = 'source-over';
       } else if (w.kind === 'arc' && !w.fired) {
         g.fillStyle = `rgba(255,255,255,${bright ? 0.06 + 0.1 * u : 0.04})`; g.beginPath(); g.moveTo(w.x, w.y); g.arc(w.x, w.y, w.len, w.a0, w.a1); g.closePath(); g.fill();
         g.strokeStyle = `rgba(255,255,255,${bright ? 0.35 + 0.4 * u : 0.12})`; g.lineWidth = 2; g.setLineDash([12, 10]); g.lineDashOffset = -t * 80; g.beginPath(); g.arc(w.x, w.y, w.len, w.a0, w.a1); g.stroke(); g.setLineDash([]);
@@ -1530,6 +1643,17 @@ class World {
       const gr = g.createRadialGradient(W / 2, LH / 2, LH * 0.5, W / 2, LH / 2, W * 0.7); gr.addColorStop(0, `rgba(${c},0)`); gr.addColorStop(1, `rgba(${c},${0.22 + k * 0.2 + Math.sin(t * 6) * 0.04})`);
       g.fillStyle = gr; g.fillRect(0, 0, W, LH);
     }
+    if (this.phase === 'boss' && this.bossIntroT > 0) { // Boss 入场蓄势：压暗 + 上下两条滑动的警示带
+      const k = clamp(1 - this.bossIntroT / 2.8, 0, 1), a = Math.sin(k * Math.PI);
+      g.fillStyle = `rgba(16,8,30,${0.38 * a})`; g.fillRect(0, 0, W, LH);
+      for (const y of [this.arena.top + 6, this.arena.bottom - 34]) {
+        g.save(); g.beginPath(); g.rect(0, y, W, 28); g.clip(); g.globalAlpha = 0.85 * a;
+        g.fillStyle = '#2a1238'; g.fillRect(0, y, W, 28);
+        g.fillStyle = '#ff7e9e'; for (let x = -60 + ((t * 160) % 60); x < W + 60; x += 60) { g.beginPath(); g.moveTo(x, y + 28); g.lineTo(x + 26, y); g.lineTo(x + 44, y); g.lineTo(x + 18, y + 28); g.closePath(); g.fill(); }
+        g.restore();
+      }
+      g.globalAlpha = 1;
+    }
     const low = p.hp <= 1 && p.alive && this.mode === 'run';
     const hf = Math.max(this.hurtFlash, low ? 0.4 : 0);
     if (hf > 0) { const gr = g.createRadialGradient(W / 2, LH / 2, LH * 0.45, W / 2, LH / 2, W * 0.7); gr.addColorStop(0, 'rgba(255,122,107,0)'); gr.addColorStop(1, `rgba(255,122,107,${0.42 * hf})`); g.fillStyle = gr; g.fillRect(0, 0, W, LH); }
@@ -1554,7 +1678,8 @@ class World {
       g.save(); g.translate(W / 2, LH * 0.42); g.scale(s, s); g.rotate(Math.sin(t * 2) * 0.05);
       g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 220, GLOW.gold, 0.8); g.globalCompositeOperation = 'source-over';
       drawIcon(g, 'star', 0, 0, 200, '#ffd76a', '#2d2358');
-      g.font = '400 54px "ZCOOL KuaiLe", sans-serif'; g.textAlign = 'center'; g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText(this.vs ? '对抗结束' : '清屏！', 0, 150); g.fillStyle = '#fff6c8'; g.fillText(this.vs ? '对抗结束' : '清屏！', 0, 150);
+      const vt = this.vs ? '对抗结束' : `击败${this.stage.bossName}！`;
+      g.font = '400 54px "ZCOOL KuaiLe", sans-serif'; g.textAlign = 'center'; g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText(vt, 0, 150); g.fillStyle = '#fff6c8'; g.fillText(vt, 0, 150);
       g.restore();
     }
     if (!o.simpleBg && !this.low) {

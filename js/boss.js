@@ -235,6 +235,7 @@ class ClockBoss {
     Tele.log('boss_phase_change', { to: n });
     for (let i = 0; i < 26; i++) w.part(i % 2 ? 'petal' : 'shard', this.x, this.y, rand(-380, 380), rand(-380, 200), 1.2, rand(5, 9), pick(['#ffcf7a', '#c9a8ff', '#fff3c8']));
     w.emit('phase', { n, name: CLOCK_PHASES[n].name });
+    w.bossBreak(this.x, this.y);
     if (w.planeId === 'clock') w.onBossPhase(0);
   }
   beginPhase() {
@@ -253,7 +254,7 @@ class ClockBoss {
   }
   updateDeath(dt) {
     const w = this.w;
-    this.dying -= dt; this.hitFlash = 0.6 + Math.sin(this.t * 30) * 0.4;
+    this.dying -= dt; this.hitFlash = 0.6 + Math.sin(this.t * 30) * 0.4; w.bossDyingPops(this, 2.6);
     this.x += Math.sin(this.t * 60) * 1.5;
     if (Math.random() < 0.5) w.part(pick(['petal', 'shard', 'dot']), this.x + rand(-100, 100), this.y + rand(-100, 100), rand(-260, 260), rand(-300, 100), 1.2, rand(4, 9), pick(['#ffcf7a', '#c9a8ff', '#fff3c8', 'rgba(255,243,200,0.9)']));
     if (this.dying <= 0) {

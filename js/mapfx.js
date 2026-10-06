@@ -32,6 +32,16 @@ Object.assign(World.prototype, {
         const side = o.y < mid ? 1 : -1; o.wall = { x: W * 0.82, y: side < 0 ? top + 20 : bot - 20, side, shown: 0 };
         break;
       }
+      case 'bridge': { // 断桥：三个灯环排成一条之字形航线，依次穿过去，尾流把它们连成桥
+        o.station = W * 0.6; const s = srnd() < 0.5 ? 1 : -1;
+        o.rings = [[-300, 95 * s], [-120, -70 * s], [60, 45 * s]].map(([dx, dy]) => ({ dx, dy: clamp(dy, top - mid + 90, bot - mid - 70) }));
+        o.lit = [false, false, false]; o.build = 0; o.ringR = 66;
+        break;
+      }
+      case 'giant': { // 沉睡巨鲸：浮在海面上，眼睛半睁；飞到眼睛旁边停一下就醒
+        o.sub = 'whale'; o.station = W * 0.66; o.y = bot - 70; o.s = 0.85; o.eye = 0.1; o.act = 0; o.mouth = 0; o.wakeT = 0;
+        break;
+      }
       case 'npc': {
         o.sub = f.sub || this.pickNpc(); o.y = f.y !== undefined ? f.y : srand(mid - 80, mid + 80); o.station = W * 0.42; o.wait = f.reward || f.sub ? 1e9 : 26;
         o.story = this.wf.targets.includes(o.sub); // 家园追踪的伙伴：一路有箭头
@@ -78,6 +88,8 @@ Object.assign(World.prototype, {
       if (o.kind === 'wind') return o.upper && this.wantsMerchant() ? { x: o.x + o.upper.dx, y: o.upper.y } : { x: o.x + o.ringDx, y: o.y }; // 要去救商人：箭头指上层风圈
       if (o.kind === 'mine') return { x: o.core.x, y: o.core.y };
       if (o.kind === 'npc') return { x: o.pod.x, y: o.pod.y };
+      if (o.kind === 'bridge') { const i = o.lit.indexOf(false); const R = o.rings[i < 0 ? 2 : i]; return { x: o.x + R.dx, y: o.y + R.dy }; }
+      if (o.kind === 'giant') return this.giantEye(o);
     }
     if (o.state === 'tow') return o.kind === 'mine' ? { x: o.wall.x, y: o.wall.y + o.wall.side * -40 } : { x: o.dock.x, y: o.dock.y };
     return null;
@@ -111,7 +123,7 @@ Object.assign(World.prototype, {
   updateMapObj(o, dt) {
     const p = this.player, M = MAP_OBJECTS[o.kind];
     o.t += dt; o.alpha = Math.min(1, o.alpha + dt * 2);
-    const holding = o.state === 'idle' || o.state === 'tow' || o.state === 'ritual' || o.state === 'blow' || o.state === 'boom';
+    const holding = o.state === 'idle' || o.state === 'tow' || o.state === 'ritual' || o.state === 'blow' || o.state === 'boom' || o.state === 'build' || o.state === 'wake' || o.state === 'gulp';
     if (o.phase === 'in') { o.x -= MAP_DRIFT * dt; if (o.x <= o.station) o.phase = 'wait'; }
     else if (o.phase === 'wait') { o.x -= (holding ? 6 : 20) * dt; if (o.state === 'idle') { o.wait -= dt; if (o.wait <= 0) o.phase = 'out'; } else if (!holding) o.phase = 'out'; }
     else { o.x -= MAP_DRIFT * 1.5 * dt; if (o.x < -320) { o.gone = true; if (o.state === 'idle') this.mapMissed(o); } }
@@ -159,6 +171,48 @@ Object.assign(World.prototype, {
           if (u >= 1 && !o.blown) this.mineBlow(o);
         }
         break;
+      case 'bridge':
+        if (o.state === 'idle') {
+          // 灯环按顺序点亮（队友谁穿过都算）；穿错顺序不罚，只是下一个还没亮
+          const i = o.lit.indexOf(false), R = o.rings[i], rx = o.x + R.dx, ry = o.y + R.dy;
+          for (const q of this.players) {
+            if (!q.alive || q.gone || q.away) continue;
+            if (dist2(q.x, q.y, rx, ry) < (o.ringR * 0.8 + reach) ** 2) {
+              o.lit[i] = true; if (o.engageT === null) o.engageT = this.runT;
+              Sound.sfx('ringPass', { k: i }); this.part('ring', rx, ry, 0, 0, 0.35, o.ringR * 1.6, 'rgba(255,215,106,0.9)');
+              for (let k = 0; k < 10; k++) this.part('spark', rx, ry, rand(-220, 220), rand(-220, 220), 0.5, rand(3, 6), pick(['#ffe38a', '#9fe3f0', '#fff6c8']));
+              if (i === 2) this.bridgeBuilt(o);
+              break;
+            }
+          }
+        } else if (o.state === 'build') {
+          o.build = Math.min(1, o.build + dt / 0.9);
+          if (o.build >= 1) { o.state = 'ritual'; this.queueRitual('bridge', { full: true, q: 1, x: o.x - 60, y: clamp(o.y - 170, this.arena.top + 120, this.arena.bottom - 120), device: 'machine', obj: o }); }
+        }
+        break;
+      case 'giant': {
+        const E = this.giantEye(o);
+        if (o.state === 'idle') {
+          // 有人停在眼睛旁边：眼睛慢慢睁开，0.6 秒后醒来；飞开了又慢慢闭上
+          const near = this.players.some((q) => q.alive && !q.gone && !q.away && dist2(q.x, q.y, E.x, E.y) < (78 + reach) ** 2);
+          o.wakeT = near ? o.wakeT + dt : Math.max(0, o.wakeT - dt * 0.5); o.eye = 0.1 + Math.min(1, o.wakeT / 0.6) * 0.9;
+          if (near && o.engageT === null) o.engageT = this.runT;
+          if (o.wakeT >= 0.6) this.giantWake(o);
+        } else if (o.state === 'wake') {
+          o.stT += dt; o.act = Math.min(1, o.stT / 0.9); o.y = smooth(o.y, this.arena.bottom - 150, 2.5, dt);
+          if (o.stT > 0.9) { o.state = 'gulp'; o.stT = 0; this.giantGulp(o); }
+        } else if (o.state === 'gulp') {
+          o.stT += dt; o.mouth = Math.min(1, o.stT / 0.3);
+          const M = this.giantMouth(o);
+          for (const e of this.enemies) if (e.alive && e.pull && e.pull.giant === o.id && dist2(e.x, e.y, M.x, M.y) < 60 * 60) { this.killEnemy(e, { x: M.x, y: M.y }); this.part('puff', M.x, M.y, rand(-60, 60), rand(-60, 60), 0.4, 10, 'rgba(200,230,255,0.8)'); }
+          if (o.stT > 1.3) {
+            for (const e of this.enemies) if (e.alive && e.pull && e.pull.giant === o.id) e.pull = null;
+            o.mouth = 0; o.state = 'ritual'; this.shake(0.4); Sound.sfx('boomNote');
+            this.queueRitual('giant', { full: true, q: 2, rare: true, x: o.x - 140, y: clamp(o.y - 260, this.arena.top + 120, this.arena.bottom - 120), device: 'machine', obj: o });
+          }
+        }
+        break;
+      }
       case 'npc': {
         const pod = o.pod; pod.inv = Math.max(0, pod.inv - dt);
         if (o.state === 'idle' && p.alive && dist2(p.x, p.y, pod.x, pod.y) < (60 + reach) ** 2) {
@@ -230,6 +284,35 @@ Object.assign(World.prototype, {
     this.remember('炸开了星砂岩壁', 1);
     this.mapDone(o, '炸开', MAP_OBJECTS.mine.name, '强化二选一', '岩壁炸出新航道和动力装置；之后敌人会从裂口钻出来');
   },
+  /* ---------- 断桥：三个灯环都亮了 → 桥一块块接上，桥上一段时间敌弹化掉（安全航道）→ 二选一 ---------- */
+  bridgeBuilt(o) {
+    o.state = 'build'; o.build = 0;
+    Sound.sfx('bridge'); this.clearBullets(true); this.laneT = Math.max(this.laneT, 7);
+    this.text('断桥接上了！桥上一段时间敌弹会化掉', clamp(o.x, 220, this.W - 220), o.y - 140, '#9fe3f0', 20, 5);
+    o.onRitual = () => { o.state = 'done'; o.phase = 'out'; };
+    this.remember('接上了断桥', 1);
+    this.mapDone(o, '修复', MAP_OBJECTS.bridge.name, '安全航道 + 二选一', '三个灯环连成桥，一段安全航道');
+  },
+  /* ---------- 沉睡巨鲸：叫醒 → 浮起来 → 一大口吞掉前面的普通敌人（Boss、精英、主目标不吞）→ 稀有二选一 ---------- */
+  giantEye(o) { const e = GIANT_EYE.whale; return { x: o.x + e[0] * o.s, y: o.y + e[1] * o.s }; },
+  giantMouth(o) { return { x: o.x - 200 * o.s, y: o.y + 20 * o.s }; },
+  giantWake(o) {
+    o.state = 'wake'; o.stT = 0; o.eye = 1;
+    Sound.sfx('giantWake'); this.rumble(0.6, 0.8, 300); this.shake(0.3);
+    this.text('巨鲸醒了！', o.x - 120, o.y - 200, '#6ff0ff', 24, 5);
+    o.onRitual = () => { o.state = 'done'; o.phase = 'out'; };
+    this.traces.door = { x: this.W * 0.86, y: this.arena.bottom - 120, side: 1, born: this.t }; // 巨鲸游开后，海面下的通道成了新的来敌口
+    this.m.giants++;
+    this.remember('叫醒了沉睡巨鲸', 1);
+    this.mapDone(o, '唤醒', MAP_OBJECTS.giant.name, '吞掉一片 + 稀有二选一', '巨鲸浮上来，把附近的敌人一口吞掉');
+  },
+  giantGulp(o) {
+    const M = this.giantMouth(o);
+    this.clearBullets(true); this.hitStop(0.06); this.flash = Math.max(this.flash, 0.25 * this.flashK()); this.flashColor = '200,235,255';
+    for (const e of this.enemies) if (e.alive && !e.isBoss && !e.elite && !e.goal && e.type !== 'cmdr' && e.type !== 'wreck' && e.x < this.W + 40) e.pull = { x: M.x, y: M.y, v: 620, giant: o.id };
+    for (let i = 0; i < 16; i++) this.part('puff', M.x + rand(0, 400), M.y + rand(-200, 200), -rand(300, 600), rand(-60, 60), 0.6, rand(10, 18), 'rgba(200,230,255,0.5)');
+  },
+
   /* ---------- 救援吊舱：护送 ---------- */
   podHit(o) {
     const pod = o.pod; pod.hp--; pod.inv = 1.1; Sound.sfx('podHit', { pan: this.pan(pod.x) });
@@ -401,6 +484,17 @@ Object.assign(World.prototype, {
           const ow = this.players[o.by] || p;
           if (!o.blown) { if (o.state === 'tow') { const p = ow; g.strokeStyle = 'rgba(201,168,255,0.7)'; g.lineWidth = 2; g.setLineDash([4, 6]); g.beginPath(); g.moveTo(p.x - 20, p.y); g.lineTo(o.core.x, o.core.y); g.stroke(); g.setLineDash([]); } drawMineCore(g, o.core.x, o.core.y, t, o.state !== 'idle'); }
           break;
+        case 'bridge': {
+          const pts = [{ x: o.x + o.rings[0].dx - 130, y: o.y + o.rings[0].dy + 40 }, ...o.rings.map((R) => ({ x: o.x + R.dx, y: o.y + R.dy })), { x: o.x + o.rings[2].dx + 140, y: o.y + o.rings[2].dy - 30 }];
+          const lit = o.lit.filter(Boolean).length;
+          drawBridgeDeck(g, pts, o.state === 'idle' ? lit * 0.22 : 0.66 + o.build * 0.34, t); // 亮一个灯环接上一截，全亮后整座桥接完
+          if (o.state === 'idle') o.rings.forEach((R, i) => drawLampRing(g, o.x + R.dx, o.y + R.dy, o.ringR, t, o.lit[i], i === lit ? o.near : 0));
+          break;
+        }
+        case 'giant':
+          drawGiant(g, o.x, o.y, o.s, { kind: 'whale', eye: o.eye, act: o.act, mouth: o.mouth }, t);
+          if (o.state === 'idle') { const E = this.giantEye(o); g.strokeStyle = `rgba(111,240,255,${0.4 + o.near * 0.5})`; g.lineWidth = 3; g.setLineDash([8, 8]); g.lineDashOffset = -t * 30; g.beginPath(); g.arc(E.x, E.y, 78, 0, TAU); g.stroke(); g.setLineDash([]); if (o.wakeT > 0) drawChargeRing(g, E.x, E.y, 50, Math.min(1, o.wakeT / 0.6), '#6ff0ff', t); }
+          break;
         case 'npc':
           if (o.state === 'tow' || o.state === 'bail') drawSafeLane(g, this.W * 0.1, o.dock.x + 40, o.lane.y, o.lane.h, t);
           if (o.state !== 'idle' && (o.state !== 'done' || o.phase !== 'out')) drawDock(g, o.dock.x, o.dock.y, t, o.state === 'done');
@@ -416,6 +510,8 @@ Object.assign(World.prototype, {
         const step = o.kind === 'house' ? (o.seek ? '铃铛飘过来了 · 碰一下就好' : '碰一下门前的铃铛')
           : o.kind === 'wind' ? (o.upper && this.wantsMerchant() ? '飞进上层风圈 · 去救糖果商人' : '从风环里穿过去')
           : o.kind === 'mine' ? (o.state === 'tow' ? '把矿核拖到发光的岩壁' : '碰一下发光的矿核')
+          : o.kind === 'bridge' ? `穿过第 ${o.lit.filter(Boolean).length + 1} 个灯环`
+          : o.kind === 'giant' ? '飞到眼睛旁边停一下'
           : o.state === 'tow' ? `沿光带送到修理点 · 耐久 ${o.pod.hp}/${o.pod.max}` : o.story ? `救${NPCS[o.sub].name} · 碰一下吊舱` : '碰一下吊舱';
         const lx = clamp(tgt.x, 150, this.W - 170), ly = clamp(tgt.y, this.arena.top + 110, this.arena.bottom); // 目标在屏幕外时，标签贴在屏幕边上
         drawMapTag(g, lx, ly - 92, M.icon, M.tag, M.color, o.alpha * (0.7 + 0.3 * Math.sin(t * 4)));

@@ -42,7 +42,7 @@ Object.assign(World.prototype, {
       else if (q.mode === 'arc') { // 后方追兵：沿看得见的弧线从飞机上方 / 下方绕到右前方
         const k = Ease.inOutSine(u); e.x = (1 - k) * (1 - k) * q.x0 + 2 * (1 - k) * k * q.cx + k * k * q.x1; e.y = (1 - k) * (1 - k) * q.y0 + 2 * (1 - k) * k * q.cy + k * k * q.y1; e.depth = 1;
       } else if (q.mode === 'drop') { const k = Ease.outCubic(u); e.x = lerp(q.x0, q.x1, k); e.y = lerp(q.y0, q.y1, k); e.depth = 1; }
-      if (u >= 1) { q.done = true; e.depth = 1; e.y0 = e.y; e.seenT = null; if (q.after) Object.assign(e, q.after); this.enemies.push(e); }
+      if (u >= 1) { q.done = true; e.depth = 1; e.y0 = e.y; e.seenT = null; e.shownT = this.t - q.dur; if (q.after) Object.assign(e, q.after); this.enemies.push(e); }
     }
     this.incoming = this.incoming.filter((q) => !q.done);
   },
