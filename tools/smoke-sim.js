@@ -17,13 +17,15 @@ function run(stage, plane, level, cap, pickIdx, godmode, world) {
   if (godmode) { w.player.hp = w.player.maxHp = 999; w.testNoWipe = true; } // 流程测试：不超载，首领要真的被打倒
   const STEP = 1 / 120; let t = 0, frames = 0, maxE = 0, maxB = 0, pickLog = [];
   const _apply = w.applyOption.bind(w); w.applyOption = (o) => { pickLog.push(o.kind === 'link' ? SYNERGIES[o.id].name : (SKILLS[o.id] || BURST_MODS[o.id] || { name: o.id }).name + (o.to || '')); _apply(o); };
-  while (!res && t < (chain ? 2400 : 900)) {
+  // 家园因果链（world）只验证关卡内容：伙伴出现并救下、上层航路、梦木和星尘入账——走到首领就够了
+  while (!res && t < (chain ? 2400 : 900) && !(world && w.boss)) {
     pilot(w); w.step(STEP); t += STEP; __now += STEP * 1000;
     const gk = w.goal ? w.goal.id + ':' + w.D.st : null; if (gk !== lastGoal) { lastGoal = gk; goalLog.push(gk + '@' + Math.round(w.runT)); }
     if (++frames % 6 === 0) { w.render(document.createElement('canvas').getContext('2d')); w.hud(); w.events.length = 0; }
     maxE = Math.max(maxE, w.enemies.length); maxB = Math.max(maxB, w.bullets.count());
   }
-  const m = res ? res.stats : w.m, f = (v) => (v === null || v === undefined ? '—' : typeof v === 'number' ? Math.round(v * 10) / 10 : v);
+  // 没打完（走到首领就停的流程局）：全队统计 + 自己的资源，和结算时的 stats 一样
+  const m = res ? res.stats : Object.assign({}, w.m, w.player.res), f = (v) => (v === null || v === undefined ? '—' : typeof v === 'number' ? Math.round(v * 10) / 10 : v);
   const ct = m.choiceTimes || [];
   if (world) return { stage, win: res && res.win, run: f(res ? res.runT : t), wood: m.wood, earned: m.earned, workT: f(m.workT), rescued: rescues.join(','), upper: m.upperRoute || 0, goals: goalLog.join(' ') };
   return { stage: chain ? 'chain→' + (res ? res.cleared.join(',') : w.stageId) : stage, plane, lv: level, pick: pickIdx, win: res && res.win, atBoss: !!((res && res.bossTime > 0) || w.boss), run: f(res ? res.runT : t), boss: f(res && res.bossTime), kill: f(m.firstKill), choice1: f(m.firstSkill), choices: ct.length, choiceAvg: f(ct.length ? ct.reduce((a, b) => a + b, 0) / ct.length : null), miss: m.offerMiss || 0,

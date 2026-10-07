@@ -197,6 +197,11 @@ const STAGES = {
     map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'], intro: '后方追兵和空间裂缝一起出现，最后是第一章 Boss：失控闹钟。' },
 };
 const STAGE_ORDER = ['1-1', '1-2', '1-3'];
+/* 连成一局时第 2、3 关的普通战斗加压（§3.9）：hp = 普通敌人（含厚甲、精英、地图伸手）的生命再乘，fill = 背景杂兵来得更密。
+   带过来的构筑比从零开始强得多，不加压的话一关比一关轻松（1-3 的普通战斗压力只有 1-1 的四分之一）。
+   按关固定，不随玩家临场强弱变；首领战另按 BUILD_CHECK.bossK */
+// 量法：普通敌人平均击破用时第 2、3 关回到第 1 关的水平（不加压时 1.03 → 0.52 → 0.33 秒），普通战斗强度一关比一关高
+const CHAIN_FOE = { '1-2': { hp: 8, fill: 1.3 }, '1-3': { hp: 20, fill: 1.6 } };
 
 /* ================================================== 家园（v0.10 第一阶段：救援 → 建设 → 改变下一局）==================================================
    资源三种：星尘（策划里叫“星砂”的账户货币；局内拾取的星砂按 50:1 折成星尘）、梦木（地图装置掉落）、货物（工坊用梦木加工）。
@@ -245,7 +250,7 @@ const BUILD_PATHS = [
    Boss / 队长打了 rage.at 秒还没倒就失控：攻击一路加快（rage.ramp 秒加满 rage.max），提前 rage.warn 秒预告。
    失控 wipe 秒后超载（先在血条上倒数，提前 5 秒喊）：全屏冲击、全队倒下——首领战有确定的期限，构筑强度按它算。
    只有成型的火力能在失控前打完；没成型的局要靠操作硬扛失控段 */
-const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 3.95, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: { '1-1': 1.3, '1-2': 8, '1-3': 15 }, regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35 } };
+const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 5.1, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: { '1-1': 1.3, '1-2': 8, '1-3': 15 }, regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35 } };
 /* 第一局（§3.6，上手 = 上钩）：第一个完整仪式保底史诗，第一个联动只要两件 1 级（头几分钟一次构筑小爆发），鱼群潮更勤；
    第一个首领（free 里的关）在基础难度下不自愈、不失控：几乎人人打得过 */
 const FIRST_RUN = { rareTier: 1, needLv: 1, swellK: 0.75, hearts: 2 }; // rareTier：第一局第一个完整仪式保底史诗（一档一档认识品质）；hearts：多两颗心
@@ -265,6 +270,9 @@ const LADDER = [
   { name: '失控', line: '首领更早失控、超载：只有最强的构筑打得过', fx: [['失控', 1]], rageK: 0.88 },
 ];
 const LADDER_MAX = LADDER.length - 1, LADDER_PAY = 0.15;
+// 梦魇先收起来（用户 2026-10-07：「先别做梦魇难度之类的，先把普通难度的做好」）：界面不出现、开局一律 0 级；
+// 规则和存档里的解锁进度留着，普通难度留得住人以后再打开
+const LADDER_ON = false;
 function ladderRules(n) { const L = LADDER.slice(1, Math.max(0, Math.min(LADDER_MAX, n | 0)) + 1); return Object.assign({}, ...L, { hpK: L.reduce((k, x) => k * (x.hpK || 1), 1) }); } // hpK 逐级相乘，其余规则叠加
 function buildLv(b, id) { if (!b) return 0; return (b.gun && b.gun[id]) || (b.support && b.support.id === id ? b.support.lv : 0); }
 function buildOwned(b, id) { if (!b) return false; if (id.includes('+')) return (b.links || []).includes(id); return !!((b.gun && b.gun[id] > 0) || (b.support && b.support.id === id)); }

@@ -72,7 +72,7 @@ class World {
     // 全队共用的统计；星砂 / 宝箱 / 碎片 / 升级次数这些“自己的资源”在每架飞机的 res 里
     this.m = { kills: 0, bursts: 0, maxStreak: 0, elites: 0, highlights: 0, firstKill: null, firstSkill: null, firstSyn: null, firstBurst: null,
       killTimeSum: 0, killTimeN: 0, gapMax: 0, gapT: 0, talent: 0, route: [], streak100: 0, hitsTaken: 0, leaks: 0, offerMiss: 0, stockIdle: 0, segsDone: 0, workT: 0, rescuedNow: [], upperRoute: 0, unfair: 0, dmgOut: 0, golds: 0 };
-    this.hintStep = this.first ? 0 : -1; this.hintShown = null;
+    this.hintStep = this.first || this.tutorial ? 0 : -1; this.hintShown = null;
     this.initMap(o);
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
     if (this.mode === 'preview') this.setupPreview();
@@ -228,7 +228,7 @@ class World {
     const sideSet = new Set((this.sideLog || []).filter((s) => this.t - s.t < 4).map((s) => s.side)); if (this.boss) sideSet.add('front'); // 最近 4 秒威胁从几个方向来（Boss 一直在前方）
     const sides = sideSet.size, tens = this.D && this.tension ? this.tension() : null;
     const phase = this.worldRitual() ? 'upgrade' : this.boss ? 'boss' : this.goal ? this.goal.B.kind : this.D ? this.D.st : 'none';
-    return { intensity: I, rewards, over: !!this.done || this.state === 'dying' || this.lastVictory(), won: this.lastVictory() || !!this.wonRun, phase, unfair: this.m.unfair, power: engaged && !this.worldRitual() ? d : 0, sides, tens };
+    return { intensity: I, rewards, over: !!this.done || this.state === 'dying' || this.lastVictory(), won: this.lastVictory() || !!this.wonRun, phase, stage: this.stageId, hits: this.m.hitsTaken, kills: this.m.kills, kts: this.m.killTimeSum, ktn: this.m.killTimeN, unfair: this.m.unfair, power: engaged && !this.worldRitual() ? d : 0, sides, tens };
   }
 
   /* ================================================== main step ================================================== */
@@ -522,9 +522,9 @@ class World {
   /* ================================================== enemies ================================================== */
   makeEnemy(type, o = {}) {
     const elite = type.endsWith('E'), base = elite ? type.slice(0, -1) : type;
-    // 关卡基础配置固定：生命只随关卡变（×1 / ×9/8 / ×10/8），不随玩家变强偷偷加血
+    // 关卡基础配置固定：生命只随关卡变（×1 / ×9/8 / ×10/8，连打时第 2、3 关再乘 CHAIN_FOE），不随玩家变强偷偷加血
     const big = elite || type === 'armor' || type === 'cmdr' || type === 'wreck' || type === 'mirror' || o.elite || o.goal;
-    const hpK = (this.stage ? this.stage.hpK : 1) * (big && this.np > 1 ? this.teamK(0.6) : 1); // 多人：硬目标按人数加厚
+    const hpK = this.foeHpK() * (big && this.np > 1 ? this.teamK(0.6) : 1); // 多人：硬目标按人数加厚
     const e = Object.assign({
       id: this.eid++, type, base, elite, x: this.W + 40, y: (TOP + BOTTOM) / 2, vx: -150, vy: 0, r: ENEMY_R[type] || 20, hp: (ENEMY_HP[type] || 10) * hpK,
       t: 0, seed: srand(10), path: 'line', amp: 0, freq: 0, phase: 0, fireT: srand(1.5, 3.5), charge: 0, alive: true, hitFlash: 0, frozen: 0, stun: 0,
@@ -953,7 +953,8 @@ class World {
     const p = this.player;
     if (this.state !== 'play' || this.ritual || !p.alive) return;
     if (this.bursting) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text(this.vs ? '别人的大招还在放' : '队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招
-    if (p.stock < 1) { if (p === this.me) Sound.sfx('denied', { gap: 250 }); return; }
+    // 没充满：说出来，大招按钮也闪一下（按了要有看得见的反应，lessons UT4）
+    if (p.stock < 1) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text('大招还没充满', p.x, p.y - 40, '#ffe38a', 15, 1.2); this.emit('burstEmpty'); } return; }
     p.stock--;
     this.startBurst();
   }
@@ -1267,6 +1268,9 @@ class World {
     this.highlight(); this.victoryT = 0;
     this.shake(1); this.flash = 0.8 * this.flashK(); this.flashColor = '255,243,200'; this.rumble(1, 1, 400);
   }
+  // 普通敌人的生命系数：关卡的 hpK；连成一局时第 2、3 关再乘 CHAIN_FOE（首领在场时不乘：首领战另按 bossK 定）
+  chainFoe() { return (this.chain && CHAIN_FOE[this.stageId]) || { hp: 1, fill: 1 }; }
+  foeHpK() { return (this.stage ? this.stage.hpK : 1) * (this.boss ? 1 : this.chainFoe().hp); }
   // 整局的胜利：连成一局时只有最后一关的首领倒下才算（中间几关的胜利马上换关）
   lastVictory() { return this.state === 'victory' && !(this.chain && this.nextStageId()); }
   nextStageId() { const i = STAGE_ORDER.indexOf(this.stageId); return i >= 0 ? STAGE_ORDER[i + 1] || null : null; }
@@ -1457,6 +1461,7 @@ class World {
     this.drawArcs(g);
     for (const k of this.pickups) if (k.kind === 'crystal' && this.seesPickup(k)) drawPickup(g, k, t);
     this.drawPlayers(g);
+    if (this.mapHintKind) this.drawMapHint(g);
     if (this.vs) this.drawVsMarks(g);
     if (this.mapObjs) this.drawMapFront(g);
     // 装饰性的爆炸在下面，危险轮廓（预警 / 入场提示 / 敌弹）永远压在上面

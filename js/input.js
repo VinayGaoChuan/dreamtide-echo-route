@@ -10,6 +10,9 @@ const Input = (() => {
   let binds = JSON.parse(JSON.stringify(DEFAULT_BINDS));
   const held = new Set(), presses = {}, nav = {};
   let device = 'kbm', onDevice = null, gameActive = false, rebind = null, keyboardNav = false;
+  // 最近用的输入：key / mouse / pad / touch（device 把键盘和鼠标算成一种；开局教移动要分开教）
+  let kind = 'mouse', onKind = null;
+  function setKind(k) { if (k !== kind) { kind = k; if (onKind) onKind(k); } }
   const drag = { id: null, lx: 0, ly: 0, dx: 0, dy: 0, lastTap: 0, tapX: 0, tapY: 0, downT: 0 };
   const pad = { prev: [], navT: 0, navDir: '', mx: 0, my: 0, focus: false };
   const out = { mx: 0, my: 0, focus: false, dragging: false };
@@ -29,7 +32,7 @@ const Input = (() => {
       if (e.code !== 'Escape') { const a = rebind.action; binds[a] = [e.code, ...binds[a].filter((c) => c !== e.code).slice(0, 1)]; }
       const cb = rebind.cb; rebind = null; if (cb) cb(binds); return;
     }
-    setDevice('kbm'); keyboardNav = true;
+    setDevice('kbm'); keyboardNav = true; setKind('key');
     const acts = actionsFor(e.code);
     if (gameActive && acts.length) e.preventDefault();
     if (!e.repeat) { held.add(e.code); for (const a of acts) press(a); }
@@ -42,7 +45,7 @@ const Input = (() => {
   window.addEventListener('blur', () => { held.clear(); drag.id = null; });
   window.addEventListener('pointerdown', (e) => {
     keyboardNav = false;
-    if (e.pointerType === 'touch' || e.pointerType === 'pen') setDevice('touch'); else if (e.pointerType === 'mouse') setDevice('kbm');
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') { setDevice('touch'); setKind('touch'); } else if (e.pointerType === 'mouse') { setDevice('kbm'); setKind('mouse'); }
   }, true);
 
   /* 拖动飞机：在画面任意空白处按下并拖动，飞机按相同距离移动（相对拖动，手指不会挡住飞机） */
@@ -78,7 +81,7 @@ const Input = (() => {
     if (b(14)) mx = -1; if (b(15)) mx = 1; if (b(12)) my = -1; if (b(13)) my = 1;
     pad.mx = mx; pad.my = my; pad.focus = b(6) || b(4);
     let any = Math.abs(mx) + Math.abs(my) > 0.3; for (let i = 0; i < gp.buttons.length; i++) if (b(i)) any = true;
-    if (any) { setDevice('pad'); keyboardNav = true; }
+    if (any) { setDevice('pad'); setKind('pad'); keyboardNav = true; }
     if (edge(0) || edge(1) || edge(2) || edge(3) || edge(5) || edge(7)) press('burst');
     if (edge(0)) navPress('ok');
     if (edge(1)) navPress('back');
@@ -135,6 +138,8 @@ const Input = (() => {
     set onPadLost(fn) { onPadLost = fn; },
     get device() { return device; }, get keyboardNav() { return keyboardNav; },
     set onDevice(fn) { onDevice = fn; },
+    get kind() { return kind; },
+    set onKind(fn) { onKind = fn; },
     set gameActive(v) { gameActive = v; if (!v) drag.id = null; }, get gameActive() { return gameActive; },
     get binds() { return binds; },
     setBinds(b) { binds = JSON.parse(JSON.stringify(b || DEFAULT_BINDS)); for (const k in DEFAULT_BINDS) if (!binds[k]) binds[k] = DEFAULT_BINDS[k].slice(); },

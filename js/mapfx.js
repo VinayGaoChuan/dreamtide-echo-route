@@ -94,6 +94,35 @@ Object.assign(World.prototype, {
     if (o.state === 'tow') return o.kind === 'mine' ? { x: o.wall.x, y: o.wall.y + o.wall.side * -40 } : { x: o.dock.x, y: o.dock.y };
     return null;
   },
+  /* 地图交互第一次出现时教一次（lessons UT15），一次只教一步：去哪 = 那个点上一圈呼吸的光 + 从飞机指过去的箭头；
+     碰到会怎样 = 底部提示的那句话（ui.js showHint）。要护送的（吊舱、矿核）碰到以后，光圈换到终点上写“送到这里”。只画，不影响玩法 */
+  drawMapHint(g) {
+    const o = this.mapObjs.find((q) => q.kind === this.mapHintKind && (q.state === 'idle' || q.state === 'tow') && q.x < this.W + 20); if (!o) return;
+    const towing = o.state === 'tow', word = towing ? '送到这里' : '碰这里';
+    const g0 = this.mapGoalPos(o) || o, at = { x: clamp(g0.x, 60, this.W - 60), y: clamp(g0.y, TOP + 60, BOTTOM - 80) }; // 终点在屏幕外时贴在边上
+    const p = this.me, t = this.t, k = 0.5 + 0.5 * Math.sin(t * 6), col = (MAP_OBJECTS[o.kind] && MAP_OBJECTS[o.kind].color) || '#ffe38a';
+    g.save(); g.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 2; i++) { const r = 34 + ((t * 40 + i * 22) % 44); g.strokeStyle = hexA(col, 0.75 * (1 - (r - 34) / 44)); g.lineWidth = 4; g.beginPath(); g.arc(at.x, at.y, r, 0, TAU); g.stroke(); }
+    g.globalCompositeOperation = 'source-over';
+    g.font = '700 16px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = 'rgba(20,14,50,.9)'; g.fillStyle = '#fff6c8';
+    // 字放在光圈下面：装置上方常有它自己的标签（吊舱的“救小梦兔”），别叠在一起
+    g.strokeText(word, at.x, at.y + 66 + k * 4); g.fillText(word, at.x, at.y + 66 + k * 4);
+    // 要护送的：还没碰之前就把终点淡淡圈出来（修理点 / 岩壁），一开始就知道要送去哪
+    const dest = !towing && (o.kind === 'npc' ? o.dock : o.kind === 'mine' ? { x: o.wall.x, y: o.wall.y + o.wall.side * -40 } : null);
+    if (dest) {
+      const dx2 = clamp(dest.x, 60, this.W - 60), dy2 = clamp(dest.y, TOP + 60, BOTTOM - 80);
+      g.globalAlpha = 0.55; g.setLineDash([8, 8]); g.strokeStyle = col; g.lineWidth = 3; g.beginPath(); g.arc(dx2, dy2, 40, 0, TAU); g.stroke(); g.setLineDash([]);
+      g.strokeStyle = 'rgba(20,14,50,.9)'; g.lineWidth = 4; const lab = o.kind === 'npc' ? '修理点' : '岩壁'; g.strokeText(lab, dx2, dy2 + 62); g.fillText(lab, dx2, dy2 + 62); g.globalAlpha = 1;
+    }
+    const dx = at.x - p.x, dy = at.y - p.y, d = Math.hypot(dx, dy);
+    if (p.alive && d > 140) {
+      const a = Math.atan2(dy, dx), r0 = 54 + k * 8;
+      g.translate(p.x + Math.cos(a) * r0, p.y + Math.sin(a) * r0); g.rotate(a);
+      g.fillStyle = col; g.strokeStyle = 'rgba(20,14,50,.9)'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(16, 0); g.lineTo(-8, -12); g.lineTo(-3, 0); g.lineTo(-8, 12); g.closePath(); g.stroke(); g.fill();
+    }
+    g.restore();
+  },
   guideTarget() {
     const P = this.props && this.props.find((q) => q.kind === 'core'); if (P) return { x: P.x, y: P.y };
     if (this.surprise && this.surprise.guide) return this.surprise.guide;
@@ -650,7 +679,7 @@ Object.assign(World.prototype, {
   /* 出一只（teach = 第一次，带教学提示）；同一时间最多一只 */
   spawnLurk(def, teach) {
     if (!this.lurks) this.lurks = [];
-    const W = this.W, top = this.arena.top, bot = this.arena.bottom, q = this.pickTarget(), hpK = this.stage ? this.stage.hpK : 1;
+    const W = this.W, top = this.arena.top, bot = this.arena.bottom, q = this.pickTarget(), hpK = this.foeHpK();
     const L = { id: this.eid++, kind: def.kind, look: def.look, side: def.side, t: 0, st: 'omen', teach: !!teach, hpK };
     if (def.kind === 'hand') {
       L.omen = LURK.handOmen; L.x = clamp(q.x + srand(140, 200), W * 0.3, W * 0.85); L.from = def.side === 'bottom' ? 1 : -1; // 在飞机前方升起：打得到，也看得清

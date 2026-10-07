@@ -181,8 +181,11 @@ Object.assign(World.prototype, {
     D.flankT -= dt; D.lurkT -= dt;
     if (this.focusBusy() || this.phase !== 'fight') return;
     const live = (this.lurks || []).length;
+    // 单人时正在教一个第一次见到的装置：地图先不出手（它的预警像在指路），一次只教一件事；
+    // 联机各端看过的装置不同，不按它改出怪，保证同步。出怪方向照常开（目标链要靠它推进）
+    const teaching = !this.mp && !!this.mapHintKind;
     // 教学：每个目标（从第二个起）在平静时开一个新方向 / 一种地图元素，一次只开一个
-    if (T === 'calm' && D.teachQ.length && this.beatIdx >= 1 && D.teachBeat !== this.beatIdx && D.t > 2 && !live) {
+    if (T === 'calm' && D.teachQ.length && this.beatIdx >= 1 && D.teachBeat !== this.beatIdx && D.t > 2 && !live && !(teaching && D.teachQ[0].lurk)) {
       const q = D.teachQ.shift(); D.teachBeat = this.beatIdx;
       if (!D.open.includes(q.dir)) D.open.push(q.dir);
       if (q.lurk) { this.spawnLurk(q.lurk, true); D.taught.push(q.lurk); D.lurkT = 10; }
@@ -194,7 +197,7 @@ Object.assign(World.prototype, {
     if (T !== 'build') D.buildSide = null;
     if (T === 'peak') {
       if (flanks.length && D.flankT <= 0 && active < 30) { D.flankT = 2.6; this.flankGroup(spick(flanks), 4); } // 高潮：多个方向轮流来
-      if (D.taught.length && !live && D.lurkT <= 0) { D.lurkT = 14; this.spawnLurk(spick(D.taught), false); } // 高潮：地图出手
+      if (D.taught.length && !live && D.lurkT <= 0 && !teaching) { D.lurkT = 14; this.spawnLurk(spick(D.taught), false); } // 高潮：地图出手
     }
   },
   /* 首次大招教学：只在“预告下一个目标”的空档里开（不和验证编队、装置操作抢）；清掉敌弹、停刷怪、摆一排好打的靶子，
@@ -225,6 +228,7 @@ Object.assign(World.prototype, {
     else if (D.st === 'goal' && this.goal && this.goal.kind !== 'crowd') rate *= this.goal.kind === 'surprise' ? 0.3 : 0.5;
     else if (D.st === 'reward') rate *= 0.6;
     rate *= 1 + 0.06 * Math.max(0, this.beatIdx); // 越往后的目标，背景杂兵越密
+    rate *= this.chainFoe().fill; // 连打的第 2、3 关更密（CHAIN_FOE）
     // 推压与喘息（v0.12）：主目标进行中隔一阵来一波“鱼群潮”——一大群一发就散的杂兵，右边先起一道波光预告。
     // 数量跟着这一局拿到的能力变多（越强越能割草，不加血）；杂兵不开火，只会撞人
     let alive = 0, active = 0, onScreen = false;

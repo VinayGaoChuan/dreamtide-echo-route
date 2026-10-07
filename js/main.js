@@ -12,6 +12,7 @@
   Input.bindDrag(app);
   Input.onPadLost = () => pauseGame(); // 手柄断开：暂停（仪式也一起冻结，恢复后接着走，不跳过、不重抽）
   Input.onDevice = (d) => { if (G.hudRefs) { G.hudLast.bk = null; if (G.world) showHint(); } };
+  Input.onKind = () => { if (G.hudRefs && G.world) showHint(); }; // 换了键盘 / 鼠标 / 手柄：开局的移动教学跟着换
   const wake = () => { Sound.init(); window.removeEventListener('pointerdown', wake, true); window.removeEventListener('keydown', wake, true); };
   window.addEventListener('pointerdown', wake, true); window.addEventListener('keydown', wake, true);
 

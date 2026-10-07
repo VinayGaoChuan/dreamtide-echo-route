@@ -4,42 +4,12 @@
 //   输出：<目录>/raw/*.png（每个时刻一张）、<目录>/images/01-capsule.png（920×430）、02~06 截图、09-trailer-frames.png（3×3）
 //   时刻表在下面 PLAN 里：每一步 = 一个条件（对 World w 求值）+ 最长等待秒数；满足后截一张。
 //   Chrome：macOS 默认 /Applications/Google Chrome.app，Windows 默认 Program Files 下的 chrome.exe，或 --chrome / CHROME 环境变量。
-const fs = require('fs'), path = require('path'), http = require('http'), os = require('os'), { spawn } = require('child_process');
+const fs = require('fs'), path = require('path');
 const { PILOT_SRC } = require('./sim-env');
-const ROOT = path.join(__dirname, '..');
+const { ROOT, sleep, openGame } = require('./chrome-env'); // 找 Chrome、起本地服务、CDP（和 ui-check.js 共用）
 const args = process.argv.slice(2), opt = (k) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : null; };
 const OUT = path.resolve(args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--') && args[i - 1] !== '--keep')) || path.join(ROOT, '.ai', 'shots'));
 const W = 1920, H = 1080;
-
-function chromePath() {
-  const c = opt('chrome') || process.env.CHROME;
-  if (c) return c;
-  const list = process.platform === 'win32'
-    ? [path.join(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe')]
-    : process.platform === 'darwin' ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
-  const f = list.find((p) => fs.existsSync(p)); if (!f) throw new Error('找不到 Chrome：用 --chrome 指定'); return f;
-}
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
-function serve() {
-  return new Promise((ok) => {
-    const s = http.createServer((req, res) => {
-      const u = decodeURIComponent(new URL(req.url, 'http://x').pathname), f = path.join(ROOT, u === '/' ? 'index.html' : u);
-      if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); res.end(); return; }
-      res.writeHead(200, { 'content-type': TYPES[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res);
-    });
-    s.listen(0, '127.0.0.1', () => ok(s));
-  });
-}
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/* 一个 CDP 连接：send(method, params) → result */
-function cdp(wsUrl) {
-  return new Promise((ok, bad) => {
-    const ws = new WebSocket(wsUrl); let id = 0; const wait = new Map();
-    ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && wait.has(d.id)) { const [a, b] = wait.get(d.id); wait.delete(d.id); d.error ? b(new Error(d.error.message)) : a(d.result); } };
-    ws.onerror = (e) => bad(e); ws.onopen = () => ok({ send: (method, params = {}) => new Promise((a, b) => { const i = ++id; wait.set(i, [a, b]); ws.send(JSON.stringify({ id: i, method, params })); }), close: () => ws.close() });
-  });
-}
 
 /* 页面里的助手：自动驾驶接管本机飞机（截图时不受伤），按条件快进，截图时可以按住不动 */
 const HELPER = PILOT_SRC + `
@@ -88,12 +58,12 @@ const PLAN = [
   // 1-2 纸船灯河：断桥灯环、厚甲编队、大招、队长
   { name: 'bridge', start: '1-2', until: "w.mapObjs.some((o) => o.kind === 'bridge' && (o.lit.filter(Boolean).length >= 2 || o.state === 'build'))", max: 120 },
   { name: 'pack', until: "w.goal && w.goal.kind === 'pack' && w.enemies.filter((e) => e.alive && e.type === 'armor' && e.x < w.W).length >= 3", max: 120 },
+  { name: 'swell', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.swell()", until: "w.enemies.filter((e) => e.alive && e.swell && e.x < w.W * 0.95).length >= 6 || (!w.warns.some((x) => x.kind === 'swell') && !w.enemies.some((e) => e.alive && e.swell) && !w.focusBusy() && w.D.st === 'goal' && !w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp') && (w.swell(), false))", max: 30, clean: true, wait: 60 }, // 鱼群潮：满屏割草（这张清掉临时横幅，只看玩法）；被巨鲸吞掉或换目标清掉了就再叫一次
   { name: 'burst', setup: 'G.world.pilotNoBurst = false; G.world.me.stock = Math.max(1, G.world.me.stock); G.world.setInput(0, { burst: true })', until: 'w.bursting && w.bursting.t > 0.5', max: 6 },
   { name: 'captain', setup: 'G.world.pilotNoBurst = true', until: 'w.boss && w.bossIntroT <= 0 && w.boss.t > 5 && w.bullets.count() > 12', max: 240 },
   // 1-3 失眠钟塔：巨鲸、Boss、通关
-  { name: 'giant', start: '1-3', until: "w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp' && o.stT > 0.35)", max: 160 },
-  { name: 'swell', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.swell()", until: "w.enemies.filter((e) => e.alive && e.swell && e.x < w.W * 0.95).length >= 6 || (!w.warns.some((x) => x.kind === 'swell') && !w.enemies.some((e) => e.alive && e.swell) && !w.focusBusy() && w.D.st === 'goal' && !w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp') && (w.swell(), false))", max: 30, clean: true, wait: 60 }, // 鱼群潮：满屏割草（这张清掉临时横幅，只看玩法）；被巨鲸吞掉或换目标清掉了就再叫一次
-  { name: 'boss-late', until: 'w.boss && w.boss.phase >= 2 && w.bullets.count() > 20', max: 240 },
+  { name: 'giant', start: '1-3', build: true, until: "w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp' && o.stT > 0.35)", max: 160 },
+  { name: 'boss-late', setup: 'G.world.testNoWipe = true', until: 'w.boss && w.boss.phase >= 2 && w.bullets.count() > 20', max: 240 }, // 摆拍不拍超载
   { name: 'victory', until: "w.state === 'victory'", max: 200 },
   { name: 'result', wait: 3500 },
   { name: 'hub-ladder', screen: 'eval', js: "clearScreens(); const P = G.meta.progress; P.ladder = 3; P.ladderSel = 2; P.selected = '1-3'; showHub()", wait: 1200 }, // 家园出击区：梦魇级选择
@@ -118,21 +88,8 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
 
 (async () => {
   fs.mkdirSync(path.join(OUT, 'raw'), { recursive: true }); fs.mkdirSync(path.join(OUT, 'images'), { recursive: true });
-  const server = await serve(), port = server.address().port, dbg = 9300 + Math.floor(Math.random() * 400);
-  const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'dreamtide-shoot-'));
-  const chrome = spawn(chromePath(), ['--headless=new', `--remote-debugging-port=${dbg}`, `--user-data-dir=${prof}`, `--window-size=${W},${H}`, '--force-device-scale-factor=1', '--hide-scrollbars', '--mute-audio', '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
-  let page = null;
+  const G0 = await openGame({ W, H, chrome: opt('chrome') }), page = G0.page, ev = G0.ev;
   try {
-    let list = null;
-    for (let i = 0; i < 60 && !list; i++) { await sleep(250); try { list = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); } catch (e) { list = null; } }
-    const tgt = list.find((t) => t.type === 'page');
-    page = await cdp(tgt.webSocketDebuggerUrl);
-    await page.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
-    await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
-    await page.send('Page.enable'); await page.send('Runtime.enable');
-    await page.send('Page.navigate', { url: `http://127.0.0.1:${port}/index.html` });
-    const ev = async (expr) => { const r = await page.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception ? r.exceptionDetails.exception.description : r.exceptionDetails.text); return r.result.value; };
-    for (let i = 0; i < 80; i++) { await sleep(250); try { if (await ev("typeof G !== 'undefined' && !!G.meta && document.readyState === 'complete'")) break; } catch (e) { /* 还在加载 */ } }
     await ev(HELPER + ';true');
     const shot = async (name) => { const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(OUT, 'raw', name + '.png'), Buffer.from(r.data, 'base64')); };
     const log = [];
@@ -142,7 +99,12 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
       if (s.screen === 'eval') { await ev(s.js + '; true'); await sleep(s.wait || 900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; } // 任意界面：先执行 js 再截
       if (s.screen === 'keyart') { await ev("clearScreens(); G.bg = 'keyart'; true"); await sleep(900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
       if (s.start) {
-        await ev(`(() => { const m = G.meta; m.seenTitle = true; m.firstRunDone = true; m.tutorialDone = true; m.shared.level = 16; m.progress.cleared['1-1'] = true; m.progress.cleared['1-2'] = true; startRun('${s.start}'); return true; })()`);
+        await ev(`(() => { const m = G.meta; m.seenTitle = true; m.firstRunDone = true; m.tutorialDone = true; m.shared.level = 16; m.progress.cleared['1-1'] = true; m.progress.cleared['1-2'] = true; startRun('${s.start}');
+          // 游戏里一局总从 1-1 连打；截图要拍后面的关：直接换到那一关，当成单关局拍（不加连打的普通战斗加压）
+          const w = G.world; while (w.stageId !== '${s.start}' && w.nextStageId()) w.advanceStage(); if (w.stageId !== '1-1') { w.chain = false; w.events.length = 0; G.sea.setTheme(STAGES[w.stageId].theme); }
+          // 摆拍：连打到最后一关时手上本来就有一套成型的构筑——追踪、雷球升满（自动接上追踪雷链），再加爆破、多重
+          if (${!!s.build}) { const add = (kind, id, to) => w.applyOption({ kind, id, from: to - 1, to }); for (const [k, id, to] of [['gun', 'homing', 1], ['support', 'thunder', 1], ['gun', 'homing', 2], ['support', 'thunder', 2], ['gun', 'homing', 3], ['support', 'thunder', 3], ['gun', 'bomb', 1], ['gun', 'bomb', 2], ['gun', 'multi', 1]]) add(k, id, to); w.events.length = 0; }
+          return true; })()`);
         await sleep(400); await ev('__S.attach(); G.world.pilotNoBurst = true; true'); // 像玩家一样攒着大招，只在“大招”那一刻放
       }
       if (s.setup) await ev(s.setup);
@@ -189,8 +151,6 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
     const errs = await ev('(window.__errs || []).length');
     console.log('截图完成', OUT, '页面错误', errs);
   } finally {
-    if (page) page.close();
-    chrome.kill(); server.close();
-    try { fs.rmSync(prof, { recursive: true, force: true }); } catch (e) { /* Chrome 还没完全退出 */ }
+    G0.close();
   }
 })().catch((e) => { console.error('截图失败', e && e.stack || e); process.exitCode = 1; });
