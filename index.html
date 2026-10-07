@@ -96,7 +96,7 @@ svg.ic{width:1.1em;height:1.1em;fill:currentColor;flex:none;vertical-align:-.16e
 /* ---------- title ---------- */
 #scr-title{cursor:pointer;justify-content:center;align-items:flex-end;text-align:center;padding-inline:max(16px,calc(90px*var(--u)))}
 .title-block{display:flex;flex-direction:column;align-items:center;gap:calc(10px*var(--u));max-width:min(92%,calc(640px*var(--u)))}
-.title-main{font-family:var(--f-display);font-size:max(56px,calc(150px*var(--u)));line-height:.95;color:var(--paper);margin:0;text-shadow:0 0 calc(30px*var(--u)) rgba(255,201,74,.55),0 calc(6px*var(--u)) 0 #3a2c72}
+.title-main{font-family:var(--f-display);font-weight:400;font-size:max(56px,calc(150px*var(--u)));line-height:.95;color:var(--paper);margin:0;text-shadow:0 0 calc(30px*var(--u)) rgba(255,201,74,.55),0 calc(6px*var(--u)) 0 #3a2c72}
 .title-main em{font-style:normal;color:var(--lamp2)}
 .title-sub{font-family:var(--f-display);font-size:max(20px,calc(44px*var(--u)));color:#d9ccff;letter-spacing:.3em;margin:0 0 0 .3em;text-shadow:0 0 16px rgba(181,140,255,.6)}
 .title-tag{font-size:var(--fs-m);color:var(--paper);background:rgba(30,24,80,.55);border:1px solid var(--edge);padding:.45em 1.1em;border-radius:999px;margin-top:calc(12px*var(--u))}
@@ -318,6 +318,15 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .pause-btn{width:max(40px,calc(48px*var(--u)));height:max(40px,calc(48px*var(--u)));border-radius:14px;background:rgba(20,16,54,.72);border:1.5px solid var(--edge);display:grid;place-items:center}
 .pause-btn svg{width:50%;height:50%;fill:var(--text)}
 .mp-giftpick{width:100%;margin-top:8px}.mp-giftpick .cl-items{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.mp-giftpick .cl-it{font-size:var(--fs-xs);padding:4px 10px;border-radius:8px;background:rgba(255,255,255,.07);font-weight:600;border:0;cursor:pointer}.mp-giftpick .cl-it:hover,.mp-giftpick .cl-it:focus-visible{background:rgba(255,255,255,.16)}
+#scr-ending{padding:0}.relay-c{position:absolute;inset:0;width:100%;height:100%}
+.relay-txt{position:absolute;left:50%;top:80%;transform:translate(-50%,-50%);font-family:var(--f-display);font-size:var(--fs-l);color:#e8dcff;text-shadow:0 0 18px rgba(185,138,255,.6);white-space:nowrap;padding:6px 18px;border-radius:12px;background:rgba(5,3,12,.55)}
+.relay-txt:empty{display:none}
+.relay-txt.end{font-size:var(--fs-xl);color:#ffd27a}.relay-skip{position:absolute;right:24px;bottom:18px}
+.tut-layer{position:fixed;inset:0;z-index:60;pointer-events:none}
+.tut-block{position:fixed;pointer-events:auto;background:transparent}
+.tut-hole{position:fixed;border-radius:14px;box-shadow:0 0 0 200vmax rgba(6,4,18,.68),0 0 0 3px #ffd27a,0 0 22px 6px rgba(255,210,122,.55);pointer-events:none;animation:tutPulse 1.2s ease-in-out infinite}
+.tut-say{position:fixed;transform:translateX(-50%);padding:10px 16px;border-radius:12px;background:#ffd27a;color:#2a1e30;font-family:var(--f-display);font-size:var(--fs-m);white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.4);pointer-events:none}
+@keyframes tutPulse{0%,100%{box-shadow:0 0 0 200vmax rgba(6,4,18,.68),0 0 0 3px #ffd27a,0 0 18px 4px rgba(255,210,122,.45)}50%{box-shadow:0 0 0 200vmax rgba(6,4,18,.68),0 0 0 4px #fff3c8,0 0 30px 10px rgba(255,210,122,.75)}}
 .cargo-list .cl-items{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .cargo-list .cl-it{font-size:var(--fs-xs);padding:2px 9px;border-radius:8px;background:rgba(255,255,255,.07);font-weight:600}
 .cargo-list .cl-it.safe::before{content:'✓ ';color:#9ff2c8}
@@ -595,7 +604,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .eq-slot.on canvas{filter:drop-shadow(0 0 6px rgba(255,210,122,.8))}
 .eq-slot.s-gun{left:88%;top:44%}.eq-slot.s-aux{left:62%;top:84%}.eq-slot.s-core{left:50%;top:16%}.eq-slot.s-armor{left:38%;top:84%}
 .eq-slot.s-engine{left:11%;top:46%}.eq-slot.s-radar{left:74%;top:16%}.eq-slot.s-chip1{left:24%;top:16%}.eq-slot.s-chip2{left:86%;top:84%}
-.eq-stats{grid-area:stats;display:flex;flex-direction:column;gap:2px;font-size:var(--fs-s)}
+.eq-stats{grid-area:stats;display:grid;grid-template-columns:1fr 1fr;column-gap:10px;row-gap:2px;font-size:var(--fs-xs)} /* 两列：一屏放得下全部属性（评审：最后一行被面板底边切掉） */
 .eq-stats .sr{display:flex;justify-content:space-between;gap:10px;padding:2px 6px;border-bottom:1px solid rgba(255,255,255,.05)}
 .eq-stats .sr span{color:var(--dim)}
 .eq-stash{grid-area:stash;display:flex;flex-direction:column;gap:8px;min-width:0}

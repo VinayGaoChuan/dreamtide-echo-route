@@ -229,6 +229,39 @@ function giftPickHtml(x) {
   const m = G.meta, L = m.gear.stash.filter((it) => Station.giftable(it)).sort((a, b) => QUALS[b.q].rank - QUALS[a.q].rank || b.ilvl - a.ilvl).slice(0, 24);
   return `<div class="panel mp-giftpick"><div class="label">送给 ${esc(x.name)} 一件 <small class="dim-text">蓝、黄、绿可以送；暗金和改造台改过的不行</small></div><div class="cl-items">${L.map((it) => `<button class="cl-it" type="button" data-giftitem="${esc(it.uid)}" style="color:${QUALS[it.q].color}">${esc(Gear.name(it))} <small class="dim-text">Lv${it.req}</small></button>`).join('')}</div></div>`;
 }
+/* 结局（§9.5）：中继天线接上，“回声”第一次听到地球的杂音——“……还有人吗？”，然后是“未完”。点一下或按键继续（3 秒以后） */
+function showRelayEnding(next) {
+  const el = showScreen('ending', `<canvas class="relay-c" id="relay-c"></canvas><div class="relay-txt" id="relay-txt"></div><div class="relay-skip dim-text" id="relay-skip" hidden>点一下继续</div>`, { bg: 'station', cls: 'relay', label: '结局' });
+  const c = $('#relay-c', el), g = c.getContext('2d'), txt = $('#relay-txt', el), t0 = performance.now(); let done = false;
+  const lines = [[0.6, '中继天线接上了。'], [3.2, '（杂音）'], [5.4, '……还有人吗？'], [9.2, '未完']];
+  Sound.setMode('hub'); Sound.sfx('cargoShip');
+  const fin = () => { if (done || performance.now() - t0 < 3000) return; done = true; window.removeEventListener('keydown', fin); next(); };
+  el.addEventListener('click', fin); window.addEventListener('keydown', fin);
+  const draw = () => {
+    if (done || !document.body.contains(c)) return;
+    const W = (c.width = c.clientWidth || innerWidth), H = (c.height = c.clientHeight || innerHeight), t = (performance.now() - t0) / 1000;
+    // 背后是站（主画布在画，中继天线已经装上）：这里只压暗四周、画信号和地球
+    const vg = g.createRadialGradient(W * 0.6, H * 0.45, H * 0.2, W * 0.5, H * 0.5, H * 0.95); vg.addColorStop(0, 'rgba(5,3,12,0.15)'); vg.addColorStop(1, `rgba(5,3,12,${0.55 + 0.25 * Math.min(1, t / 3)})`);
+    g.fillStyle = vg; g.fillRect(0, 0, W, H);
+    const rx = W * 0.78, ry = H * 0.42, ex = W * 0.9, ey = H * 0.12, k = clamp((t - 1.2) / 2, 0, 1); // 天线 → 地球
+    g.globalCompositeOperation = 'lighter';
+    if (k > 0) { // 一道往上走的信号，一段一段亮
+      for (let i = 0; i < 18; i++) { const u = (i / 18 + t * 0.35) % 1; if (u > k) continue; const x = lerp(rx, ex, u), y = lerp(ry, ey, u); drawGlow(g, x, y, 10 + 6 * Math.sin(t * 6 + i), 'rgba(214,184,255,0.9)', 0.7); }
+    }
+    const ek = clamp((t - 3.2) / 1.5, 0, 1); // 地球：很远的一颗蓝点，听见杂音以后亮起来
+    if (ek > 0) { drawGlow(g, ex, ey, 40 + 18 * ek + 8 * Math.sin(t * 2.4), 'rgba(110,180,255,0.9)', 0.6 * ek); g.globalCompositeOperation = 'source-over'; g.fillStyle = `rgba(150,205,255,${ek})`; g.beginPath(); g.arc(ex, ey, 5 + ek * 2, 0, TAU); g.fill(); g.globalCompositeOperation = 'lighter'; }
+    drawGlow(g, rx, ry, 50 + 10 * Math.sin(t * 3), 'rgba(214,184,255,0.8)', 0.5 * clamp(t / 1.2, 0, 1));
+    g.globalCompositeOperation = 'source-over';
+    const amp = t < 3.2 ? 2 : t < 5.4 ? 18 * (0.5 + 0.5 * Math.sin(t * 9)) : 8 + 6 * Math.sin(t * 2); // 先是平线，再是杂音，然后像人的声音
+    g.strokeStyle = 'rgba(159,242,200,0.85)'; g.lineWidth = 2; g.beginPath();
+    for (let x = 0; x <= W; x += 6) { const n = Math.sin(x * 0.05 + t * 8) * amp + (t > 3.2 && t < 5.4 ? (((x * 7919 + Math.floor(t * 30) * 104729) % 97) / 97 - 0.5) * amp * 1.6 : 0); g.lineTo(x, H * 0.9 + n); }
+    g.stroke();
+    const shown = lines.filter(([at]) => t >= at).map(([, s]) => s); txt.textContent = shown[shown.length - 1] || ''; txt.classList.toggle('end', t >= 9.2);
+    const sk = $('#relay-skip', el); if (sk) sk.hidden = t < 3;
+    requestAnimationFrame(draw);
+  };
+  requestAnimationFrame(draw);
+}
 function inviteLink(code) { return `${location.origin}${location.pathname}?join=${code}`; }
 function showMultiplayer(back, joinCode, resumeData) {
   const m = G.meta; if (!m.nick) m.nick = '玩家' + Math.floor(100 + Math.random() * 900);
@@ -423,9 +456,10 @@ function onRunEnd(res) {
   m.nextHint = lure;
   persist();
   G.lastRes = { res, out, lure };
-  G.stationArrive = { credits: out.credits, kept: out.kept.length, unlocks: out.unlocks };
+  G.stationArrive = { credits: out.credits, kept: out.kept.length, unlocks: out.unlocks, items: out.kept.map((it) => ({ q: it.q, name: Gear.name(it) })) }; // 回家开货舱（§14）
   if (first && out.kept.length) m.station.tut.equip = 1; // 第一次带着装备回家：站里强制引导换装（§8.4）
-  showEnd(G.lastRes);
+  const relay = G.relayPending && out.mapClear === 5; G.relayPending = false;
+  if (relay) showRelayEnding(() => showEnd(G.lastRes)); else showEnd(G.lastRes); // 第一次打倒混沌祭司：先放结局（§9.5）
 }
 /* 对抗分数拆解：各项合计正好等于总分（vs.js 的分数账本） */
 const VS_PART_NAMES = [['kill', '击破'], ['tower', '风塔'], ['sent', '送干扰'], ['held', '防守'], ['ko', '压制'], ['loss', '被击毁']];
@@ -953,7 +987,7 @@ function updateGoalCard(G, R, L) {
   if (L.gOn !== true) { L.gOn = true; }
   if (L.gport !== G.portrait) { L.gport = G.portrait; paintPortrait(R.gport, G.portrait); }
   setText(R.gt, 'gt', G.title);
-  setText(R.gs, 'gs', `${Math.min(G.step, G.steps)}/${G.steps}`);
+  setText(R.gs, 'gs', `目标 ${Math.min(G.step, G.steps)}/${G.steps}`); // 这一关的第几个目标（评审：只写 1/7 看不懂）
   const cls = 'goal-main' + (G.adv ? ' adv' : G.next ? ' next' : G.reward ? ' reward' : '');
   if (L.gcls !== cls) { L.gcls = cls; R.gm.className = cls; }
   const P = G.prog; let pk = '', html = '';
@@ -991,7 +1025,8 @@ function drainWorldEvents() {
       case 'elite': toast(e.elite === 'cmdr' ? '带队精英出现 · 等它举旗再打旗头水晶' : '精英出现 · 击败它能充不少大招', '#ff9d8c', 'n-crown'); Sound.setBoost('tension', 0.3); setTimeout(() => Sound.setBoost('tension', 0), 12000); break;
       case 'boss': Sound.sfx('alarm'); break; // 入场蓄势：警报，名牌等它落地再出
       case 'raceFoe': banner(e.name, e.hint, 2.4, hexA(e.color, 0.8), 3); break; // 七族招牌敌人第一次出现：一句怎么对付（§9.3）
-      case 'thief': banner('收账小偷！追上它', '钱袋里有装备 · 让它跑了就没了', 2.4, 'rgba(167,123,255,.85)', 4); break; // §9.3
+      case 'relay': G.relayPending = true; break; // 混沌祭司倒下：这一局结算前放结局
+      case 'thief': toast('收账小偷！追上打倒它 · 钱袋里有装备', '#d9b8ff', null, 2600); break; // §9.3：一关一次的事，不占屏幕中间
       case 'thiefGone': toast('它带着钱袋跑了……', '#d9b8ff', null, 1800); break;
       // 地图第一次出手：讲一句怎么看先兆、怎么反制；正在教地图交互时先排队，教完再讲（一次只教一件事）
       case 'lurkTeach': if (G.mapHint) G.lurkQ = e; else { banner(e.name, e.hint, 2.6, hexA(e.color, 0.75), 3); G.lurkOn = { e, until: w.t + 2.6 }; } break;

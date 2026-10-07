@@ -76,7 +76,7 @@ Object.assign(World.prototype, {
       else if (n < 3) drops.push({ q: 'yellow' });
       else drops.push({ q: 'green', mapOnly: true });
     }
-    if (n === 3 && C.uniPity) { drops.push({ q: 'gold' }); C.uniPity = false; }
+    if (n >= 2 && C.uniPity) { drops.push({ q: 'gold' }); C.uniPity = false; } // 暗金保底：第 2、3 关的首领都兑现（连续玩量过：只在第 3 关兑现时第一件金要到第 8 局）
     if (C.noRare >= PITY.rareRuns && !drops.some((d) => QUALS[d.q].rank >= 2)) { drops.push({ minQ: 'yellow' }); C.noRare = 0; }
     while (drops.length < (n === 3 ? 3 : 2)) drops.push(n === 3 && drops.length === 0 ? { minQ: 'yellow' } : {}); // 大首领倒下是一堆（§6.7）
     if (n === 3 && !drops.some((d) => d.minQ || (d.q && QUALS[d.q].rank >= 2))) drops[drops.length - 1] = { minQ: 'yellow' };
@@ -96,7 +96,7 @@ Object.assign(World.prototype, {
       k.t += dt;
       if (!p.alive && this.state !== 'victory') { k.vx = smooth(k.vx, -40, 2, dt); k.vy = smooth(k.vy, 0, 2, dt); }
       else {
-        const d = Math.hypot(k.x - p.x, k.y - p.y), pull = k.t > 0.7 && (d < R || k.t > 6 || this.state === 'victory');
+        const d = Math.hypot(k.x - p.x, k.y - p.y), vic = this.state === 'victory', pull = vic ? this.stateT <= VICTORY.t - VICTORY.pull && k.t > 0.9 : k.t > 0.7 && (d < R || k.t > 6); // 首领倒下：先停着让人看清，再一起吸进来
         if (pull) { const a = angTo(k.x, k.y, p.x, p.y), sp = 520 + k.t * 160; k.vx = smooth(k.vx, Math.cos(a) * sp, 10, dt); k.vy = smooth(k.vy, Math.sin(a) * sp, 10, dt); }
         else { k.vx = smooth(k.vx, -30, 2.2, dt); k.vy = smooth(k.vy, Math.sin(k.t * 2) * 14, 2.2, dt); }
         if (d < 30 && k.t > 0.5) { this.lootCollect(k); continue; }

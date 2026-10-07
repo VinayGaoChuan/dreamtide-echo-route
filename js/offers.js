@@ -463,7 +463,7 @@ Object.assign(World.prototype, {
     g.strokeStyle = I.color; g.lineWidth = 3; g.setLineDash([8, 7]); g.lineDashOffset = -t * 30; g.beginPath(); g.arc(0, 0, GATE_R - 4, 0, TAU); g.stroke(); g.setLineDash([]);
     drawIcon(g, I.icon, 0, 0, 40, I.color);
     if (G.dwell > 0) { g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.arc(0, 0, GATE_R - 4, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(G.dwell / GATE_DWELL, 0, 1)); g.stroke(); }
-    if (R.st === 'choose') { g.textAlign = 'center'; g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.7)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : i === this.recIndex(R) ? '推荐 · 按大招键选它（不耗大招）' : '飞进圆圈', 0, GATE_R + 16); }
+    if (R.st === 'choose') { g.textAlign = 'center'; g.font = '700 12px "Noto Sans SC", sans-serif'; g.fillStyle = G.dwell > 0 ? '#ffffff' : 'rgba(255,255,255,0.7)'; g.fillText(G.dwell > 0 ? `确认中 ${Math.round((G.dwell / GATE_DWELL) * 100)}%` : i === this.recIndex(R) ? '推荐 · 按大招键' : '飞进圆圈', 0, GATE_R + 16); } // 短：不钻进旁边的卡片
     g.restore();
     g.restore();
   },

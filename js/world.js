@@ -21,6 +21,7 @@ function planeStats(meta, planeId) {
     pierceD: pct('pierceD'), sideD: pct('sideD'), orbAdd: g.orb || 0, wingD: pct('wingD'), beamW: pct('beamW'), iceT: pct('iceT'), starD: pct('starD'), mf: g.mf || 0, credit: pct('credit'), ritualQ: pct('ritual'),
     plus: g.plus || {}, grant: g.grant || [], flags: g.flags || {}, burstSwap: g.burst || null, sets: g.sets || {}, look: Gear.look(meta && meta.gear ? meta.gear.eq : null) };
 }
+const VICTORY = { t: 4.6, pull: 2.0, ship: 3.2 }; // 首领倒下以后：第 2.0 秒才把战利品吸进货舱（先看清喷出来的是什么），第 3.2 秒货舱送回家，4.6 秒进结算或下一关
 const DTYPE_OF_KIND = { zap: 'energy', beam: 'energy', orb: 'energy', ice: 'kinetic', shard: 'kinetic', starbolt: 'kinetic', snow: 'kinetic' };
 const PLANE_DTYPE = { moon: 'energy', candy: 'energy', clock: 'energy', cloud: 'kinetic', paper: 'kinetic', whale: 'kinetic' };
 
@@ -1322,13 +1323,13 @@ class World {
     this.highlight();
   }
   onBossDead() {
-    this.state = 'victory'; this.stateT = 3.4; this.phase = 'victory';
+    this.state = 'victory'; this.stateT = VICTORY.t; this.phase = 'victory'; // 首领倒下的仪式（§14）：喷泉 → 停一下看清 → 吸进货舱 → 货舱送回家 → 结算
     this.bossTime = this.boss.fightT; this.cleared.push({ id: this.stageId, bossTime: Math.round(this.boss.fightT), runT: Math.round(this.runT) });
     if (this.bossProxy) this.bossProxy.alive = false;
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.killEnemy(e, {});
     this.clearBullets(true); this.warns = [];
     this.fx(this.boss.x, this.boss.y, 5, 900);
-    this.lootBoss(this.boss.x, this.boss.y); this.later(2.5, () => this.shipCargo()); // 首领掉落，然后货舱送回家
+    this.lootBoss(this.boss.x, this.boss.y); this.later(VICTORY.ship, () => this.shipCargo()); // 首领掉落，然后货舱送回家
     const bc = this.stage.boss === 'clock' ? ['#f4ecff', '#c9a8ff', '#ffcf7a', '#fff6c8'] : [(this.boss.C && this.boss.C.color) || '#ff9fcf', '#fff6c8', '#c9a8ff'];
     for (let i = 0; i < 14; i++) this.part('plate', this.boss.x + rand(-60, 60), this.boss.y + rand(-60, 60), rand(-520, 520), rand(-560, 200), 1.4, rand(22, 44), pick(bc)); // 整只碎成几大块飞开
     this.hitStop(0.1);
@@ -1429,6 +1430,7 @@ class World {
   shake(v) { if (this.settings.shake) this.trauma = Math.min(1, this.trauma + v); }
   text(str, x, y, color, size = 16, prio = 1) {
     if (this.texts.length > 14) { const i = this.texts.findIndex((t) => t.prio < prio); if (i < 0) return; this.texts.splice(i, 1); }
+    for (let k = 0; k < 4 && this.texts.some((q) => q.t < 0.6 && Math.abs(q.x - x) < 140 && Math.abs(q.y - y) < size + 6); k++) y -= size + 8; // 飘字排队：同一处的新字往上挪，不叠成一团（评审）
     this.texts.push({ str, x, y, color, size, prio, t: 0, life: 0.9 });
   }
   part(kind, x, y, vx, vy, life, size, color, rot = 0) {

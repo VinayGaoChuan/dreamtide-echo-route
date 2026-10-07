@@ -143,7 +143,7 @@
       ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = tg; ctx.fillText('LOOTWING', lx, ly); ctx.shadowBlur = 0;
       ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('SHOOT  ·  LOOT  ·  SALVAGE', lx + 8, ly + 44); ctx.fillStyle = '#bfe9ff'; ctx.fillText('SHOOT  ·  LOOT  ·  SALVAGE', lx + 8, ly + 44);
     } else {
-      ctx.font = '400 140px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineWidth = 16; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('拾荒之翼', lx, ly);
+      ctx.font = '400 140px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineWidth = 10; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('拾荒之翼', lx, ly);
       ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = '#ffd76a'; ctx.fillText('拾荒之翼', lx, ly); ctx.shadowBlur = 0;
       ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('LOOTWING', lx + 8, ly + 44); ctx.fillStyle = '#bfe9ff'; ctx.fillText('LOOTWING', lx + 8, ly + 44);
     }

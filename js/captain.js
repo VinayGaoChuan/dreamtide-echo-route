@@ -22,6 +22,7 @@ class CaptainBoss {
     this.plates = [-62, 0, 62].map((dy) => ({ dy, hp: hp * 0.06, max: hp * 0.06, alive: true, flash: 0 }));
     this.guard = false;
     const R = (MAPS[mapOfStage(w.stageId)] || MAPS[1]).races; this.race = R[(stageNOf(w.stageId) - 1) % R.length]; // 这张图第几关的族：颜色
+    this.cyc = [C.cycle, C.cycle2].map((L) => { const a = L.slice(); a.splice(2, 0, 'race'); return a; }); // 队长的族招牌（§9.5）插进两段循环
     Sound.sfx('alarm');
   }
   targetable() { return this.alive && !this.dying && this.x < this.w.W - 20; }
@@ -43,7 +44,7 @@ class CaptainBoss {
     if (this.gen) { const r = this.gen.next(dt * rk); if (r.done) this.gen = null; return; }
     this.atkT -= dt * rk;
     if (this.atkT <= 0) {
-      const list = this.phase === 1 ? this.C.cycle : this.C.cycle2, name = list[this.idx++ % list.length];
+      const list = this.phase === 1 ? this.cyc[0] : this.cyc[1], name = list[this.idx++ % list.length];
       this.gen = this.attack(name); this.atkT = this.phase === 1 ? 1.5 : 1.0;
     }
   }
@@ -56,6 +57,11 @@ class CaptainBoss {
       case 'fan': { const n = this.phase === 1 ? 5 : 7, a0 = w.aimAngle(this.x, this.y); for (let i = 0; i < n; i++) w.fire('pink', this.x - 20, this.y, a0 + (i - (n - 1) / 2) * 0.16, 190 * spd, { silent: i > 0 }); yield* wait(0.5); break; }
       case 'ring': { const n = 14, gap = srandi(0, n - 1), off = srand(TAU); for (let i = 0; i < n; i++) if (i !== gap && i !== (gap + 1) % n) w.fire('pink', this.x, this.y, off + (i / n) * TAU, 140 * spd, { silent: i > 0 }); yield* wait(0.6); break; }
       case 'cross': for (let k = 0; k < 4; k++) { for (let q = 0; q < 4; q++) w.fire('blue', this.x, this.y, (q * Math.PI) / 2 + Math.PI / 4 + this.t * 0.8, 170 * spd, { silent: q > 0 }); yield* wait(0.18); } break;
+      case 'race': { // 这族的招牌：矿业冲锋车、商会收账小偷、霜晶冰墙、群翼工蜂、电弧电塔、马戏弹跳球、熔核迫击炮
+        if (this.race === 'ledger') { if (!this.thiefDone) { this.thiefDone = true; w.spawnThief(true); } } // 小偷一场只叫一次：首领战不能变成刷钱袋
+        else if (RACE_FOES[this.race]) w.spawnRaceFoe(RACE_FOES[this.race].kind);
+        yield* wait(1.0); break;
+      }
       case 'volley': for (let k = 0; k < 3; k++) { w.fire('gold', this.x - 30, this.y, w.aimAngle(this.x, this.y), 230 * spd); yield* wait(0.4); } break;
       case 'summon': {
         // 散兵：从右边补一队小怪，不计入“必须清零”的目标

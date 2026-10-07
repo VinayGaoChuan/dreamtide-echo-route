@@ -12,8 +12,19 @@ const STATION_SPOTS = {
 };
 class StationScene {
   constructor() { this.t = 0; this.space = new SpaceScene(); this.space.setTheme('station'); this.flash = {}; this.arrive = null; }
-  update(dt) { this.t += dt; this.space.update(dt * 0.3); if (this.arrive) { this.arrive.t += dt; if (this.arrive.t > 4) this.arrive = null; } }
-  startArrival(info) { this.arrive = Object.assign({ t: 0 }, info || {}); }
+  update(dt) {
+    this.t += dt; this.space.update(dt * 0.3);
+    const A = this.arrive; if (!A) return;
+    const t0 = A.t; A.t += dt;
+    for (const it of A.list) if (t0 < it.at + it.fly && A.t >= it.at + it.fly) Sound.sfx(it.rank >= 4 ? 'lootGold' : it.rank >= 3 ? 'lootGreen' : it.rank >= 1 ? 'pickLoot' : 'dust', { gap: 30, k: it.rank }); // 落进仓库那一下
+    if (A.t > A.end) this.arrive = null;
+  }
+  /* 回家开货舱（§14）：船落进泊位 → 货舱弹开 → 装备按品质从低到高一件件飞进仓库，金的最后、停一下 */
+  startArrival(info) {
+    const A = Object.assign({ t: 0 }, info || {}), items = (A.items || []).slice().sort((a, b) => QUALS[a.q].rank - QUALS[b.q].rank).slice(-16);
+    let at = 1.8; A.list = items.map((it) => { const rank = QUALS[it.q].rank, o = { q: it.q, name: it.name, rank, at: at + (rank >= 4 ? 0.5 : 0), fly: 0.55 }; at = o.at + (rank >= 3 ? 0.6 : 0.22); return o; });
+    A.end = Math.max(4, at + 1.2); this.arrive = A;
+  }
   draw(g, W, H, m) {
     const t = this.t; this.space.dim = 1; this.space.draw(g, W, H, { noForeground: true });
     const U = (m && m.unlock) || {}, homes = (m && m.station && m.station.homes) || {};
@@ -46,6 +57,17 @@ class StationScene {
     const sx = W * 0.40, sy = H * 0.80 - 40;
     let ay = 0; if (this.arrive) { const u = Math.min(1, this.arrive.t / 1.4); ay = (1 - Ease.outCubic(u)) * -260; }
     drawPlane(g, (m && m.current) || 'moon', sx, sy + ay + Math.sin(t * 1.4) * 3, 1.1, t, { happy: true, look: m && m.gear ? Gear.look(m.gear.eq) : null });
+    const A = this.arrive;
+    if (A && A.list && A.list.length) { // 货舱从船尾弹出、打开；装备一件件划着弧线飞进仓库
+      const px = sx - 60, py = sy + 24, open = clamp((A.t - 1.3) / 0.4, 0, 1), tx = W * STATION_SPOTS.stash.x, ty = H * STATION_SPOTS.stash.y;
+      if (A.t > 1.1 && A.t < A.end - 0.3) { g.save(); g.translate(px, py); g.fillStyle = '#c9b08a'; g.strokeStyle = '#2a1e30'; g.lineWidth = 2.4; roundRect(g, -26, -16, 52, 32, 7); g.fill(); g.stroke(); g.fillStyle = '#ffd27a'; g.save(); g.translate(0, -16); g.rotate(-open * 1.1); g.fillRect(-26, -5, 52, 6); g.restore(); g.restore(); }
+      for (const it of A.list) {
+        const u = (A.t - it.at) / it.fly; if (u < 0) continue;
+        const c = QUALS[it.q].color;
+        if (u < 1) { const k = Ease.inOutSine(u), x = lerp(px, tx, k), y = lerp(py, ty, k) - Math.sin(k * Math.PI) * (90 + it.rank * 25); g.globalCompositeOperation = 'lighter'; drawGlow(g, x, y, 14 + it.rank * 6, hexA(c, 0.9), 0.8); g.globalCompositeOperation = 'source-over'; g.fillStyle = c; g.strokeStyle = '#2a1e30'; g.lineWidth = 1.6; roundRect(g, x - 8, y - 6, 16, 12, 3); g.fill(); g.stroke(); }
+        else if (u < 3 && it.rank >= 2) { const a = 1 - (u - 1) / 2; g.save(); g.font = '600 15px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.fillStyle = hexA(c, a); g.fillText(it.name, tx, ty - 40 - (u - 1) * 14 - it.rank * 4); g.restore(); if (it.rank >= 4 && u < 1.6) { g.globalCompositeOperation = 'lighter'; drawGlow(g, tx, ty, 120, 'rgba(255,214,140,0.9)', 0.9 * (1.6 - u)); g.globalCompositeOperation = 'source-over'; } }
+      }
+    }
     g.restore();
   }
 }
@@ -104,9 +126,9 @@ function gearCompareHtml(it) {
   const a = Gear.itemStats(it), b = old ? Gear.itemStats(old) : {}, keys = [...new Set([...Object.keys(a), ...Object.keys(b)])];
   if (it.kind === 'gun') { a.gunDmg = it.imp.gunDmg; b.gunDmg = old ? old.imp.gunDmg : GUN_BASES.rapid.dmg; keys.unshift('gunDmg'); }
   const arrows = (r) => { const d = r - 1; const n = Math.abs(d) < 0.02 ? 0 : Math.min(3, Math.ceil(Math.abs(d) / 0.12)); return n ? `<span class="fx ${d > 0 ? 'up' : 'down'}"><i>${(d > 0 ? '▲' : '▼').repeat(n)}</i></span>` : '<span class="dim-text">—</span>'; };
-  const diff = keys.map((k) => { const d = (a[k] || 0) - (b[k] || 0); if (Math.abs(d) < 0.01) return ''; return `<div class="cmp-line ${d > 0 ? 'up' : 'down'}">${esc(Gear.fmtAffix(k, +d.toFixed(1)).replace('+-', '−'))}</div>`; }).join('');
+  const diff = keys.map((k) => { const d = (a[k] || 0) - (b[k] || 0); if (Math.abs(d) < 0.01) return ''; const txt = k === 'gunDmg' ? `每发伤害 ${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}` : Gear.fmtAffix(k, +d.toFixed(1)).replace('+-', '−'); return `<div class="cmp-line ${d > 0 ? 'up' : 'down'}">${esc(txt)}</div>`; }).join('');
   const pa = Gear.plusOf(it), pb = old ? Gear.plusOf(old) : {};
-  return `<div class="cmp"><div class="cmp-sum">火力 ${arrows(c.dps)} · 生存 ${arrows(c.ehp)}</div>${old ? '' : '<div class="dim-text">这个位现在是空的</div>'}${diff}${JSON.stringify(pa) !== JSON.stringify(pb) ? '<div class="cmp-line">技能变了：看说明框最后几行</div>' : ''}</div>`;
+  return `<div class="cmp"><div class="cmp-sum">火力 ${arrows(c.dps)} · 生存 ${arrows(c.ehp)}</div>${old ? '' : `<div class="dim-text">${it.kind === 'gun' ? '身上是默认的速射炮' : '这个位现在是空的'}</div>`}${diff}${JSON.stringify(pa) !== JSON.stringify(pb) ? '<div class="cmp-line">技能变了：看说明框最后几行</div>' : ''}</div>`;
 }
 
 /* ---------- 主画面 ---------- */
@@ -160,6 +182,43 @@ function showStation() {
   $$('[data-fac]', el).forEach((b) => b.onclick = () => { Sound.sfx('ui'); S.panel = S.panel === b.dataset.fac ? null : b.dataset.fac; S.sel = null; showStation(); });
   if (S.panel) bindStationPanel($('#st-panel', el), S.panel);
   if (G.stationArrive) { const A = G.stationArrive; G.stationArrive = null; G.stationScene.startArrival(A); stationArrivalToasts(A); }
+  if (S.tut) requestAnimationFrame(() => stationTutor(el));
+}
+/* 第一次回家的强制引导（§8.4）：只亮一样东西、一句话，别的压暗点不了；做完那一步才往下走。
+   1 带回了几件 → 2 点那把蓝色主炮看比较 → 3 按「换上」→ 4 看船上的炮换了样子 → 5 出击 */
+function stationTutorItem() {
+  const m = G.meta, L = m.gear.stash.filter((it) => Station.canEquip(m, it));
+  return L.find((it) => it.kind === 'gun' && QUALS[it.q].rank >= 1) || L.sort((a, b) => Station.compare(m, b, m.current).total - Station.compare(m, a, m.current).total)[0] || null;
+}
+function stationTutorEnd() { const m = G.meta; G.st.tut = null; m.station.tut.equip = 2; persist(); }
+function stationTutor(el) {
+  const S = G.st, m = G.meta, T = S.tut; if (!T || !document.body.contains(el)) return;
+  const it = stationTutorItem();
+  if (!it && T.step < 4) { stationTutorEnd(); return; } // 仓库里没有能换的：不教
+  if (T.step >= 2 && T.step <= 4 && S.panel !== 'equip') { S.panel = 'equip'; showStation(); return; }
+  if (T.step === 5 && S.panel) { S.panel = null; S.sel = null; showStation(); return; }
+  const steps = {
+    1: { sel: '.eq-stash', text: `你带回了 ${m.gear.stash.length} 件东西 · 点一下继续`, any: true },
+    2: { sel: `[data-item="${it && it.uid}"]`, text: '指着它，和身上的比一比' },
+    3: { sel: '[data-equip]', text: '箭头朝上：比身上的好 · 按一下换上' },
+    4: { sel: '.eq-plane', text: '船上的炮换了样子 · 下一局就用它（点一下继续）', any: true },
+    5: { sel: '#st-go', text: '出击' },
+  }, D = steps[T.step], tg = D && $(D.sel, el);
+  if (T.step === 2 && it && S.sel === it.uid) { T.step = 3; showStation(); return; } // 已经选中了：直接到「换上」
+  if (!tg) { if (T.step === 2 && it && S.filter !== 'all') { S.filter = 'all'; showStation(); } return; }
+  if (T.step === 2) tg.scrollIntoView({ block: 'nearest' });
+  const r = tg.getBoundingClientRect(), pad = 14, L = document.createElement('div'); L.className = 'tut-layer';
+  const hole = { x: r.left - pad, y: r.top - pad, w: r.width + pad * 2, h: r.height + pad * 2 };
+  L.innerHTML = `<div class="tut-hole" style="left:${hole.x}px;top:${hole.y}px;width:${hole.w}px;height:${hole.h}px"></div>
+    ${[[0, 0, '100vw', hole.y], [0, hole.y + hole.h, '100vw', `calc(100vh - ${hole.y + hole.h}px)`], [0, hole.y, hole.x, hole.h], [hole.x + hole.w, hole.y, `calc(100vw - ${hole.x + hole.w}px)`, hole.h]].map(([x, y, w, h]) => `<div class="tut-block" style="left:${x}px;top:${y}px;width:${typeof w === 'number' ? w + 'px' : w};height:${typeof h === 'number' ? h + 'px' : h}"></div>`).join('')}
+    <div class="tut-say" style="left:${clamp(hole.x + hole.w / 2, 160, innerWidth - 160)}px;top:${hole.y > innerHeight * 0.4 ? hole.y - 64 : hole.y + hole.h + 16}px">${esc(D.text)}</div>`;
+  el.appendChild(L);
+  const holeEl = $('.tut-hole', L);
+  $$('.tut-block', L).forEach((b) => b.onclick = (e) => { e.stopPropagation(); if (D.any) next(); else { pulse(holeEl); Sound.sfx('denied'); } });
+  const next = () => { L.remove(); T.step++; if (T.step > 5) { stationTutorEnd(); return; } Sound.sfx('ui'); showStation(); };
+  if (D.any) { holeEl.style.pointerEvents = 'auto'; holeEl.onclick = next; }
+  else if (T.step === 2) tg.addEventListener('click', () => { T.step = 3; }, { capture: true, once: true }); // 选中那件以后往下走（面板自己会重画）
+  else if (T.step === 5) tg.addEventListener('click', () => stationTutorEnd(), { capture: true, once: true });
 }
 function stationStart() { const m = G.meta, mm = m.maps.sel && Station.mapOpen(m, m.maps.sel) ? m.maps.sel : 1, starts = Station.startStages(m, mm); return starts.includes(m.maps.start) ? m.maps.start : MAPS[mm].stages[0]; }
 function stationArrivalToasts(A) {

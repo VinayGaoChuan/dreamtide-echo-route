@@ -59,9 +59,9 @@ function careerStart(m, F) {
   let mm = 1; for (const n of MAP_ORDER) if (Station.mapOpen(m, n)) mm = n; // 最前面开着的图
   if (m.maps.cleared[mm] && mm < MAP_ORDER.length) mm++;
   const f = F[mm] || { n: 0, at: null };
-  if (f.n >= 4 && mm > 1 && f.n % 5 === 4) return { stage: MAPS[mm - 1].stages[0], farm: true }; // 卡住了：回上一张图刷一局
+  if (f.n >= 4 && mm > 1 && f.n % 5 === 4) return { stage: MAPS[mm - 1].stages[0], farm: true, front: mm }; // 卡住了：回上一张图刷一局
   const starts = Station.startStages(m, mm), deep = f.at && starts.includes(f.at) && stageNOf(f.at) > 1 ? f.at : null;
-  return { stage: deep && f.n >= 2 && f.n % 2 === 0 ? deep : MAPS[mm].stages[0], farm: false };
+  return { stage: deep && f.n >= 1 && f.n % 3 !== 0 ? deep : MAPS[mm].stages[0], farm: false, front: mm }; // 卡在第 2、3 关：三局里两局从路标直接去那一关
 }
 function careerStation(m, plane) {
   const got = { eq: [], sold: 0, salv: 0, fac: [], gamble: 0 }, sc = () => Gear.score(Gear.compute(m.gear.eq), plane).total;
@@ -96,6 +96,15 @@ function careerStation(m, plane) {
   }
   return got;
 }
+/* 打首领前按它的防御换主炮（§4.3 软克制）：护盾用能量、装甲用动能——仓库里有评分不差太多的对路主炮就换上 */
+function careerCounter(m, plane, stage) {
+  const def = STAGES[stage] && STAGES[stage].bossDef; if (!def || def === 'chaos') return null;
+  const want = def === 'shield' ? 'energy' : 'kinetic', cur = m.gear.eq.gun, curT = GUN_BASES[(cur && cur.base) || 'rapid'].dtype; if (curT === want) return null;
+  const now = Gear.score(Gear.compute(m.gear.eq), plane).total;
+  const pick = m.gear.stash.filter((it) => it.kind === 'gun' && Station.canEquip(m, it) && GUN_BASES[it.base].dtype === want).map((it) => ({ it, s: Station.compare(m, it, plane).total })).sort((a, b) => b.s - a.s)[0];
+  if (pick && pick.s > 0.85) { Station.equip(m, pick.it.uid, 'gun'); return pick.it.base; }
+  return null;
+}
 function careerRun(seed, maxRuns, human, maxHours) {
   const plane = PLANE_ORDER[0], meta = Station.ensure(freshMeta()); meta.current = plane;
   const OVER = 75, log = [], F = {}; let hours = 0, prevScore = null;
@@ -103,12 +112,13 @@ function careerRun(seed, maxRuns, human, maxHours) {
     // 玩家在学：头 2.5 小时从新手（反应 0.45 秒、常走神、瞄不准、常随手拿）长到普通玩家（0.25 秒，照推荐选）
     const k = Math.min(1, hours / 2.5), hum = { react: 0.45 - 0.2 * k, slip: 0.3 - 0.18 * k, aim: 26 - 12 * k }, mix = 0.45 + 0.5 * k;
     const S0 = careerStart(meta, F), start = S0.stage, mm = mapOfStage(start);
+    const swap = stageNOf(start) > 1 ? careerCounter(meta, plane, start) : null; // 从路标去打某个首领：先按它的防御换主炮
     const st0 = planeStats(meta, plane), score = Gear.score(Gear.compute(meta.gear.eq), plane).total, lv0 = meta.pilot.lv, shipped = new Set();
     const x = reportRun(start, -2, plane, (seed * 131 + r * 7919) >>> 0, human, { meta, first: r === 0, ult: 1, hum, mix, chain: true, career: { shipped, loot: Station.lootCfg(meta), catchUp: Station.catchUp(start) } });
     const res = x.res; res.creditK = st0.credit || 0; res.shipped = shipped;
     const out = Station.settle(meta, res); meta.firstRunDone = true;
     const bot = careerStation(meta, plane);
-    const win = !!res.win, f = F[mm] || (F[mm] = { n: 0, at: null });
+    const win = !!res.win, f = F[S0.front] || (F[S0.front] = { n: 0, at: null }); // 计数记在前沿那张图上（回刷的那一局也算一次）
     if (S0.farm) f.n++; else if (win) { f.n = 0; f.at = null; } else { f.n++; f.at = x.reached; } // 回刷的那一局也算一次（下一局再回前沿）
     const news = [...out.unlocks.map((u) => 'unlock ' + u), ...(out.mapClear ? ['map ' + out.mapClear] : []), ...(out.lvUp ? ['lv ' + meta.pilot.lv] : []), ...bot.eq.map((q) => 'eq ' + q), ...bot.fac.map((id) => 'fac ' + id)];
     const kq = {}; for (const it of out.kept) kq[it.q] = (kq[it.q] || 0) + 1;

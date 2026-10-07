@@ -116,8 +116,8 @@ Object.assign(World.prototype, {
     const M = MAPS[mapOfStage(this.stageId)] || MAPS[1];
     if (M.races.includes('ledger') || srnd() < THIEF.chance) this.later(2.2, () => this.spawnThief());
   },
-  spawnThief() {
-    if (this.state !== 'play' || this.boss || this.phase !== 'fight') return null;
+  spawnThief(force) { // force：商会队长在首领战里叫来的
+    if (this.state !== 'play' || (!force && (this.boss || this.phase !== 'fight'))) return null;
     const mid = (this.arena.top + this.arena.bottom) / 2;
     const e = this.addEnemy('thief', { x: this.W + 50, y: mid + srand(-90, 90), path: 'thief', race: 'ledger', def: null, tx: this.W * 0.68, stolen: 0, sack: 0 });
     Sound.sfx('weakOpen', { pan: 0.7 }); this.emit('thief');

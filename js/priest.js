@@ -42,7 +42,7 @@ class ChaosPriestBoss {
     this.fightT += dt; this.phaseT += dt;
     if (this.transT > 0) { this.transT -= dt; if (this.transT <= 0) this.beginPhase(); return; }
     const adds = w.enemies.filter((e) => e.alive && e.bossAdd).length;
-    if (this.guard && adds === 0) { this.guard = false; Sound.sfx('weakOpen'); w.emit('flag', { text: '信徒散了 · 祭司的护罩没了', color: 'white', dur: 1.4 }); }
+    if (this.guard && adds === 0) { this.guard = false; Sound.sfx('weakOpen'); w.emit('flag', { text: '信徒散了 · 祭司的结界没了', color: 'white', dur: 1.4 }); }
     if (this.phase === 3) { // 防御在护盾和装甲之间换（先闪 1 秒）
       this.defT -= dt;
       if (this.defT <= 1 && !this.defWarn) { this.defWarn = 1; w.emit('flag', { text: this.def === 'shield' ? '外壳要变成装甲了' : '外壳要变成护盾了', color: 'white', dur: 1 }); Sound.sfx('warn'); }
@@ -61,7 +61,7 @@ class ChaosPriestBoss {
   /* ---------- 招式 ---------- */
   *atk_acolytes() {
     const w = this.w, M = MAPS[5], picks = [M.races[(this.cycleIdx * 3) % M.races.length], M.races[(this.cycleIdx * 3 + 2) % M.races.length]];
-    w.emit('flag', { text: '祭司召来了信徒 · 先打信徒，护罩才会散', color: 'white', dur: 1.6 });
+    w.emit('flag', { text: '祭司召来了信徒 · 先打信徒，结界才会散', color: 'white', dur: 1.6 });
     for (let i = 0; i < 2; i++) { const ty = i ? w.arena.bottom - 110 : w.arena.top + 110; w.addEnemy(i ? 'tickE' : 'starE', { x: w.W + 60, y: ty, path: 'mirror', tx: w.W * 0.6, ty, fireT: 2 + i, bossAdd: true, race: picks[i], hp: 260 * w.foeHpK(), life: 60 }); }
     this.guard = true; yield 1.2;
   }
@@ -148,7 +148,7 @@ class ChaosPriestBoss {
       g.fillStyle = on ? `rgba(200,190,230,${a})` : `rgba(255,95,135,${a})`; g.fillRect(0, b.y0, w.W, b.y1 - b.y0);
       g.strokeStyle = on ? 'rgba(230,220,255,0.6)' : 'rgba(255,95,135,0.8)'; g.lineWidth = 2; g.setLineDash([16, 10]); g.lineDashOffset = -t * 60; g.beginPath(); g.moveTo(0, b.y0); g.lineTo(w.W, b.y0); g.moveTo(0, b.y1); g.lineTo(w.W, b.y1); g.stroke(); g.setLineDash([]);
       for (let i = 0; i < (on ? 26 : 10); i++) { const x = (i * 97 + t * (on ? 300 : 900)) % w.W, y = b.y0 + ((i * 53) % Math.max(1, b.y1 - b.y0)); g.fillStyle = `rgba(255,255,255,${on ? 0.35 : 0.2})`; g.fillRect(x, y, 18 + (i % 3) * 10, 1.6); }
-      if (on) { g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = '18px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; g.textAlign = 'left'; g.fillText('静默', 18, b.y0 + 24); }
+      if (on) { g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = '18px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; g.textAlign = 'left'; g.fillText('静默 · 打不出子弹', 18, b.y0 + 24); }
     }
     if (this.beam) { const B = this.beam, ex = this.x + Math.cos(B.a) * B.len, ey = this.y + Math.sin(B.a) * B.len, gx0 = this.x + Math.cos(B.a) * B.len * B.gap, gy0 = this.y + Math.sin(B.a) * B.len * B.gap, gx1 = this.x + Math.cos(B.a) * B.len * (B.gap + 0.16), gy1 = this.y + Math.sin(B.a) * B.len * (B.gap + 0.16);
       g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';

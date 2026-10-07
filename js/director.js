@@ -263,7 +263,7 @@ Object.assign(World.prototype, {
     // 然后从右往左一列列跳进来——成型的构筑一扫一大片，是这类游戏直播和短视频里的那个画面
     const n = Math.min(64, 16 + picks * 4), h = Math.min(bot - top, 240 + picks * 24), cy = srand(top + h / 2, bot - h / 2), rows = n > 40 ? 8 : 6;
     const cols = Math.ceil(n / rows), x0 = W * 0.5, cw = (W * 0.46) / cols, pts = [];
-    for (let i = 0; i < n; i++) { const col = Math.floor(i / rows), row = i % rows; pts.push({ col, row, x: x0 + (col + 0.5) * cw + srand(-cw * 0.2, cw * 0.2), y: clamp(cy - h / 2 + (row + 0.5) * (h / rows) + srand(-8, 8), top, bot) }); }
+    for (let i = 0; i < n; i++) { const col = Math.floor(i / rows), row = i % rows; pts.push({ col, row, x: x0 + (col + 0.5) * cw + srand(-cw * 0.42, cw * 0.42), y: clamp(cy - h / 2 + (row + 0.5 + (col % 2) * 0.5) * (h / rows) + srand(-16, 16), top, bot) }); } // 错开半格、加大抖动：一群，不是一张方阵
     let stars = 0;
     this.addWarn({ kind: 'swell', x: x0, y: cy - h / 2, w: W - x0, h, pts, tWarn: 1.0, silent: true, onFire: () => {
       for (const P of pts) this.later((cols - 1 - P.col) * 0.03, () => {

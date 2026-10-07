@@ -66,7 +66,7 @@ const PLAN = [
   { name: 'title', screen: 'title' },
   { name: 'keyart', screen: 'keyart' }, // 商店主图：游戏自己的画法拼的关键美术
   // 1-1 锈带残骸场：开场
-  { name: 'open', start: '1-1', until: 'w.runT > 6', max: 12 },
+  { name: 'open', start: '1-1', until: 'w.runT > 3', max: 12 },
   // 1-2 锈带残骸场：收账小偷背着越吸越鼓的钱袋躲你的高度（摆拍：这一只打不死，周围撒一把星砂让它吸）
   { name: 'thief', start: '1-2', build: true, setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); const w = G.world; w.spawnFormation('vee'); w.spawnFormation('line'); __S.until('false', 1.2); const e = w.spawnThief(); e.hp = e.maxHp = 1e6; e.x = w.W * 0.86; for (let i = 0; i < 26; i++) w.dropPickup('dust', w.W * (0.6 + 0.012 * i), e.y + srand(-90, 90), { value: 1, vx: -20, vy: 0 });",
     until: "(() => { const e = w.enemies.find((q) => q.type === 'thief'); return e && e.t > 1.1 && e.sack > 0.25; })()", max: 8, wait: 60 },
@@ -133,7 +133,7 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
           // 摆拍：走到后面的图时手上本来就有一套成型的构筑——追踪、雷球升满（自动接上追踪雷链），再加爆破、多重
           if (${!!s.build}) { const add = (kind, id, to) => w.applyOption({ kind, id, from: to - 1, to }); for (const [k, id, to] of [['gun', 'homing', 1], ['support', 'thunder', 1], ['gun', 'homing', 2], ['support', 'thunder', 2], ['gun', 'homing', 3], ['support', 'thunder', 3], ['gun', 'bomb', 1], ['gun', 'bomb', 2], ['gun', 'multi', 1]]) add(k, id, to); w.events.length = 0; }
           return true; })()`);
-        await sleep(400); await ev('__S.attach(); G.world.pilotNoBurst = true; true'); // 像玩家一样攒着大招，只在“大招”那一刻放
+        await sleep(400); await ev("__S.attach(); G.world.pilotNoBurst = true; hudPin('hearts', true); true"); // 像玩家一样攒着大招，只在“大招”那一刻放；生命按挨过一下以后常驻（UT15）
       }
       if (s.setup) await ev('{ ' + s.setup + ' } true');
       let r = { ok: true };
