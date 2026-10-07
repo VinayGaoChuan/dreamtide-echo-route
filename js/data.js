@@ -181,8 +181,8 @@ const NODE_TYPES = {
 const ULT_CAP = [{ cap: 1, need: null, text: '初始' }, { cap: 2, need: '1-1', text: '1-1 首次通关' }, { cap: 3, need: '1-3', text: '1-3 首次通关' }];
 /* 共享等级：星尘升级，所有飞机一起变强（原型值） */
 /* 共享等级（§7）：前期一两局升一级，后期越来越慢（满级十个多小时），下一局开局就看得见变强；每级攻击 × atk，每 4 级多一颗心；
-   费用 100 起，10 级前每级 +40，之后每级 +120 */
-const SHARED = { max: 20, cost: Array.from({ length: 21 }, (_, lv) => (lv < 2 ? 0 : lv <= 10 ? 100 + 40 * (lv - 2) : 420 + 120 * (lv - 10))), atk: 1.035, heartAt: [4, 8, 12, 16, 20] };
+   费用 150 起，10 级前每级 +60，之后每级 +180（三关连成一局后一局带回的星尘约翻倍，费用跟着乘了 1.5） */
+const SHARED = { max: 20, cost: Array.from({ length: 21 }, (_, lv) => (lv < 2 ? 0 : lv <= 10 ? 150 + 60 * (lv - 2) : 630 + 180 * (lv - 10))), atk: 1.035, heartAt: [4, 8, 12, 16, 20] };
 const sharedAtk = (lv) => Math.pow(SHARED.atk, lv - 1);
 const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 
@@ -191,9 +191,9 @@ const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 const STAGES = {
   '1-1': { id: '1-1', ch: 1, name: '梦灯海湾', theme: 'bay', segs: 6, segDur: 54, hpK: 1, avg: 5, peak: 9, fill: 2.3, elites: ['jellyE'], boss: 'captain', bossName: '泡泡小队长', bossHp: 6000, rec: 1, reward: 120, fail: [30, 90], ult: 1,
     map: ['house', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '第一次出击：开局只会直射；先清普通怪群，再对付越来越硬的厚甲怪。' },
-  '1-2': { id: '1-2', ch: 1, name: '纸船灯河', theme: 'river', segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, elites: ['tickE', 'jellyE'], boss: 'captain2', bossName: '裂纹闹钟队长', bossHp: 9000, rec: 4, reward: 150, fail: [40, 100], ult: 2,
+  '1-2': { id: '1-2', ch: 1, name: '纸船灯河', theme: 'river', segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, elites: ['tickE', 'jellyE'], boss: 'captain2', bossName: '裂纹闹钟队长', bossHp: 9000, rec: 3, reward: 150, fail: [40, 100], ult: 2,
     map: ['house', 'bridge', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '敌人会从裂缝、上下方钻出来；途中要护送一位伙伴。' },
-  '1-3': { id: '1-3', ch: 1, name: '失眠钟塔', theme: 'tower', segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, elites: ['starE', 'tickE', 'jellyE'], boss: 'clock', bossName: '失控闹钟', bossHp: 1000, rec: 6, reward: 190, fail: [50, 120], ult: 2,
+  '1-3': { id: '1-3', ch: 1, name: '失眠钟塔', theme: 'tower', segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, elites: ['starE', 'tickE', 'jellyE'], boss: 'clock', bossName: '失控闹钟', bossHp: 1000, rec: 7, reward: 190, fail: [50, 120], ult: 2,
     map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'], intro: '后方追兵和空间裂缝一起出现，最后是第一章 Boss：失控闹钟。' },
 };
 const STAGE_ORDER = ['1-1', '1-2', '1-3'];
@@ -245,7 +245,7 @@ const BUILD_PATHS = [
    Boss / 队长打了 rage.at 秒还没倒就失控：攻击一路加快（rage.ramp 秒加满 rage.max），提前 rage.warn 秒预告。
    失控 wipe 秒后超载（先在血条上倒数，提前 5 秒喊）：全屏冲击、全队倒下——首领战有确定的期限，构筑强度按它算。
    只有成型的火力能在失控前打完；没成型的局要靠操作硬扛失控段 */
-const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, formKOf: { 'pierce+bomb': 2.25, 'bomb+rainbow': 2.3, 'homing+thunder': 3.2, 'bomb+thunder': 2.5, 'homing+wing': 1.8, 'multi+ice': 2.3, 'multi+magnet': 2.3 }, free: { '1-1': true }, bossK: { '1-1': 1.3, '1-2': 3.8, '1-3': 8.4 }, regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35 } };
+const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 3.95, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: { '1-1': 1.3, '1-2': 8, '1-3': 15 }, regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35 } };
 /* 第一局（§3.6，上手 = 上钩）：第一个完整仪式保底史诗，第一个联动只要两件 1 级（头几分钟一次构筑小爆发），鱼群潮更勤；
    第一个首领（free 里的关）在基础难度下不自愈、不失控：几乎人人打得过 */
 const FIRST_RUN = { rareTier: 1, needLv: 1, swellK: 0.75, hearts: 2 }; // rareTier：第一局第一个完整仪式保底史诗（一档一档认识品质）；hearts：多两颗心
@@ -261,8 +261,8 @@ const LADDER = [
   { name: '厚甲', line: '精英和厚甲怪更结实：爆破、多重更值钱', fx: [['敌甲', 1]], eliteK: 1.4, hpK: 1.36 },
   { name: '护驾', line: '首领的散兵更多更结实，护盾回来更快：清群的流派更值钱', fx: [['散兵', 1]], addsK: 1.5, addHpK: 3, shieldT: 14, hpK: 1.05 },
   { name: '疾弹', line: '敌弹快两成：冰冻、追踪更值钱', fx: [['敌弹', 1]], bulletK: 1.2, hpK: 1.25 },
-  { name: '自愈', line: '首领自愈更快：单体爆发更值钱', fx: [['自愈', 1]], regenK: 1.5 },
-  { name: '失控', line: '首领更早失控、超载：只有最强的构筑打得过', fx: [['失控', 1]], rageK: 0.92 },
+  { name: '自愈', line: '首领自愈更快：单体爆发更值钱', fx: [['自愈', 1]], regenK: 1.3 },
+  { name: '失控', line: '首领更早失控、超载：只有最强的构筑打得过', fx: [['失控', 1]], rageK: 0.88 },
 ];
 const LADDER_MAX = LADDER.length - 1, LADDER_PAY = 0.15;
 function ladderRules(n) { const L = LADDER.slice(1, Math.max(0, Math.min(LADDER_MAX, n | 0)) + 1); return Object.assign({}, ...L, { hpK: L.reduce((k, x) => k * (x.hpK || 1), 1) }); } // hpK 逐级相乘，其余规则叠加
@@ -286,7 +286,7 @@ function buildPlan(b, targetName, rot) {
   const need = (b && b.need) || BUILD_CHECK.needLv, ready = (id) => buildLv(b, id) >= need; // 联动要两件都到 need 级（到了自动接上）
   const core = link ? SYNERGIES[link].need : comps, order = [...core, ...comps.filter((id) => !core.includes(id))]; // 先凑联动的两件，再凑流派的其他件
   const have = comps.filter(ready), miss = order.filter((id) => !ready(id)), linkOwned = !!(link && buildOwned(b, link));
-  const next = (linkOwned ? null : core.find((id) => !buildLv(b, id)) || core.find((id) => !ready(id))) || miss[0] || null; // 两件先各拿到，再各升到级
+  const next = (linkOwned ? core.find((id) => buildLv(b, id) < 3) : core.find((id) => !buildLv(b, id)) || core.find((id) => !ready(id))) || miss[0] || null; // 两件先各拿到，再各升到级；接上联动以后把两件升满（联动满级再乘 maxK）
   const swap = next && SKILLS[next] && SKILLS[next].slot === 'support' && b.support && b.support.id !== next ? b.support.id : null;
   let alt = null;
   for (const [k, L] of Object.entries(SYNERGIES)) {

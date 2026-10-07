@@ -91,7 +91,7 @@ async function main() {
       }
       Lobby.onStart = (st) => {
         const idx = Lobby.beginSession(st); if (idx < 0) return false;
-        const mk = () => new World({ mode: 'run', W: 1280, stage: st.stage, seed: st.seed, me: idx, settings, world: st.world || {}, vs: st.mode === 'vs',
+        const mk = () => new World({ mode: 'run', W: 1280, stage: st.stage, seed: st.seed, me: idx, settings, world: st.world || {}, vs: st.mode === 'vs', chain: st.mode !== 'vs',
           players: st.roster.map((r) => ({ id: r.peer, name: r.name, plane: r.plane, stats: r.stats || planeStats(null, r.plane), ultCap: r.ultCap || 1, cos: {} })),
           cb: { onEnd: (r) => { B.res = r; Lobby.endGame(); }, onRescue: (id) => { if (!B.rescues.includes(id)) B.rescues.push(id); } } });
         B.w = mk(); Lobby.onReplay = () => { if (B.w.done) return false; B.w = mk(); B.replays = (B.replays || 0) + 1; return true; };

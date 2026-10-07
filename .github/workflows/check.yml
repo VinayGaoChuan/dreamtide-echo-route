@@ -21,11 +21,11 @@ jobs:
         run: for f in js/*.js tools/*.js; do node --check "$f" || exit 1; done
       - name: 行尾注释吞代码检查（脚本改代码时注释插进一行中间，后半行变成注释，语法检查发现不了）
         run: node tools/lint-comments.js
-      - name: 三关无头通关模拟
+      - name: 三关无头通关模拟（含连打一局）
         run: node tools/smoke-sim.js js
       - name: 家园规则（第一小时因果链 + 存档安全）
         run: node tools/home-sim.js
-      - name: 联机同步（2 人三关逐帧比对）
+      - name: 联机同步（2 人连打三关一局 + 单独的 1-3，逐帧比对，换关也比）
         run: node tools/mp-sim.js js all 2 direct
       - name: 联机网络（3 人、20% 丢包、中途掉线）
         run: node tools/mp-sim.js js 1-2 3 net 0.2 100 5 2@3000

@@ -12,7 +12,7 @@ const LOCKSTEP = { hz: 30, steps: 4, delay: 4, window: 60, hashEvery: 30, goneAf
 const SS_ID = 'dreamtide.mp.id', SS_ROOM = 'dreamtide.mp.room'; // 本标签页的联机身份和所在房间（刷新后回到原对局）
 function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
 function ssSet(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) { /* 隐私模式等：只是不能刷新回来 */ } }
-const MP_PROTO = 5; // 5：开局带梦魇级数（ladder）； 4：刷新回到原对局（rj）、准备确认；3：断线保留席位（断线区间 w / 恢复请求 ry / 断线占位操作）；2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
+const MP_PROTO = 6; // 6：合作三关连成一局（chain）；5：开局带梦魇级数（ladder）； 4：刷新回到原对局（rj）、准备确认；3：断线保留席位（断线区间 w / 恢复请求 ry / 断线占位操作）；2：操作帧单独放在 ls 字段，服务器只发变化的字段 // 联机协议 / 玩法版本：改了会影响同步的东西就加一，旧版本的客户端进不了同一个频道
 
 /* ---------- 操作编码：一帧 5 个字符 ---------- */
 const NetCodec = {

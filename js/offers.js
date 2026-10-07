@@ -60,7 +60,10 @@ Object.assign(World.prototype, {
   /* 这一局在追的流派：单人时大厅的目标流派优先（还没走到别的流派上时），否则是离当前 Build 最近、还没做完的那条。
      联机不用本机的目标，只看自己的 Build（各端一致） */
   aimPlan() {
-    const b = this.buildSummary(), near = buildPlan(b, null, 0);
+    const b = this.buildSummary();
+    // 一局只接一个联动（§3.9）：接上以后流派就定了，推荐和“对路”都跟着这条路线
+    if (this.links.size) { const L0 = [...this.links][0], P0 = BUILD_PATHS.find((x) => x.path.includes(L0)); if (P0) return buildPlan(b, P0.name); }
+    const near = buildPlan(b, null, 0);
     if (!this.mp && this.targetName) { const T = buildPlan(b, this.targetName); if (!T.done && T.have.length >= near.have.length) return T; }
     return near;
   },
@@ -144,7 +147,8 @@ Object.assign(World.prototype, {
   /* 火力：成型（第一个联动）× formK，再乘上每件对路的高品质件（属于已成型流派的件和联动本身）；没对路的高品质件不加火力 */
   recalcPower(p) {
     const links = [...p.links]; let k = links.length ? BUILD_CHECK.formKOf[links[0]] || BUILD_CHECK.formK : 1, on = 0;
-    const onIds = new Set(); for (const P of BUILD_PATHS) if (links.includes(P.path.find((x) => x.includes('+')))) for (const id of P.path) onIds.add(id);
+    if (links.length) { const lvOf = (id) => (id in p.gun ? p.gun[id] : p.support && p.support.id === id ? p.support.ulv : 0); if (SYNERGIES[links[0]].need.every((id) => lvOf(id) >= 3)) k *= BUILD_CHECK.maxK; } // 联动的两件都升满：再乘 maxK
+    const onIds = new Set(); for (const P of BUILD_PATHS) if (links.length && P.path.find((x) => x.includes('+')) === links[0]) for (const id of P.path) onIds.add(id); // 这一局的构筑 = 第一个成型的流派：只有它的件算对路（后面再凑的联动照样有效果，但不再乘火力）
     for (const id of onIds) { const q = p.qual[id] || 0; if (q) { k *= 1 + QUALITY_K[q]; on++; } }
     p.stats.dmgK = p.baseDmgK * k; p.rareOn = on;
   },
@@ -306,7 +310,14 @@ Object.assign(World.prototype, {
   },
   /* 大招键 = 选推荐（不会自动替玩家选）：能凑联动 > 升级已有的 > 第一个；单人时“目标流派”优先（联机不用本机的目标，保证各端一致） */
   recIndex(R) {
-    const sc = (G) => (G.opt.kind === 'link' ? 8 : 0) + (G.info.target ? 4 : 0) + (G.info.link ? 2 : 0) + (G.opt.from > 0 ? 1 : 0);
+    // 照推荐：联动 > 流派路线的下一步（两件先拿到、升到级，接上联动后升满）> 路线上的件（品质越高越好）> 能凑联动 > 其他升级；
+    // 不对路的高品质件只是“好看”，不加分；换掉路线上的支援要扣分
+    const P = this.aimPlan(), on = (id) => P.path.includes(id);
+    const sc = (G) => {
+      const o = G.opt, gs = o.kind === 'gun' || o.kind === 'support';
+      return (o.kind === 'link' ? 8 : 0) + (gs && o.id === P.next ? 6 : 0) + (G.info.target ? 4 : 0) + (gs && on(o.id) ? 2 + (o.qUp || 0) : 0)
+        + (G.info.link && G.info.link[0] === '★' ? 1 : 0) + (o.from > 0 ? 1 : 0) - (o.replace && on(o.replace.id) ? 5 : 0);
+    };
     let best = 0; R.gates.forEach((G, i) => { if (sc(G) > sc(R.gates[best])) best = i; }); return best;
   },
   chooseLimit() { return this.mp ? (this.vs ? CHOOSE_LIMIT.vs : CHOOSE_LIMIT.coop) : 0; },
@@ -332,7 +343,7 @@ Object.assign(World.prototype, {
     }
     if (o.bonus) this.addCharge(o.bonus, true);
     if (o.qUp && o.kind !== 'res') { p.qual[o.id] = Math.max(p.qual[o.id] || 0, Math.min(3, o.qUp)); p.res.rare = (p.res.rare || 0) + 1; if (p.res.rareAt === undefined) p.res.rareAt = this.runT; } // 品质记在这一件上
-    if (o.kind === 'gun' || o.kind === 'support') for (const k of Object.keys(SYNERGIES)) if (this.optLink(k)) this.applyOption({ kind: 'link', id: k, qUp: o.qUp && SYNERGIES[k].need.includes(o.id) ? o.qUp : 0 }); // 两件到级：联动自动接上（品质跟着补齐它的那一件）
+    if ((o.kind === 'gun' || o.kind === 'support') && !this.links.size) for (const k of Object.keys(SYNERGIES)) if (this.optLink(k)) { this.applyOption({ kind: 'link', id: k, qUp: o.qUp && SYNERGIES[k].need.includes(o.id) ? o.qUp : 0 }); break; } // 两件到级：联动自动接上（品质跟着补齐它的那一件）。一局只接一个联动：它就是这一局的构筑
     this.recalcPower(p); // 成型、对路的高品质件 → 全部火力
     p.skills = this.support ? [Object.assign({}, this.support, { t: 0.4, t2: 3 })] : []; // 自己的支援技能和冷却
     this.picks.push(o); this.crystals = this.picks.length; p.res.crystals++;
@@ -446,7 +457,7 @@ Object.assign(World.prototype, {
     const hasAim = (!this.mp && !!this.targetName) || P.have.length > 0; // 第一次选择前还没有方向，不硬塞一个“目标流派”
     const target = hasAim && (o.kind === 'link' ? o.id === P.link : P.comps.includes(o.id) && !own(o.id)) ? P.name : null;
     let link = '';
-    if (o.kind === 'gun' || o.kind === 'support') {
+    if ((o.kind === 'gun' || o.kind === 'support') && !this.links.size) {
       const others = [...GUN_ORDER.filter((id) => id !== o.id && own(id)), ...(this.support && this.support.id !== o.id && !(o.replace && o.replace.id === this.support.id) ? [this.support.id] : [])];
       for (const x of others) { const k = synKey(o.id, x); if (SYNERGIES[k] && !this.links.has(k)) { link = `★ 能和${SKILLS[x].name}凑联动`; break; } }
     }

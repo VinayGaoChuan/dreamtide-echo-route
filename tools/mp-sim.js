@@ -7,6 +7,10 @@ if (process.env.NETSEED) { let r = +process.env.NETSEED; Math.random = () => { r
 const dir = process.argv[2] || path.join(__dirname, '..', 'js');
 const stageArg = process.argv[3] || 'all', N = +(process.argv[4] || 2), MODE = process.argv[5] || 'direct', LOSS = +(process.argv[6] || 0.15), LAT = +(process.argv[7] || 80), DELAY = +(process.argv[8] || 4);
 const VSM = stageArg === 'vs'; // 对抗模式（v0.11）：stage 写 vs
+// 关卡写 chain：第 1 章三关连成一局（§3.9），和真实合作一样从 1-1 打起，换关时也逐帧比对；
+// 这是同步测试不是难度测试，所以给 12 级的属性，尽量把三关和两次换关都跑到
+const CHAINED = (st) => st === 'chain';
+const STATS_JS = (st) => (CHAINED(st) ? '(() => { const mm = freshMeta(); mm.shared.level = 12; mm.planes[r.plane] = newPlaneRecord(r.plane); return planeStats(mm, r.plane); })()' : 'planeStats(null, r.plane)');
 const A9 = process.argv[9] || '';
 const DROP = A9 && !A9.includes('~') ? A9.split('@').map(Number) : null; // 例如 1@3000：第 1 号玩家在第 3000 帧掉线（不回来）
 const OUT = A9.includes('~') ? (([k, r]) => { const [f, d] = r.split('~').map(Number); return { k: +k, at: f, ticks: d }; })(A9.split('@')) : null; // 例如 1@2000~900：第 1 号玩家第 2000 帧起彻底断网 900 帧（30 秒）再回来
@@ -75,9 +79,9 @@ function roster(n) { return Array.from({ length: n }, (_, i) => ({ id: 'p' + i, 
 function runDirect(stage, n) {
   const seed = 12345 + stage.charCodeAt(2) * 7;
   const ctxs = Array.from({ length: n }, (_, k) => makeCtx(k));
-  ctxs.forEach((c, k) => { c.__roster = roster(n); R(c, `var __res = null; var __w = new World({ mode: 'run', W: 1280, stage: '${VSM ? '1-1' : stage}', vs: ${VSM}, seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
+  ctxs.forEach((c, k) => { c.__roster = roster(n); R(c, `var __res = null; var __w = new World({ mode: 'run', W: 1280, stage: '${VSM || CHAINED(stage) ? '1-1' : stage}', vs: ${VSM}, chain: ${CHAINED(stage)}, seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: ${STATS_JS(stage)} })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });`); });
   let frame = 0, teamSolo = 0, teamEarly = 0; const downs = { down: 0, revive: 0 };
-  for (; frame < 30 * 900; frame++) {
+  for (; frame < 30 * (CHAINED(stage) ? 2400 : 900); frame++) {
     // 每个玩家只在自己那一端算自己的操作，再“发给”所有人（经过 net.js 的量化编码，和真实联机一致）
     const inputs = ctxs.map((c, k) => R(c, `NetCodec.decodeFrame(NetCodec.encodeFrame(__bot(__w, ${k})))`));
     // 0 号端在模拟步之间画画面、读 HUD（真实游戏里渲染穿插在步与步之间）；其他端不画：画面代码不许动到玩法状态
@@ -96,7 +100,7 @@ function runDirect(stage, n) {
     for (const ev of R(ctxs[0], '__ev.splice(0).concat(__w.events.splice(0).map((e) => e.type))')) if (ev === 'down' || ev === 'revive') downs[ev]++;
     if (R(ctxs[0], '__w.done') ) break;
   }
-  const res = R(ctxs[0], '__res && { win: __res.win, runT: Math.round(__res.runT), kills: __res.stats.kills }');
+  const res = R(ctxs[0], '__res && { win: __res.win, runT: Math.round(__res.runT), kills: __res.stats.kills, cleared: __res.cleared, end: __res.stage }');
   // 每架飞机自己的 Build 和星砂（各端看到的必须一样；不同飞机之间应该各不相同）
   const rescued = R(ctxs[0], '__w.m.rescuedNow.join(",") + " upper:" + __w.m.upperRoute');
   const per = R(ctxs[0], `JSON.stringify(__w.players.map((q) => ({ build: q.picks.map((o) => o.kind[0] + ':' + o.id).join('>'), dust: Math.round(q.res.dust), offers: q.res.offers })))`);
@@ -122,7 +126,7 @@ async function runNet(stage, n) {
   ctxs.forEach((c, k) => { c.__send = (obj) => deliver(k, obj); c.__roster = roster(n);
     c.__clock = () => now;
     R(c, `var __res = null, __replaying = false; var __sess = new LockstepSession({ selfIndex: ${k}, n: ${n}, delay: ${DELAY}, isHost: ${k === 0}, clock: () => __clock(), send: (o) => __send(o) });
-      var __wopts = () => ({ mode: 'run', W: 1280, stage: '${VSM ? '1-1' : stage}', vs: ${VSM}, seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: planeStats(null, r.plane) })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });
+      var __wopts = () => ({ mode: 'run', W: 1280, stage: '${VSM || CHAINED(stage) ? '1-1' : stage}', vs: ${VSM}, chain: ${CHAINED(stage)}, seed: ${seed}, players: __roster.map((r) => Object.assign({}, r, { stats: ${STATS_JS(stage)} })), me: ${k}, settings: __settings, world: __world, cb: { onEnd: (r) => { __res = r; } } });
       var __w = new World(__wopts());`); });
   const hashes = ctxs.map(() => new Map());
   let maxFrame = 0, stalls = 0, ticks = 0; const stallBy = {};
@@ -173,7 +177,8 @@ async function runNet(stage, n) {
 }
 
 (async () => {
-  const stages = stageArg === 'all' ? ['1-1', '1-2', '1-3'] : [stageArg];
+  // all：连成一局（从 1-1 打起、两次换关）+ 单独的 1-3（连打时机器人可能倒在 1-2，最后一关的内容也要比对到）
+  const stages = stageArg === 'all' ? ['chain', '1-3'] : [stageArg];
   let failed = 0;
   for (const st of stages) {
     const r = MODE === 'net' ? await runNet(st, N) : runDirect(st, N);

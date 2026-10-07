@@ -41,6 +41,8 @@ class World {
     this.np = roster.length; this.mp = this.np > 1 || !!o.mp;
     this.first = !!o.first && !this.mp; this.tutorial = !!o.tutorial && !this.mp; this.targetName = o.target || null; // 这一局追的流派（和大厅“下一局目标”一致）
     this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id;
+    // 连成一局（§3.9）：首领倒了就原地换到下一关，构筑、心数、资源带着走；cleared 记这一局打倒了哪几关的首领
+    this.chain = !!o.chain && !o.vs; this.cleared = [];
     // 家园改变战场（v0.10）：上层风圈是否已修好、这次要救谁、NPC 职责带来的变化。多人时用房主的，各端一致
     this.wf = Object.assign({ upper: false, target: null, targets: null, rescued: [], clue: false, beacon: false, scout: false }, o.world || {});
     if (!Array.isArray(this.wf.targets)) this.wf.targets = this.wf.target ? [this.wf.target] : []; // 联机：房间里每个人当前要救的伙伴都在这里
@@ -226,7 +228,7 @@ class World {
     const sideSet = new Set((this.sideLog || []).filter((s) => this.t - s.t < 4).map((s) => s.side)); if (this.boss) sideSet.add('front'); // 最近 4 秒威胁从几个方向来（Boss 一直在前方）
     const sides = sideSet.size, tens = this.D && this.tension ? this.tension() : null;
     const phase = this.worldRitual() ? 'upgrade' : this.boss ? 'boss' : this.goal ? this.goal.B.kind : this.D ? this.D.st : 'none';
-    return { intensity: I, rewards, over: !!this.done || this.state === 'dying' || this.state === 'victory', won: this.state === 'victory' || !!this.wonRun, phase, unfair: this.m.unfair, power: engaged && !this.worldRitual() ? d : 0, sides, tens };
+    return { intensity: I, rewards, over: !!this.done || this.state === 'dying' || this.lastVictory(), won: this.lastVictory() || !!this.wonRun, phase, unfair: this.m.unfair, power: engaged && !this.worldRitual() ? d : 0, sides, tens };
   }
 
   /* ================================================== main step ================================================== */
@@ -274,7 +276,7 @@ class World {
     } else if (this.state === 'victory') {
       this.stateT -= dt;
       if (srnd() < 0.6) this.dropPickup('dust', srand(this.W * 0.2, this.W), -10, { vx: srand(-40, 40), vy: srand(120, 260), value: 3, big: true, rain: true, seed: 0 });
-      if (this.stateT <= 0 && !this.done) this.finish(true);
+      if (this.stateT <= 0 && !this.done) { if (this.chain && this.nextStageId()) this.advanceStage(); else this.finish(true); }
     }
     this.updateIncoming(sdt);
     this.updateEnemies(sdt);
@@ -1254,7 +1256,7 @@ class World {
   }
   onBossDead() {
     this.state = 'victory'; this.stateT = 3.4; this.phase = 'victory';
-    this.bossTime = this.boss.fightT;
+    this.bossTime = this.boss.fightT; this.cleared.push({ id: this.stageId, bossTime: Math.round(this.boss.fightT), runT: Math.round(this.runT) });
     if (this.bossProxy) this.bossProxy.alive = false;
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.killEnemy(e, {});
     this.clearBullets(true); this.warns = [];
@@ -1264,6 +1266,39 @@ class World {
     this.hitStop(0.1);
     this.highlight(); this.victoryT = 0;
     this.shake(1); this.flash = 0.8 * this.flashK(); this.flashColor = '255,243,200'; this.rumble(1, 1, 400);
+  }
+  // 整局的胜利：连成一局时只有最后一关的首领倒下才算（中间几关的胜利马上换关）
+  lastVictory() { return this.state === 'victory' && !(this.chain && this.nextStageId()); }
+  nextStageId() { const i = STAGE_ORDER.indexOf(this.stageId); return i >= 0 ? STAGE_ORDER[i + 1] || null : null; }
+  /* 连成一局：换到下一关。关卡里的东西（敌人、子弹、地图物件、目标链、首领、预警、计时器）从头来；
+     飞机、构筑、心数、资源、统计带着走；倒下的队友站起来；每过一关回两颗心 */
+  advanceStage() {
+    const next = this.nextStageId(); if (!next) return;
+    this.stage = STAGES[next]; this.stageId = next;
+    this.state = 'play'; this.phase = 'fight'; this.stateT = 0; this.victoryT = undefined;
+    for (const e of this.enemies) e.alive = false;
+    this.enemies = []; this.incoming = []; this.pickups = []; this.portals = []; this.surprise = null; this.burstKills = []; this.arcs = []; this.beams = []; this.rings = []; this.walls = [];
+    this.warns = []; this.timers = []; this.bursting = null; this.bfx = null; this.cloudWall = null; this.timeStop = 0; this.reverseT = 0; this.slowT = 0;
+    this.bullets.each((b) => { b.on = false; }); this.shots.each((s) => { s.on = false; });
+    this.arena = { top: TOP, bottom: BOTTOM }; this.arenaTarget = { top: TOP, bottom: BOTTOM };
+    this.seg = null; this.segIdx = 0; this.boss = null; this.bossProxy = null; this.bossIntroT = 0; this.bossEarly = false; this.carnival = false; this.bossTime = 0;
+    // 跨关累计的统计和随行的伙伴：initMap / initDirector 会清零，先存下再加回去
+    const keep = {}; for (const k of ['interacts', 'interactFails', 'rescues', 'giants', 'breaks', 'backlogs']) keep[k] = this.m[k] || 0;
+    const goalTimes = (this.m.goalTimes || []).slice(), noGoalMax = this.m.noGoalMax || 0, companions = this.companions, journey = this.journey, interactMax = this.m.interactMax || 0;
+    this.initMap({ seenMap: [...(this.seenMap || [])] });
+    this.initDirector();
+    for (const k in keep) this.m[k] = (this.m[k] || 0) + keep[k];
+    this.m.goalTimes = goalTimes.concat(this.m.goalTimes || []); this.m.noGoalMax = Math.max(noGoalMax, this.m.noGoalMax || 0); this.m.interactMax = Math.max(interactMax, this.m.interactMax || 0);
+    this.companions = companions || []; this.journey = journey || [];
+    const n = Math.max(1, this.np);
+    this.players.forEach((q, i) => {
+      if (q.gone) return;
+      q.ritual = null; q.ritualQueue = []; q.x = this.W * 0.24 - (n > 1 ? (i % 2) * 40 : 0); q.y = (TOP + BOTTOM) / 2 + (i - (n - 1) / 2) * 90; q.vx = q.vy = 0;
+      if (!q.alive) { q.alive = true; q.downT = 0; q.saveT = 0; q.hp = 0; }
+      q.hp = Math.min(q.maxHp, q.hp + 2); q.inv = 2;
+    });
+    this.eachPlayer(() => this.syncWingmen());
+    this.emit('stageAdvance', { id: next, name: this.stage.name, n: STAGE_ORDER.indexOf(next) + 1 });
   }
   finish(win) {
     this.done = true; this.phase = 'end';
@@ -1276,7 +1311,7 @@ class World {
     const R = this.me.res, m = Object.assign({}, this.m, R, { frags: Object.assign({}, R.frags), choiceTimes: R.choiceTimes.slice() }); // 自己的资源 + 全队统计
     return {
       win, plane: this.me.planeId, runT: this.runT, stats: m, mp: this.np > 1, team: this.players.map((q) => ({ name: q.name, plane: q.planeId, gone: q.gone })),
-      stage: this.stageId, build: this.buildSummary(), progress: win ? 1 : this.vs ? clamp(this.vs.t / (VS.stages * VS.stageT), 0, 1) : clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1),
+      stage: this.stageId, cleared: this.cleared.map((c) => c.id), clearedAt: Object.fromEntries(this.cleared.map((c) => [c.id, c.runT])), chain: this.chain, build: this.buildSummary(), progress: win ? 1 : this.vs ? clamp(this.vs.t / (VS.stages * VS.stageT), 0, 1) : (() => { const f = clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1); return this.chain ? clamp((this.cleared.length + f) / STAGE_ORDER.length, 0, 1) : f; })(),
       memories: this.pickMemories ? this.pickMemories() : [], hurt: Object.assign({}, m.hurt || {}), lastHurt: m.lastHurt || null, clue: pick(STAGE_CLUES[this.stageId] || ['']), goalTimes: (m.goalTimes || []).slice(),
       choiceAvg: m.choiceTimes.length ? m.choiceTimes.reduce((a, b) => a + b, 0) / m.choiceTimes.length : null,
       skills: [...GUN_ORDER.filter((id) => this.gun[id] > 0).map((id) => ({ id, lv: this.gun[id] })), ...(this.support ? [{ id: this.support.id, lv: this.support.ulv }] : [])],
