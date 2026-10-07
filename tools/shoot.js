@@ -7,9 +7,10 @@
 const fs = require('fs'), path = require('path');
 const { PILOT_SRC } = require('./sim-env');
 const { ROOT, sleep, openGame } = require('./chrome-env'); // 找 Chrome、起本地服务、CDP（和 ui-check.js 共用）
+const { EN_SRC } = require('./capture-en'); // --en：只给画面里出现的那几句换英文（录英文商店素材）；--collect：记下每张里的中文
 const args = process.argv.slice(2), opt = (k) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : null; };
 const OUT = path.resolve(args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--') && args[i - 1] !== '--keep')) || path.join(ROOT, '.ai', 'shots'));
-const W = 1920, H = 1080;
+const W = 1920, H = 1080, EN_MODE = args.includes('--en'), COLLECT = args.includes('--collect');
 
 /* 页面里的助手：自动驾驶接管本机飞机（截图时不受伤），按条件快进，截图时可以按住不动 */
 const HELPER = PILOT_SRC + `
@@ -91,7 +92,15 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
   const G0 = await openGame({ W, H, chrome: opt('chrome') }), page = G0.page, ev = G0.ev;
   try {
     await ev(HELPER + ';true');
-    const shot = async (name) => { const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(OUT, 'raw', name + '.png'), Buffer.from(r.data, 'base64')); };
+    if (EN_MODE || COLLECT) await ev(EN_SRC + `; __EN.on = ${EN_MODE}; __EN.collect = ${COLLECT}; true`);
+    const strings = {};
+    const shot = async (name) => {
+      // 英文素材：先把界面上的字换掉；收集：只记这一帧前后画出来、看得见的中文
+      if (COLLECT) { await ev('__EN.take(); true'); await sleep(160); strings[name] = await ev('__EN.dom(); __EN.take()'); }
+      // 英文素材：这一张里还有没换掉的中文就记下来（对照表缺句子）
+      if (EN_MODE) { await ev('__EN.takeMiss(); true'); await sleep(160); await ev('__EN.dom(); true'); await sleep(60); const miss = await ev('__EN.takeMiss()'); if (miss.length) strings[name] = miss; }
+      const r = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(OUT, 'raw', name + '.png'), Buffer.from(r.data, 'base64'));
+    };
     const log = [];
     const SEL = !MOMENTS_MODE ? PLAN : !ONLY ? MOMENTS : MOMENTS.filter((m) => ONLY.split(',').includes(m.name)).map((m, i) => (i === 0 && !m.start ? Object.assign({}, m, { start: '1-1' }) : m));
     for (const s of SEL) {
@@ -148,6 +157,7 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
     fs.writeFileSync(path.join(OUT, 'images', '01-capsule.png'), await compose({ w: 920, h: 430, items: [{ b64: b64(fs.existsSync(path.join(OUT, 'raw', 'keyart.png')) ? 'keyart' : 'title'), sx: 0, sy: Math.round((H - ch) / 2), sw: W, sh: ch, x: 0, y: 0, w: 920, h: 430 }] }));
     SHOTS.forEach((n, i) => fs.copyFileSync(path.join(OUT, 'raw', n + '.png'), path.join(OUT, 'images', `0${i + 2}-${n}.png`)));
     fs.writeFileSync(path.join(OUT, 'images', '09-trailer-frames.png'), await compose({ w: W, h: H, items: TRAILER.map((n, i) => ({ b64: b64(n), sx: 0, sy: 0, sw: W, sh: H, x: (i % 3) * W / 3, y: Math.floor(i / 3) * H / 3, w: W / 3, h: H / 3 })) }));
+    if (COLLECT || EN_MODE) fs.writeFileSync(path.join(OUT, EN_MODE ? 'en-missing.json' : 'strings.json'), JSON.stringify(strings, null, 1));
     const errs = await ev('(window.__errs || []).length');
     console.log('截图完成', OUT, '页面错误', errs);
   } finally {

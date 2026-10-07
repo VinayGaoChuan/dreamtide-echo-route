@@ -952,7 +952,7 @@ class World {
   tryBurst() {
     const p = this.player;
     if (this.state !== 'play' || this.ritual || !p.alive) return;
-    if (this.bursting) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text(this.vs ? '别人的大招还在放' : '队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招
+    if (this.bursting) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text(this.bursting.owner === p.idx ? '大招正在放' : this.vs ? '别人的大招还在放' : '队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招（自己的还在放时别说成队友的）
     // 没充满：说出来，大招按钮也闪一下（按了要有看得见的反应，lessons UT4）
     if (p.stock < 1) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text('大招还没充满', p.x, p.y - 40, '#ffe38a', 15, 1.2); this.emit('burstEmpty'); } return; }
     p.stock--;
