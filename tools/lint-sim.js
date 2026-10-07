@@ -1,4 +1,4 @@
-// 联机同步的写法检查：只给本机看的分支（this.mine() / isMe）里不许用这一局的随机数（srnd / srand / srandi / spick）。
+// 联机同步的写法检查：只给本机看的分支（mine 判断、isMe）里不许用这一局的随机数（srnd、srand、srandi、spick 这几个函数）。
 // 那些分支只在一部分客户端执行，用了就会让各端的随机数序列错开，联机分叉（2026-10-07：冲锋车的火花这样写过一次）。
 // 用法：node tools/lint-sim.js（有问题时退出码 1）
 const fs = require('fs'), path = require('path');
