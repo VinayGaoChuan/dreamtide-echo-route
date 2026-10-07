@@ -402,6 +402,13 @@ const Sound = (() => {
     mapDone: () => { const t = ctx.currentTime; [69, 74, 78, 81, 86, 90].forEach((m, i) => bell(t + i * 0.055, m, 0.2, bus)); noise({ f: 400, f2: 4000, q: 0.5, dur: 0.5, vol: 0.12, a: 0.1 }); },
     bridge: () => { const t = ctx.currentTime; [62, 66, 69, 74, 78, 81, 86].forEach((m, i) => bell(t + i * 0.07, m, 0.2, bus)); tone({ f: 220, f2: 440, dur: 0.9, vol: 0.12, type: 'triangle' }); },
     rescue: () => { const t = ctx.currentTime; noise({ f: 2600, f2: 900, q: 1, dur: 0.2, vol: 0.12 }); [78, 83, 86, 90].forEach((m, i) => bell(t + 0.1 + i * 0.08, m, 0.2, bus)); },
+    // 装备掉落（§6.8）：越稀有越亮、越长；金色是专属的一声
+    lootBlue: () => { const t = ctx.currentTime; [76, 83].forEach((m, i) => bell(t + i * 0.06, m, 0.16, bus)); },
+    lootYellow: () => { const t = ctx.currentTime; [74, 79, 86].forEach((m, i) => bell(t + i * 0.06, m, 0.18, bus)); tone({ f: 880, f2: 1320, dur: 0.25, vol: 0.05, type: 'triangle' }); },
+    lootGreen: () => { const t = ctx.currentTime; [67, 74, 79, 83, 86].forEach((m, i) => bell(t + i * 0.07, m, 0.2, bus)); tone({ f: 330, f2: 660, dur: 0.6, vol: 0.1, type: 'triangle' }); },
+    lootGold: () => { const t = ctx.currentTime; tone({ f: 60, f2: 40, dur: 0.6, vol: 0.35, type: 'sine' }); noise({ f: 3000, f2: 600, q: 0.7, dur: 0.5, vol: 0.14 }); [62, 69, 74, 78, 81, 86, 90].forEach((m, i) => bell(t + 0.12 + i * 0.07, m, 0.22, bus)); },
+    pickLoot: (o) => { const t = ctx.currentTime, k = o.k || 0; bell(t, 72 + k * 3, 0.14, bus); tone({ f: 500 + k * 120, f2: 900 + k * 160, dur: 0.08, vol: 0.05 }); },
+    cargoShip: () => { const t = ctx.currentTime; noise({ f: 300, f2: 1800, q: 0.6, dur: 0.6, vol: 0.14, a: 0.05 }); [64, 71, 76, 83].forEach((m, i) => bell(t + 0.3 + i * 0.09, m, 0.18, bus)); },
     giantWake: () => { tone({ f: 70, f2: 110, dur: 1.6, vol: 0.3, type: 'sine', a: 0.4 }); tone({ f: 140, f2: 220, dur: 1.4, vol: 0.12, type: 'triangle', a: 0.5 }); const t = ctx.currentTime; [57, 64, 69].forEach((m, i) => bell(t + 0.5 + i * 0.18, m, 0.2, bus)); },
   };
 

@@ -29,6 +29,21 @@ for (const k of ['gun', 'support', 'bmod', 'links', 'ritual', 'ritualQueue', 'of
 
 Object.assign(World.prototype, {
   initBuild() { this.focusK = 1; }, // Build 本身在 makePlayer 里，每架飞机一份
+  /* 开局：装备自带的能力（暗金、满套）直接装上（1 级 + 装备的 +1 级）；预言者多一次完整仪式。不走仪式，不算一次选择 */
+  applyGearStart(q) {
+    const st = q.stats || {}; if (!st.grant || !st.grant.length) { if (st.flags && st.flags.prophet) this.queueRitual('core', { who: q.idx, full: true, q: 1, x: q.x + 220, y: q.y, device: 'crystal', promise: '预言者' }); return; }
+    this.withPlayer(q, () => {
+      for (const id of st.grant) {
+        const lv = Math.min(3, 1 + this.plusOf(id));
+        if (id in this.gun) { if (this.gun[id] < lv) this.gun[id] = lv; }
+        else if (SKILLS[id] && SKILLS[id].slot === 'support' && !this.support) this.support = { id, ulv: lv, lv: UPG_LEGACY[lv], t: 0.4, t2: 3 };
+      }
+      q.skills = this.support ? [Object.assign({}, this.support, { t: 0.4, t2: 3 })] : [];
+      if (!this.links.size) for (const k of Object.keys(SYNERGIES)) if (this.optLink(k)) { this.links.add(k); break; }
+      this.recalcPower(q); this.hudBuild = this.buildSummary(); q.granted = st.grant.slice();
+      if (st.flags && st.flags.prophet) this.queueRitual('core', { who: q.idx, full: true, q: 1, x: q.x + 220, y: q.y, device: 'crystal', promise: '预言者' });
+    });
+  },
   /* 旧效果代码用的档位：支援 / 爆破 1~3 级 → 1 / 3 / 5 */
   lvOf(id) {
     if (id === 'bomb') return UPG_LEGACY[this.gun.bomb];
@@ -39,11 +54,12 @@ Object.assign(World.prototype, {
   hasSyn(a, b) { return this.links.has(synKey(a, b)); },
 
   /* ---------- 候选 ---------- */
-  optGun(id, rare) { const from = this.gun[id]; if (from >= 3) return null; return { kind: 'gun', id, from, to: Math.min(3, from + (rare ? 2 : 1)) }; },
+  plusOf(id) { const pl = (this.player.stats && this.player.stats.plus) || {}; return (pl[id] || 0) + (pl.all || 0); }, // 装备「+1 级某能力」：第一次拿到时从高一级起步
+  optGun(id, rare) { const from = this.gun[id]; if (from >= 3) return null; return { kind: 'gun', id, from, to: Math.min(3, from + (rare ? 2 : 1) + (from === 0 ? this.plusOf(id) : 0)) }; },
   optSupport(id, rare) {
     const cur = this.support;
     if (cur && cur.id === id) return cur.ulv >= 3 ? null : { kind: 'support', id, from: cur.ulv, to: Math.min(3, cur.ulv + (rare ? 2 : 1)) };
-    return { kind: 'support', id, from: 0, to: rare ? 2 : 1, replace: cur ? { id: cur.id, lv: cur.ulv } : null };
+    return { kind: 'support', id, from: 0, to: Math.min(3, (rare ? 2 : 1) + this.plusOf(id)), replace: cur ? { id: cur.id, lv: cur.ulv } : null };
   },
   optBmod(id) {
     const cur = this.bmod;

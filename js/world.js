@@ -10,17 +10,19 @@ let _eid = 1; // 只给不进同步的场合兜底；每个 World 用自己的 t
 const PLAYER_COLORS = ['#ffe38a', '#9fe3f0', '#ff9fcf', '#9ff2c8'];
 const NEUTRAL_INPUT = Object.freeze({ mx: 0, my: 0, focus: false, burst: false, dx: 0, dy: 0 });
 
-/* 飞机属性 = 飞机基础 × 共享等级 × 这架飞机天赋树已点亮的节点（穿透 / 追踪节点只强化本局已获得的能力） */
+/* 飞船属性 = 飞船基础 × 驾驶员等级 × 身上的装备（docs/design.md §5、§6）。联机时每人把自己算好的这一份带进房间，各端用同一份 */
+function pilotLevel(meta) { return (meta && meta.pilot && meta.pilot.lv) || (meta && meta.shared && meta.shared.level) || 1; }
 function planeStats(meta, planeId) {
-  const P = PLANES[planeId], rec = (meta && meta.planes && meta.planes[planeId]) || { stars: 1 }, lv = (meta && meta.shared && meta.shared.level) || 1;
-  const s = { dmg: 0, blast: 0, charge: 0, magnet: 0, repeat: 0, heart: 0, boss: 0, pierceX: 0, homingX: 0, houseFast: 0, npcBoost: 0 };
-  if (rec.map) for (const r of ROUTE_ORDER) {
-    const nodes = rec.map[r] || [], lit = rec.lit ? rec.lit[r] || 0 : 0;
-    for (let i = 0; i < Math.min(lit, nodes.length); i++) if (nodes[i].type in s) s[nodes[i].type] += nodes[i].v;
-  }
-  return { dmgK: sharedAtk(lv) * (1 + s.dmg / 100), blastK: 1 + s.blast / 100, chargeK: 1 + s.charge / 100, magnetK: 1 + s.magnet / 100, repeat: s.repeat / 100, wings: 0,
-    hearts: P.hearts + s.heart + sharedHearts(lv), luck: Math.max(0, lv - 1), bossK: 1 + s.boss / 100, stars: rec.stars || 1, pierceX: s.pierceX, homingX: s.homingX / 100, houseFast: s.houseFast / 100, npcBoost: s.npcBoost / 100, level: lv, raw: s };
+  const P = PLANES[planeId] || PLANES.moon, lv = pilotLevel(meta), g = Gear.compute(meta && meta.gear ? meta.gear.eq : null), pct = (k) => (g[k] || 0) / 100;
+  return { dmgK: (1 + PILOT.dmg * (lv - 1)) * (1 + pct('dmg')), blastK: 1 + pct('blast'), chargeK: 1 + pct('charge'), magnetK: 1 + pct('pick'), repeat: 0, wings: 0,
+    hearts: Math.max(1, P.hearts + pilotHearts(lv) + (g.life || 0) / 10), luck: Math.floor(((lv - 1) * 19) / 29), bossK: 1, stars: 1, pierceX: 0, homingX: pct('homing'), houseFast: 0, npcBoost: 0, level: lv,
+    gun: g.gun, rateK: 1 + pct('rate'), crit: 5 + (g.crit || 0), critD: 1.5 + pct('critD'), energy: pct('energy'), kinetic: pct('kinetic'), vsShield: pct('vsShield'), vsArmor: pct('vsArmor'),
+    supK: 1 + pct('supK'), burstK: 1 + pct('burstK'), capAdd: g.cap || 0, dr: Math.min(0.5, pct('dr')), invK: 1 + pct('inv'), spdK: Math.max(0.6, 1 + pct('spd')), leech: g.leech || 0,
+    pierceD: pct('pierceD'), sideD: pct('sideD'), orbAdd: g.orb || 0, wingD: pct('wingD'), beamW: pct('beamW'), iceT: pct('iceT'), starD: pct('starD'), mf: g.mf || 0, credit: pct('credit'), ritualQ: pct('ritual'),
+    plus: g.plus || {}, grant: g.grant || [], flags: g.flags || {}, burstSwap: g.burst || null, sets: g.sets || {}, look: Gear.look(meta && meta.gear ? meta.gear.eq : null) };
 }
+const DTYPE_OF_KIND = { zap: 'energy', beam: 'energy', orb: 'energy', ice: 'kinetic', shard: 'kinetic', starbolt: 'kinetic', snow: 'kinetic' };
+const PLANE_DTYPE = { moon: 'energy', candy: 'energy', clock: 'energy', cloud: 'kinetic', paper: 'kinetic', whale: 'kinetic' };
 
 const ENEMY_HP = { jelly: 8, moth: 8, boat: 22, tick: 30, star: 18, beacon: 60, jellyE: 480, tickE: 540, starE: 440, mirror: 220, dummy: 1e9 };
 const ENEMY_R = { jelly: 20, moth: 18, boat: 22, tick: 20, star: 20, beacon: 22, jellyE: 32, tickE: 30, starE: 28, mirror: 34, dummy: 20 };
@@ -40,7 +42,7 @@ class World {
     const roster = o.players || [{ id: 'solo', name: '', plane: o.plane || 'moon', stats: o.stats, ultCap: o.ultCap || 1, cos: o.cos }];
     this.np = roster.length; this.mp = this.np > 1 || !!o.mp;
     this.first = !!o.first && !this.mp; this.tutorial = !!o.tutorial && !this.mp; this.targetName = o.target || null; // 这一局追的流派（和大厅“下一局目标”一致）
-    this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id;
+    this.stage = STAGES[o.stage] || STAGES['1-1']; this.stageId = this.stage.id; this.startStage = this.stageId; this.catchUp = Math.max(0, o.catchUp | 0); // 路标：从第 2、3 关开始时补发的升级次数
     // 连成一局（§3.9）：首领倒了就原地换到下一关，构筑、心数、资源带着走；cleared 记这一局打倒了哪几关的首领
     this.chain = !!o.chain && !o.vs; this.cleared = [];
     // 家园改变战场（v0.10）：上层风圈是否已修好、这次要救谁、NPC 职责带来的变化。多人时用房主的，各端一致
@@ -52,7 +54,7 @@ class World {
     this.ladder = o.vs ? 0 : Math.max(0, Math.min(LADDER_MAX, o.ladder | 0)); this.L = ladderRules(this.ladder);
     this.meIdx = o.me || 0; this.me = this.players[this.meIdx]; this.player = this.players[0];
     this.inputs = this.players.map(() => Object.assign({}, NEUTRAL_INPUT));
-    this.scene = o.scene || new SeaScene(); this.scene.speed = 90; this.scene.dir = 1; this.scene.dim = this.mode === 'run' ? 1 : 0; this.scene.moonFx = null;
+    this.scene = o.scene || new SpaceScene(); this.scene.speed = 90; this.scene.dir = 1; this.scene.dim = this.mode === 'run' ? 1 : 0; this.scene.moonFx = null;
     this.low = this.settings.particles === 'low';
     this.diff = { warnBonus: 0.1 }; // 大众向：Boss 预警统一多给 0.1 秒
     this.t = 0; this.runT = 0; this.state = 'play'; this.phase = 'fight';
@@ -74,10 +76,13 @@ class World {
       killTimeSum: 0, killTimeN: 0, gapMax: 0, gapT: 0, talent: 0, route: [], streak100: 0, hitsTaken: 0, leaks: 0, offerMiss: 0, stockIdle: 0, segsDone: 0, workT: 0, rescuedNow: [], upperRoute: 0, unfair: 0, dmgOut: 0, golds: 0 };
     this.hintStep = this.first || this.tutorial ? 0 : -1; this.hintShown = null;
     this.initMap(o);
+    this.initLoot(o);
     this.pickCd = { bolt: 0, mine: 0, zap: 0 };
     if (this.mode === 'preview') this.setupPreview();
     else if (o.vs && this.np > 1) this.initVs(); // 对抗（v0.11）：每人一条航道、三段计分，不走合作关卡的目标链
     else this.initDirector();
+    if (this.mode === 'run' && !o.vs) this.eachPlayer((q) => this.applyGearStart(q)); // 装备：开局自带的能力、预言者多一次仪式
+    if (this.mode === 'run' && !o.vs && this.catchUp) this.eachPlayer((q) => { for (let i = 0; i < this.catchUp; i++) this.queueRitual('catch', { who: q.idx, x: q.x + 240, y: (TOP + BOTTOM) / 2, device: 'crystal', promise: '路标补发' }); });
     this.eachPlayer(() => this.syncWingmen());
     this.player = this.me; // 模拟之外（界面、HUD、渲染）读到的“当前飞机”就是本机这架
   }
@@ -86,7 +91,8 @@ class World {
     const planeId = r.plane || 'moon', P = PLANES[planeId], stats = Object.assign({}, r.stats || planeStats(null, planeId)), cos = r.cos || {}, n = Math.max(1, this.np || 1);
     const expC = COSMETICS.exp.find((c) => c.id === cos.exp), trC = COSMETICS.trail.find((c) => c.id === cos.trail) || COSMETICS.trail[0];
     const y = (TOP + BOTTOM) / 2 + (i - (n - 1) / 2) * 90;
-    return { idx: i, id: r.id || 'p' + i, name: r.name || '', planeId, P, stats, baseDmgK: stats.dmgK, qual: {}, ultCap: r.ultCap || 1, expColors: (expC && expC.colors) || P.colors.exp, trailColors: trC.colors, trailId: trC.id,
+    return { idx: i, id: r.id || 'p' + i, name: r.name || '', planeId, P, stats, baseDmgK: stats.dmgK, qual: {}, ultCap: Math.max(1, (r.ultCap || 1) + (stats.capAdd || 0)), expColors: (expC && expC.colors) || P.colors.exp, trailColors: trC.colors, trailId: trC.id,
+      gunB: GUN_BASES[(stats.gun && stats.gun.base) || 'rapid'] || GUN_BASES.rapid, gunDmg: (stats.gun && stats.gun.dmg) || GUN_BASES.rapid.dmg, burstId: stats.burstSwap || planeId, cargo: [], lootT: 0,
       color: PLAYER_COLORS[i % PLAYER_COLORS.length], wingmen: [], storm: null, skills: [], downT: 0, gone: false,
       x: this.W * 0.24 - (n > 1 ? (i % 2) * 40 : 0), y, vx: 0, vy: 0, r: 6, hp: stats.hearts + (this.first ? FIRST_RUN.hearts : 0), maxHp: stats.hearts + (this.first ? FIRST_RUN.hearts : 0), inv: 0, hurtT: 0, burst: 0, stock: 0, tilt: 0, blink: 0, blinkT: 2, cloudShield: false, cloudCd: 0, fireT: 0.1, alt: 1, trail: [], trailT: 0, alive: true, candy: 0, moved: 0,
       // 自己的 Build：三个槽、联动、流派、升级队列和正在进行的升级仪式
@@ -283,6 +289,7 @@ class World {
     this.updateBullets(sdt);
     this.updateShots(sdt);
     this.updatePickups(sdt);
+    this.updateLoot(sdt); // 装备掉落只是本机的表现，不进同步哈希
     this.updateWarns(sdt);
     this.updateFx(sdt);
     if (!rit) this.updateStreak(sdt); // 连杀倒计时在仪式期间暂停
@@ -317,7 +324,7 @@ class World {
     if (lock || this.mode !== 'run') { dx = 0; dy = 0; }
     I.dx = 0; I.dy = 0; // 拖动位移只用一次
     if (this.mode === 'preview') my = clamp(((TOP + BOTTOM) / 2 + Math.sin(this.t * 1.2) * 60 - p.y) / 60, -1, 1);
-    const spd = 400 * this.P.speed * (I.focus && this.mode === 'run' ? 0.5 : 1);
+    const spd = 400 * this.P.speed * ((p.stats && p.stats.spdK) || 1) * (I.focus && this.mode === 'run' ? 0.5 : 1);
     const ox = p.x, oy = p.y;
     if (!(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx)) { p.x += mx * spd * dt + dx; p.y += my * spd * dt + dy; }
     p.x = clamp(p.x, 34, this.W * 0.82); p.y = clamp(p.y, this.arena.top + 14, this.arena.bottom - 14);
@@ -330,33 +337,42 @@ class World {
     if (this.state !== 'play') return;
     if (this.mode === 'run' && I.burst) { I.burst = false; if (this.ritual && this.ritual.st === 'choose') this.chooseRecommended(); else this.tryBurst(); } // 选升级时大招键 = 选推荐
     p.fireT -= dt;
-    const rate = this.P.rate * (p.candy > 0 ? 1.5 : 1) * (this.streak.n >= 30 ? 1.1 : 1);
+    const rate = (p.gunB ? p.gunB.rate : this.P.rate) * ((p.stats && p.stats.rateK) || 1) * (p.candy > 0 ? 1.5 : 1) * (this.streak.n >= 30 ? 1.1 : 1);
     if (this.ritual && this.ritual.st !== 'resume') p.fireT = Math.max(p.fireT, 0.05); // 仪式期间自动射击暂停
+    else if (this.boss && this.boss.jammed && this.boss.jammed(p)) p.fireT = Math.max(p.fireT, 0.05); // 混沌祭司的静默带：打不出子弹
     else if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
     if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx) && this.mode === 'run') {
       for (const e of this.enemies) {
         if (!e.alive || e.leaving || e.nocontact || this.freshFoe(e)) continue; // 刚出现的敌人还不能撞人（先看见，再受伤）
         const rr = (e.isBoss ? 110 : e.r) + 8;
-        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { if (e.lurk && this.lurks) { const L = this.lurks.find((q) => q.id === e.lurk); if (L) L.hit = true; } this._hitFresh = this.freshFoe(e); this.hurtPlayer(1, 'c:' + (e.chaser ? 'chaser' : e.isBoss ? 'boss' : e.type)); if (!e.elite && !e.isBoss && !e.lurk && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
+        if (dist2(e.x, e.y, p.x, p.y) < rr * rr) { if (e.lurk && this.lurks) { const L = this.lurks.find((q) => q.id === e.lurk); if (L) L.hit = true; } this._hitFresh = this.freshFoe(e); this.hurtPlayer(1, 'c:' + (e.chaser ? 'chaser' : e.isBoss ? 'boss' : e.type)); if (!e.elite && !e.isBoss && !e.lurk && !e.tough && e.type !== 'mirror' && e.type !== 'armor' && e.type !== 'wreck') this.killEnemy(e, { contact: true }); break; }
       }
     }
   }
   /* 主炮：固定向右；多重 = 并排多路；每颗弹带上当前穿透 / 追踪 / 爆破等级 */
   fireMain() {
-    const p = this.player, d = this.P.dmg * this.stats.dmgK, x = p.x + 24, y = p.y + 2, n = 1 + this.gun.multi;
+    const p = this.player, B = p.gunB || GUN_BASES.rapid, d = (p.gunDmg || B.dmg) * this.stats.dmgK, x = p.x + 24, y = p.y + 2, n = 1 + this.gun.multi;
     const lanes = [[0], [-9, 9], [-15, 0, 15], [-21, -7, 7, 21]][n - 1], dl = (d * BUILD_CHECK.multiK[n - 1]) / n; // 多重：多出来的几路扫得更宽，但打同一个大目标时总伤害只涨到 multiK 倍（不是路数倍）
-    for (const off of lanes) this.gunShot(x, y + off, off * 0.004, dl, { side: off !== 0 });
+    // 主炮底子（§6.3）：速射一发、散射一轮三发扇形、光束一道长光枪、导弹一轮两发慢弹
+    const fl = this.stats.flags || {}, spread = B.spread * (fl.narrow ? 0.5 : 1);
+    for (const off of lanes) {
+      if (B.n === 1) this.gunShot(x, y + off, off * 0.004, dl, { side: off !== 0 });
+      else for (let k = 0; k < B.n; k++) { const u = B.n === 1 ? 0 : k / (B.n - 1) - 0.5; this.gunShot(x, y + off + u * (B.id === 'missile' ? 18 : 6), off * 0.004 + u * 2 * spread, dl, { side: off !== 0 || (B.id === 'scatter' && k !== 1) }); }
+    }
     p.muzzle = 1; // 画面：炮口闪一下
     if (this.hasSyn('homing', 'wing')) for (const w of this.wingmen) if (!w.burst) w.fireT = Math.min(w.fireT, 0.02);
     if (p === this.me && Math.random() < 0.3) Sound.sfx('shoot', { gap: 120 });
   }
   gunShot(x, y, a, dmg, o = {}) {
-    const kind = { moon: 'moon', cloud: 'puff', candy: 'candyS', paper: 'dart', whale: 'bubble', clock: 'hand' }[this.planeId] || 'moon';
-    const s = this.addShot(o.from === 'wing' ? 'wingDart' : kind, x, y, a, 1150, { dmg, r: o.from === 'wing' ? 7 : 10, from: o.from || 'main', life: 1.25, knock: this.planeId === 'cloud' && !o.from ? 18 : 0, gold: o.gold });
+    const p = this.player, B = p.gunB || GUN_BASES.rapid;
+    const kind = B.id === 'scatter' ? 'plasma' : B.id === 'beam' ? 'lance' : B.id === 'missile' ? 'missile' : ({ moon: 'moon', cloud: 'puff', candy: 'candyS', paper: 'dart', whale: 'bubble', clock: 'hand' }[this.planeId] || 'moon');
+    const wing = o.from === 'wing', spd = wing ? 1150 : B.speed;
+    const s = this.addShot(wing ? 'wingDart' : kind, x, y, a, spd, { dmg, r: wing ? 7 : B.id === 'beam' ? 12 : 10, from: o.from || 'main', life: wing ? 1.25 : B.life, knock: this.planeId === 'cloud' && !o.from ? 18 : 0, gold: o.gold });
     if (!s) return null;
     const pl = this.gun.pierce;
-    s.gun = true; s.pierce = pl ? pl + this.stats.pierceX : 0; s.pierceMax = s.pierce; s.side = !!o.side; s.bombLv = this.gun.bomb; s.pierceLv = pl; s.hist = null;
-    const hl = Math.min(3, this.gun.homing + (o.homBonus || 0));
+    s.gun = true; s.pierce = (pl ? pl + this.stats.pierceX : 0) + (B.pierce && !wing ? B.pierce : 0); s.pierceMax = s.pierce; s.side = !!o.side; s.bombLv = this.gun.bomb; s.pierceLv = pl; s.hist = null;
+    s.dtype = B.dtype; s.splash = !wing && B.splash ? B.splash : 0; s.accel = !wing && B.accel ? B.accel : 0;
+    const fl = this.stats.flags || {}, hl = Math.min(3, this.gun.homing + (o.homBonus || 0) + (fl.seek && B.id === 'missile' && !this.gun.homing ? 1 : 0)); // 暗金「回信」：导弹自带轻微追踪
     s.homLv = hl; s.target = null; s.lost = false;
     if (hl) { s.homTurn = (HOMING.turn[hl] * (1 + this.stats.homingX) * Math.PI) / 180; s.homCone = (HOMING.cone[hl] * Math.PI) / 180; }
     return s;
@@ -387,7 +403,8 @@ class World {
     if (!inRit && p === this.me) { const c = hurtCat(src); this.m.hurt = this.m.hurt || {}; this.m.hurt[c] = (this.m.hurt[c] || 0) + 1; this.m.lastHurt = c; } // 受伤来源：结算复盘用（本机这架）
     if (inRit) return; // 升级仪式期间不会受伤
     if (p.cloudShield) { p.cloudShield = false; p.inv = 0.8; Sound.sfx('shieldPop'); this.text('缓冲云挡住了', p.x, p.y - 40, '#dcefff', 16, 4); for (let i = 0; i < 10; i++) this.part('puff', p.x, p.y, rand(-160, 160), rand(-160, 160), 0.6, rand(8, 14), 'rgba(255,255,255,0.9)'); return; }
-    p.hp -= n; p.inv = 1.4; p.hurtT = 1; this.m.hitsTaken++;
+    p.hp -= n >= 99 ? n : n * (1 - ((p.stats && p.stats.dr) || 0)); p.inv = 1.4 * ((p.stats && p.stats.invK) || 1); p.hurtT = 1; this.m.hitsTaken++; // 生命是数值（1 心 = 10）：减伤按比例，无敌时间按词条加长
+    if (p.hp > 0 && p.hp < 0.05) p.hp = 0;
     if (fresh) this.m.unfair++; // 节奏报告：攻击者刚出现（或在屏幕外）就打中了
     this.hitStop(0.05); // 受击：红色暗角 + 顿帧 + 手柄震，不晃镜头（暗角和震动只给被打的那位）
     if (p === this.me) { this.hurtFlash = 1; this.rumble(0.7, 0.9, 160); Sound.sfx('hurt', { prio: true }); }
@@ -447,7 +464,13 @@ class World {
     s.hitCd = null; s.chain = o.chain || 0; s.y0 = y; s.ty = o.ty || 0;
     s.gun = false; s.homLv = 0; s.pierceMax = 0; s.pierceLv = 0; s.bombLv = 0; s.side = false; s.target = null; s.lost = false; s.hist = null; s.histT = 0; // 对象池复用：上一发主炮弹的改造不能带到技能弹上
     s.owner = o.owner !== undefined ? o.owner : this.player.idx; // 谁打的：击杀充能记给谁
+    s.dtype = o.dtype || null; s.splash = 0; s.accel = 0; s.twin = false;
     return s;
+  }
+  /* 导弹巢的溅射：命中点小范围，伤害一半（不算爆破的标记和连爆） */
+  splashHit(x, y, r, dmg, skip, dtype) {
+    for (const e of this.enemies) { if (!e.alive || e === skip) continue; const rr = r + (e.isBoss ? 100 : e.r); if (dist2(e.x, e.y, x, y) < rr * rr) this.damageEnemy(e, dmg, { kind: 'splash', x, y, dtype, gun: true }); }
+    if (this.mine()) { this.part('ring', x, y, 0, 0, 0.25, r, 'rgba(255,190,120,0.7)'); }
   }
   nearestEnemy(x, y, maxD = 1e9, exclude) {
     let best = null, bd = maxD * maxD;
@@ -478,6 +501,7 @@ class World {
         const tg = this.homingTarget(s);
         if (tg) { const a = Math.atan2(s.vy, s.vx), ta = angTo(s.x, s.y, tg.x, tg.y), na = a + clamp(angDiff(a, ta), -s.homing * dt, s.homing * dt), sp = Math.hypot(s.vx, s.vy); s.vx = Math.cos(na) * sp; s.vy = Math.sin(na) * sp; }
       }
+      if (s.accel) { const sp = Math.hypot(s.vx, s.vy), ns = Math.min(1350, sp + s.accel * dt); s.vx *= ns / sp; s.vy *= ns / sp; }
       s.x += s.vx * dt;
       if (s.wave) { s.y0 += s.vy * dt; s.y = s.y0 + Math.sin(s.t * 14) * 16 * s.wave; } else s.y += s.vy * dt;
       if (s.t > s.life || s.x > W + 60 || s.x < -60 || s.y < -60 || s.y > LH + 60) { s.on = false; return; }
@@ -507,7 +531,10 @@ class World {
   onGunHit(s, e, hx, hy) {
     const last = s.pierce <= 0, b = this.gun.bomb;
     if (b && !e.isBoss && srnd() < [0, 0.45, 0.6, 0.75][b]) e.mark = true;
-    this.damageEnemy(e, s.dmg, { x: hx, y: hy, src: s.from, kind: s.kind, dir: Math.atan2(s.vy, s.vx) });
+    const ho = { x: hx, y: hy, src: s.from, kind: s.kind, dir: Math.atan2(s.vy, s.vx), dtype: s.dtype, gun: true, pierced: s.hits.length > 1, side: s.side };
+    this.damageEnemy(e, s.dmg, ho);
+    if (s.splash) this.splashHit(hx, hy, s.splash * this.stats.blastK, s.dmg * 0.5, e, s.dtype); // 导弹巢：命中小范围溅射
+    if (ho.crit && (this.stats.flags || {}).twin && s.from === 'main' && !s.twin) for (const da of [-0.35, 0.35]) { const t2 = this.addShot(s.kind, hx + 8, hy, Math.atan2(s.vy, s.vx) + da, Math.hypot(s.vx, s.vy), { dmg: s.dmg * 0.5, r: 7, from: 'main', life: 0.6 }); if (t2) { t2.twin = true; t2.dtype = s.dtype; t2.hits = [e.id]; } } // 暗金「双生芯片」：暴击的子弹分成两发
     if (s.knock && !e.isBoss && !e.elite && e.alive) e.x += s.knock;
     if (s.side && this.hasSyn('multi', 'ice') && e.alive) this.freezeEnemy(e, 0.8);
     if (s.homLv && this.hasSyn('homing', 'thunder') && srnd() < 0.5) { const n2 = this.nearestEnemy(hx, hy, 200, new Set([e.id])); if (n2) this.zap(hx, hy, n2, 0, 8 * this.stats.dmgK); }
@@ -532,10 +559,12 @@ class World {
     }, o);
     if (big && this.L && this.L.eliteK) e.hp *= this.L.eliteK; // 梦魇·厚甲
     e.maxHp = e.hp; e.y0 = e.y;
+    if (!e.race) { const R = (MAPS[mapOfStage(this.stageId)] || MAPS[1]).races; e.race = R[e.id % R.length]; } // 这张图的族：颜色和防御（§4.3）
+    if (e.def === undefined) e.def = RACES[e.race] ? RACES[e.race].def : null;
     if (this.seg && this.seg.explosive && !elite) e.explosive = true;
     return e;
   }
-  addEnemy(type, o = {}) { const e = this.makeEnemy(type, o); this.enemies.push(e); return e; }
+  addEnemy(type, o = {}) { const e = this.makeEnemy(type, o); this.enemies.push(e); if (e.elite || e.type === 'cmdr') this.lootPreRoll(e); return e; }
   spawnFormation(kind) {
     const W = this.W, tier = this.seg ? this.seg.tier : 0, top = this.arena.top + 50, bot = this.arena.bottom - 50;
     const y0 = srand(top, bot), sp = 1 + tier * 0.05;
@@ -630,8 +659,32 @@ class World {
     }
     if (e.type === 'mirror' && e.fireT <= 0) { e.fireT = 2.4; const a0 = this.aimAngle(e.x, e.y); for (let i = 0; i < 5; i++) this.fire('pink', e.x, e.y, a0 + (i - 2) * 0.2, 170, { silent: i > 0 }); }
   }
+  /* 装备进伤害（§4.3、§6.4）：支援和机制参数、能量 / 动能、对护盾 / 对装甲（软克制 × 1.3 / × 0.8）、暴击。
+     伤害类型：主炮发的一切跟主炮底子；雷球、彩虹光束是能量；冰晶、星弹是动能；大招看飞船 */
+  gearDmg(e, dmg, o) {
+    const st = this.stats; if (!st || st.critD === undefined) return dmg;
+    let k = 1; const src = o.src, kind = o.kind, fl = st.flags || {};
+    if (kind === 'zap' || kind === 'beam' || kind === 'shatter' || kind === 'starbolt' || src === 'wing' || src === 'ice') k *= st.supK || 1;
+    if (src === 'wing') k *= 1 + (st.wingD || 0);
+    if (kind === 'starbolt') k *= 1 + (st.starD || 0);
+    if (o.pierced) k *= 1 + (st.pierceD || 0);
+    if (o.side) k *= 1 + (st.sideD || 0);
+    const dt = o.dtype || DTYPE_OF_KIND[kind] || (src === 'ice' ? 'kinetic' : null) || (this.bursting && this.bursting.owner === this.player.idx && !o.gun ? PLANE_DTYPE[this.player.burstId] || 'energy' : (this.player.gunB || GUN_BASES.rapid).dtype);
+    k *= 1 + ((dt === 'energy' ? st.energy : st.kinetic) || 0);
+    const def = e.isBoss ? (this.boss && this.boss.def) : e.def;
+    if (def) { const good = !!fl.counter || (def === 'shield' ? dt === 'energy' : dt === 'kinetic'); k *= good ? 1.3 : 0.8; k *= 1 + ((def === 'shield' ? st.vsShield : st.vsArmor) || 0); o.counter = good ? 1 : -1; o.def = def; }
+    if (srnd() * 100 < (st.crit || 5)) { k *= st.critD || 1.5; o.crit = true; }
+    if (fl.chaos && e.isBoss && this.boss && (this.boss.fightT || 0) < 10) k *= 2;
+    return dmg * k;
+  }
   damageEnemy(e, dmg, o = {}) {
     if (!e.alive) return;
+    if (!e.isBoss && e.x - (e.r || 20) > this.W) return; // 还没进屏幕的打不到：爆炸、电链不会在屏幕外把一整潮杂兵连锁清掉，割草要看得见
+    dmg = this.gearDmg(e, dmg, o);
+    if (o.def && this.mine() && (this._defFxT || 0) < this.t) { this._defFxT = this.t + 0.06; const hx = o.x !== undefined ? o.x : e.x, hy = o.y !== undefined ? o.y : e.y; // 命中护盾是蓝色涟漪，命中装甲是火花；克制时大一号
+      if (o.def === 'shield') this.part('ring', hx, hy, 0, 0, 0.22, o.counter > 0 ? 26 : 14, o.counter > 0 ? 'rgba(120,200,255,0.9)' : 'rgba(120,160,220,0.5)');
+      else for (let i = 0; i < (o.counter > 0 ? 3 : 1); i++) this.part('spark', hx, hy, rand(-160, 60), rand(-160, 160), 0.22, o.counter > 0 ? 4 : 2.5, o.counter > 0 ? '#ffd27a' : '#a8a8b8'); }
+    if (o.crit && this.mine() && (this._critFxT || 0) < this.t) { this._critFxT = this.t + 0.08; this.part('spark', o.x !== undefined ? o.x : e.x, o.y !== undefined ? o.y : e.y, 0, -80, 0.3, 6, '#fff3a0'); }
     this.m.dmgOut += dmg;
     if (e.isBoss) {
       if (!this.boss) return;
@@ -654,7 +707,10 @@ class World {
     e.alive = false;
     const p = this.player, small = !e.elite && e.type !== 'mirror';
     this.m.kills++;
+    this.lootOnKill(e);
+    if ((e.elite || e.type === 'cmdr') && p.stats && p.stats.leech && p.alive) p.hp = Math.min(p.maxHp, p.hp + p.stats.leech / 10); // 装备「打倒精英回生命」
     if (e.lurk) this.onLurkKilled(e); // 打碎了地图伸出来的东西：额外奖励
+    if (typeof RACE_FOE_TYPES !== 'undefined' && RACE_FOE_TYPES[e.type]) this.killRaceFoe(e);
     if (this.m.firstKill === null) this.m.firstKill = this.runT;
     if (small && e.seenT !== null && !e.fodder) { this.m.killTimeSum += this.t - e.seenT; this.m.killTimeN++; }
     this.streak.n++; this.streak.t = 2.5;
@@ -667,7 +723,12 @@ class World {
     if (e.elite) { this.hitStop(0.055); this.rumble(0.8, 0.6, 140); } else if (armored) { this.armorTimed(e); this.rumble(0.3, 0.5, 70); }
     if (this.bursting) this.burstKills.push({ x: e.x, y: e.y, key: e.elite || armored });
     if (this.recentKills.length >= 4 && this.chainCd <= 0) { this.chainCd = 0.5; this.fx(e.x, e.y, 2, 90); if (this.chainHiCd <= 0) { this.chainHiCd = 8; this.highlight(); } }
-    if (e.elite) {
+    if (e.type === 'thief') { // 收账小偷（§9.3）：吐出两倍星砂，袋子里的装备扇形喷出来
+      this.m.thieves = (this.m.thieves || 0) + 1; this.highlight(); this.hitStop(0.055); this.shake(0.35); this.fx(e.x, e.y, 3, 70, ['#d9b8ff', '#ffe38a', '#ffffff']);
+      const n = Math.min(40, 10 + e.stolen * 2);
+      for (let i = 0; i < n; i++) this.dropPickup('dust', e.x + srand(-20, 20), e.y + srand(-20, 20), { value: 2, big: i < 6, vx: srand(-260, 200), vy: srand(-520, -160) });
+      this.text('袋子破了！', e.x, e.y - 60, '#ffe38a', 24, 3); this.lootThief(e);
+    } else if (e.elite) {
       this.m.elites++; this.highlight();
       for (let i = 0; i < 14; i++) this.dropPickup('dust', e.x + srand(-30, 30), e.y + srand(-30, 30), { value: 2, big: i < 4, vx: srand(-200, 140), vy: srand(-460, -160) }); // 喷泉一样喷出来
       this.addCharge(0.15); this.shake(0.4);
@@ -702,7 +763,7 @@ class World {
     if (this.vs) this.vsKill(e);
     if (this.cb.onKill) this.cb.onKill(e.type);
   }
-  freezeEnemy(e, s) { if (e.isBoss || !e.alive) return; if (e.frozen <= 0) Sound.sfx('freeze', { pan: this.pan(e.x), gap: 60 }); e.frozen = Math.max(e.frozen, s); }
+  freezeEnemy(e, s) { if (e.isBoss || !e.alive) return; if (e.frozen <= 0) Sound.sfx('freeze', { pan: this.pan(e.x), gap: 60 }); e.frozen = Math.max(e.frozen, s * (1 + ((this.stats && this.stats.iceT) || 0))); } // 装备「冰冻时间」
 
   /* ================================================== enemy bullets ================================================== */
   fire(type, x, y, ang, spd, o = {}) {
@@ -737,6 +798,7 @@ class World {
       if (wall && Math.abs(b.x - wall.x) < 22 && Math.abs(b.y - wall.y) < 150) { b.on = false; this.part('puff', b.x, b.y, rand(-40, 40), rand(-40, 40), 0.4, 8, 'rgba(255,255,255,0.8)'); return; }
       if (this.state !== 'play') return;
       for (const q of this.players) {
+        if (q.inv > 0 && q.alive && q.hurtT > 0 && q.stats.flags && q.stats.flags.escape && dist2(b.x, b.y, q.x, q.y) < 40 * 40) { b.on = false; this.dropPickup('dust', b.x, b.y, Object.assign({ value: 1 }, this.np > 1 ? { owner: q.idx } : {})); return; } // 暗金「逃逸速度」
         if (!q.alive || q.gone || q.inv > 0) continue;
         if (this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === q.idx) continue;
         if (dist2(b.x, b.y, q.x, q.y) < (q.r + b.r) * (q.r + b.r)) { b.on = false; this._hitFresh = !!b.fresh; this.hurtPlayer(1, 'b:' + (b.from || 'shot'), q); return; }
@@ -828,7 +890,7 @@ class World {
     this.ring(p.x, p.y, 600, 0, 0.5, 0, 'rgba(201,168,255,0.8)');
     Sound.sfx('nova', { gap: 300 });
   }
-  addBeam(o) { this.beams.push(Object.assign({ t: 0, tick: 0 }, o)); }
+  addBeam(o) { if (o.owner === 'player' && this.stats && this.stats.beamW) o.w *= 1 + this.stats.beamW; this.beams.push(Object.assign({ t: 0, tick: 0 }, o)); } // 装备「光束宽度」
   beamOrigin(b) { if (b.owner === 'player') return { x: this.player.x + 20, y: this.player.y }; return { x: b.owner.x + 10, y: b.owner.y }; }
   updateBeams(dt) {
     for (const b of this.beams) {
@@ -851,7 +913,7 @@ class World {
     this.beams = this.beams.filter((b) => b.t < b.dur);
   }
   zap(fx, fy, target, chain, dmg) {
-    const visited = new Set(); let from = { x: fx, y: fy }, e = target, n = chain + 1 + (this.boss && this.boss.conductive ? 2 : 0);
+    const visited = new Set(); let from = { x: fx, y: fy }, e = target, n = chain + 1 + (this.boss && this.boss.conductive ? 2 : 0) + (chain > 0 ? (this.stats && this.stats.orbAdd) || 0 : 0); // 装备「雷球多弹」
     while (e && n-- > 0) {
       visited.add(e.id);
       this.arc(from.x, from.y, e.x, e.y, '#bfe9ff');
@@ -971,11 +1033,11 @@ class World {
     else if (B.stage === 'active' && this.updateBfx(dt)) { this.bursting = null; this.bfx = null; this.gatherRewards(); this.burstAftermath(); }
   }
   executeBurst() {
-    const p = this.player, st = this.stats.stars, big = st >= 2 ? 1.22 : 1, dK = this.stats.dmgK * (st >= 5 ? 1.2 : 1);
-    Sound.sfx('b_' + this.planeId, { prio: true }); this.shake(0.6); this.flash = Math.max(this.flash, 0.55 * this.flashK()); this.flashColor = '255,250,235'; this.rumble(1, 0.8, 320);
+    const p = this.player, st = this.stats.stars, plus = this.stats.plus || {}, lvB = (plus.burst || 0) + (plus.all || 0), big = (st >= 2 ? 1.22 : 1) * (1 + 0.12 * lvB), dK = this.stats.dmgK * (st >= 5 ? 1.2 : 1) * (this.stats.burstK || 1) * (1 + 0.3 * lvB), bid = p.burstId || this.planeId; // 装备：大招伤害、+1 级飞船大招、暗金换大招
+    Sound.sfx('b_' + bid, { prio: true }); this.shake(0.6); this.flash = Math.max(this.flash, 0.55 * this.flashK()); this.flashColor = '255,250,235'; this.rumble(1, 0.8, 320);
     this.fx(p.x, p.y, 4, 500);
     if (st >= 5) for (let i = 0; i < 60; i++) this.part('confetti', p.x, p.y, rand(-700, 700), rand(-700, 300), 1.6, rand(5, 9), pick(['#ffd76a', '#fff6c8', '#ffb347']));
-    switch (this.planeId) {
+    switch (bid) {
       case 'moon': this.addShot('wheel', p.x + 50, p.y, 0, 760, { dmg: 140 * dK, r: 70 * big, life: 4, pierce: 9999 }); this.bfx = { id: 'moon', t: 0 }; break;
       case 'cloud': this.bfx = { id: 'cloud', t: 0, dur: 1.6, x0: p.x, y: p.y, R: 130 * big, tick: 0, dK }; break;
       case 'candy': this.bfx = { id: 'candy', t: 0, dur: st >= 3 ? 4.5 : 3, spawn: 0, dK }; break;
@@ -1208,9 +1270,10 @@ class World {
     if (this.props) this.props = []; // 之前的场景道具不带进 Boss 场（Boss 场里只有侧面小队的先兆道具）
     for (const e of this.enemies) if (e.alive) { e.leaving = true; e.vx = -380; e.path = 'line'; }
     this.clearBullets(true);
-    this.seg = { type: 'boss', tier: Math.max(3, this.beatIdx + STAGE_ORDER.indexOf(this.stageId)), t: 0, dur: 0 };
-    this.remember(this.stage.boss === 'clock' ? '闯进了失控闹钟的钟面' : `闯过了${this.stage.bossName}的防线`, 1);
-    this.boss = this.stage.boss === 'clock' ? new ClockBoss(this) : new CaptainBoss(this, this.stage.boss, this.stage.bossHp);
+    this.seg = { type: 'boss', tier: Math.max(3, this.beatIdx + this.stageTier()), t: 0, dur: 0 };
+    this.remember(this.stage.boss === 'clock' ? '闯进了失控主钟的钟面' : `闯过了${this.stage.bossName}的防线`, 1);
+    this.boss = this.stageId === '5-3' ? new ChaosPriestBoss(this) : this.stage.boss === 'clock' ? new ClockBoss(this) : new CaptainBoss(this, this.stage.boss, this.stage.bossHp);
+    this.boss.def = this.stage.bossDef === 'chaos' ? 'shield' : this.stage.bossDef || null; this.boss.chaosDef = this.stage.bossDef === 'chaos'; // 首领的防御写在名牌上（§4.3）
     this.eachPlayer((q) => { if (q.alive && q.stock === 0) this.addStock(1); }); // Boss 入口：每架库存为 0 的飞机补到 1
     this.bossIntroT = 2.8;
     this.bossProxy = { id: 'boss', isBoss: true, type: 'boss', x: this.boss.x, y: this.boss.y, r: this.boss.radius || 118, alive: true };
@@ -1245,13 +1308,13 @@ class World {
   /* Boss 看见你的 Build */
   bossResponse() {
     const b = this.boss, sid = this.support ? this.support.id : this.gun.bomb ? 'bomb' : this.topId();
-    let title = '失控闹钟加快了节奏', sub = '先把 Build 养起来，Boss 会回应你的流派';
-    if (sid === 'thunder') { b.conductive = true; title = '外壳开始导电！'; sub = '雷暴流：打闹钟会多跳几次电'; }
-    else if (sid === 'wing') { title = '闹钟召唤了镜像！'; sub = '分身流：分身会自动锁定镜像闹钟'; for (let i = 0; i < 3; i++) { const ty = lerp(this.arena.top + 90, this.arena.bottom - 90, i / 2); this.addEnemy('mirror', { x: this.W + 60, y: ty, path: 'mirror', tx: this.W * (0.5 + i * 0.07), ty, fireT: 2 + i * 0.6 }); } }
-    else if (sid === 'bomb') { b.marked = true; title = '护甲被标记了！'; sub = '爆破流：爆炸能撬开闹钟的核心'; }
-    else if (sid === 'magnet') { title = '星砂海！'; sub = '吸星流：闹钟洒出一整片星砂，全部吸进来'; for (let i = 0; i < 70; i++) this.dropPickup('dust', b.x + srand(-160, 60), b.y + srand(-220, 220), { value: 2, vx: srand(-260, -60), vy: srand(-160, 160) }); }
-    else if (sid === 'rainbow') { this.carnival = true; title = '彩色狂欢阶段！'; sub = '彩虹流：击中闹钟会掉落更多糖果强化'; }
-    else if (sid === 'ice') { b.iceHands = true; title = '指针被冻住了！'; sub = '冰晶流：闹钟指针会周期性冻结，核心更常暴露'; }
+    let title = '失控主钟加快了节奏', sub = '先把 Build 养起来，Boss 会回应你的流派';
+    if (sid === 'thunder') { b.conductive = true; title = '外壳开始导电！'; sub = '雷暴流：打主钟会多跳几次电'; }
+    else if (sid === 'wing') { title = '主钟召唤了镜像！'; sub = '分身流：分身会自动锁定镜像主钟'; for (let i = 0; i < 3; i++) { const ty = lerp(this.arena.top + 90, this.arena.bottom - 90, i / 2); this.addEnemy('mirror', { x: this.W + 60, y: ty, path: 'mirror', tx: this.W * (0.5 + i * 0.07), ty, fireT: 2 + i * 0.6 }); } }
+    else if (sid === 'bomb') { b.marked = true; title = '护甲被标记了！'; sub = '爆破流：爆炸能撬开主钟的核心'; }
+    else if (sid === 'magnet') { title = '星砂海！'; sub = '吸星流：主钟洒出一整片星砂，全部吸进来'; for (let i = 0; i < 70; i++) this.dropPickup('dust', b.x + srand(-160, 60), b.y + srand(-220, 220), { value: 2, vx: srand(-260, -60), vy: srand(-160, 160) }); }
+    else if (sid === 'rainbow') { this.carnival = true; title = '彩色狂欢阶段！'; sub = '彩虹流：击中主钟会掉落更多糖果强化'; }
+    else if (sid === 'ice') { b.iceHands = true; title = '指针被冻住了！'; sub = '冰晶流：主钟指针会周期性冻结，核心更常暴露'; }
     this.emit('bossResponse', { title, sub, id: sid });
     this.highlight();
   }
@@ -1262,6 +1325,7 @@ class World {
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.killEnemy(e, {});
     this.clearBullets(true); this.warns = [];
     this.fx(this.boss.x, this.boss.y, 5, 900);
+    this.lootBoss(this.boss.x, this.boss.y); this.later(2.5, () => this.shipCargo()); // 首领掉落，然后货舱送回家
     const bc = this.stage.boss === 'clock' ? ['#f4ecff', '#c9a8ff', '#ffcf7a', '#fff6c8'] : [(this.boss.C && this.boss.C.color) || '#ff9fcf', '#fff6c8', '#c9a8ff'];
     for (let i = 0; i < 14; i++) this.part('plate', this.boss.x + rand(-60, 60), this.boss.y + rand(-60, 60), rand(-520, 520), rand(-560, 200), 1.4, rand(22, 44), pick(bc)); // 整只碎成几大块飞开
     this.hitStop(0.1);
@@ -1270,10 +1334,11 @@ class World {
   }
   // 普通敌人的生命系数：关卡的 hpK；连成一局时第 2、3 关再乘 CHAIN_FOE（首领在场时不乘：首领战另按 bossK 定）
   chainFoe() { return (this.chain && CHAIN_FOE[this.stageId]) || { hp: 1, fill: 1 }; }
+  stageTier() { return stageNOf(this.stageId) - 1 + Math.min(3, mapOfStage(this.stageId) - 1); } // 刷怪的档：每张图的第几关，再按地图往上抬
   foeHpK() { return (this.stage ? this.stage.hpK : 1) * (this.boss ? 1 : this.chainFoe().hp); }
   // 整局的胜利：连成一局时只有最后一关的首领倒下才算（中间几关的胜利马上换关）
   lastVictory() { return this.state === 'victory' && !(this.chain && this.nextStageId()); }
-  nextStageId() { const i = STAGE_ORDER.indexOf(this.stageId); return i >= 0 ? STAGE_ORDER[i + 1] || null : null; }
+  nextStageId() { const mm = mapOfStage(this.stageId), n = stageNOf(this.stageId); return n < 3 && STAGES[`${mm}-${n + 1}`] ? `${mm}-${n + 1}` : null; } // 同一张图的下一关
   /* 连成一局：换到下一关。关卡里的东西（敌人、子弹、地图物件、目标链、首领、预警、计时器）从头来；
      飞机、构筑、心数、资源、统计带着走；倒下的队友站起来；每过一关回两颗心 */
   advanceStage() {
@@ -1281,7 +1346,7 @@ class World {
     this.stage = STAGES[next]; this.stageId = next;
     this.state = 'play'; this.phase = 'fight'; this.stateT = 0; this.victoryT = undefined;
     for (const e of this.enemies) e.alive = false;
-    this.enemies = []; this.incoming = []; this.pickups = []; this.portals = []; this.surprise = null; this.burstKills = []; this.arcs = []; this.beams = []; this.rings = []; this.walls = [];
+    this.enemies = []; this.incoming = []; this.pickups = []; this.portals = []; this.loot = []; this.cargoPod = null; this.surprise = null; this.burstKills = []; this.arcs = []; this.beams = []; this.rings = []; this.walls = [];
     this.warns = []; this.timers = []; this.bursting = null; this.bfx = null; this.cloudWall = null; this.timeStop = 0; this.reverseT = 0; this.slowT = 0;
     this.bullets.each((b) => { b.on = false; }); this.shots.each((s) => { s.on = false; });
     this.arena = { top: TOP, bottom: BOTTOM }; this.arenaTarget = { top: TOP, bottom: BOTTOM };
@@ -1302,7 +1367,7 @@ class World {
       q.hp = Math.min(q.maxHp, q.hp + 2); q.inv = 2;
     });
     this.eachPlayer(() => this.syncWingmen());
-    this.emit('stageAdvance', { id: next, name: this.stage.name, n: STAGE_ORDER.indexOf(next) + 1 });
+    this.emit('stageAdvance', { id: next, name: this.stage.name, n: stageNOf(next) });
   }
   finish(win) {
     this.done = true; this.phase = 'end';
@@ -1315,13 +1380,14 @@ class World {
     const R = this.me.res, m = Object.assign({}, this.m, R, { frags: Object.assign({}, R.frags), choiceTimes: R.choiceTimes.slice() }); // 自己的资源 + 全队统计
     return {
       win, plane: this.me.planeId, runT: this.runT, stats: m, mp: this.np > 1, team: this.players.map((q) => ({ name: q.name, plane: q.planeId, gone: q.gone })),
-      stage: this.stageId, cleared: this.cleared.map((c) => c.id), clearedAt: Object.fromEntries(this.cleared.map((c) => [c.id, c.runT])), chain: this.chain, build: this.buildSummary(), progress: win ? 1 : this.vs ? clamp(this.vs.t / (VS.stages * VS.stageT), 0, 1) : (() => { const f = clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1); return this.chain ? clamp((this.cleared.length + f) / STAGE_ORDER.length, 0, 1) : f; })(),
+      stage: this.stageId, cleared: this.cleared.map((c) => c.id), clearedAt: Object.fromEntries(this.cleared.map((c) => [c.id, c.runT])), chain: this.chain, build: this.buildSummary(), progress: win ? 1 : this.vs ? clamp(this.vs.t / (VS.stages * VS.stageT), 0, 1) : (() => { const f = clamp((this.beatIdx + (this.goal && this.goal.state === 'done' ? 1 : 0)) / this.plan.length, 0, 1); return this.chain ? clamp((this.cleared.length + stageNOf(this.startStage || '1-1') - 1 + f) / 3, 0, 1) : f; })(),
       memories: this.pickMemories ? this.pickMemories() : [], hurt: Object.assign({}, m.hurt || {}), lastHurt: m.lastHurt || null, clue: pick(STAGE_CLUES[this.stageId] || ['']), goalTimes: (m.goalTimes || []).slice(),
       choiceAvg: m.choiceTimes.length ? m.choiceTimes.reduce((a, b) => a + b, 0) / m.choiceTimes.length : null,
       skills: [...GUN_ORDER.filter((id) => this.gun[id] > 0).map((id) => ({ id, lv: this.gun[id] })), ...(this.support ? [{ id: this.support.id, lv: this.support.ulv }] : [])],
       syns: [...this.links], stream: this.buildName(), streamId: this.topId(),
       avgKill: m.killTimeN ? m.killTimeSum / m.killTimeN : null, bossTime: this.bossTime || 0, bossEarly: this.bossEarly,
       journey: (this.journey || []).slice(), companions: (this.companions || []).map((c) => c.id), vs: this.vs ? this.vsResult() : null,
+      cargo: (this.me.cargo || []).slice(), loot: Object.assign({}, this.m.loot || {}), map: mapOfStage(this.stageId), lootCfg: this.lootCfg ? { firstBoss: Object.assign({}, this.lootCfg.firstBoss), uniPity: !!this.lootCfg.uniPity } : null,
     };
   }
 
@@ -1452,6 +1518,7 @@ class World {
     if (this.surprise) this.drawSurprise(g);
     for (const w of this.walls) { g.globalCompositeOperation = 'lighter'; const gr = g.createLinearGradient(w.x - 40, 0, w.x + 10, 0); gr.addColorStop(0, 'rgba(201,168,255,0)'); gr.addColorStop(1, 'rgba(255,243,200,0.7)'); g.fillStyle = gr; g.fillRect(w.x - 40, this.arena.top, 50, this.arena.bottom - this.arena.top); g.globalCompositeOperation = 'source-over'; }
     for (const k of this.pickups) if (k.kind !== 'crystal' && this.seesPickup(k)) drawPickup(g, k, t); // 别人的掉落看不见
+    this.drawLoot(g);
     for (const q of this.incoming) this.drawIncoming(g, q);
     if (this.lurks) this.drawLurks(g); // 地图出手：先兆、手臂、合拢的墙（在敌人下面）
     for (const e of this.enemies) if (e.alive && !e.isBoss) this.drawEnemy(g, e);
@@ -1477,6 +1544,7 @@ class World {
       if (stop) { g.strokeStyle = 'rgba(255,215,106,0.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(b.x, b.y, 11, 0, TAU); g.stroke(); }
     });
     if (p.alive && this.settings.showHitbox && this.mode === 'run') { g.fillStyle = '#ffffff'; g.strokeStyle = 'rgba(255,122,107,0.95)'; g.lineWidth = 2; g.beginPath(); g.arc(p.x, p.y, 3.4, 0, TAU); g.fill(); g.stroke(); }
+    if (this.loot && this.loot.length) for (const k of this.loot) drawLootLabel(g, k); // 掉落的名字画在敌人上面，不被挡住
     this.drawTexts(g);
     g.restore();
     // 奖励焦点：战场去饱和、压暗；奖励装置 / 候选 / 光轨 / 飞机画在上面保持鲜艳
@@ -1551,7 +1619,7 @@ class World {
       g.fillStyle = gr; g.fillRect(p.x + 20, p.y - h / 2, this.W, h);
       g.globalCompositeOperation = 'source-over';
     }
-    if (!blink) drawPlane(g, this.planeId, p.x, p.y, 1, t, { tilt: p.tilt, blink: p.blink, hurt: p.hurtT > 0.3, happy: this.state === 'victory', bright: !!this.bursting || p.candy > 0 });
+    if (!blink) drawPlane(g, this.planeId, p.x, p.y, 1.12, t, { tilt: p.tilt, blink: p.blink, hurt: p.hurtT > 0.3, happy: this.state === 'victory', bright: !!this.bursting || p.candy > 0, look: p.stats && p.stats.look }); // 身上的装备长在船上
     if (p.linkFx > 0) { // 组合完成：飞机周围转一圈金色光环（2.5 秒）
       const k = Math.min(1, p.linkFx), r = 46 + (2.5 - p.linkFx) * 6; g.save(); g.globalCompositeOperation = 'lighter'; drawGlow(g, p.x, p.y, r * 1.6, GLOW.gold, 0.35 * k);
       g.strokeStyle = `rgba(255,227,138,${0.8 * k})`; g.lineWidth = 3; g.setLineDash([10, 8]); g.lineDashOffset = -t * 60; g.beginPath(); g.arc(p.x, p.y, r, 0, TAU); g.stroke(); g.setLineDash([]);
@@ -1669,17 +1737,24 @@ class World {
         const ex = w.x + Math.cos(w.a) * w.len, ey = w.y + Math.sin(w.a) * w.len;
         if (!w.fired) { g.strokeStyle = bright ? `rgba(255,255,255,${0.45 + 0.4 * u})` : 'rgba(255,255,255,0.14)'; g.lineWidth = bright ? 2 + u * 2 : 1.2; g.setLineDash(bright ? [14, 8] : []); g.lineDashOffset = -t * 120; g.beginPath(); g.moveTo(w.x, w.y); g.lineTo(ex, ey); g.stroke(); g.setLineDash([]); }
         if (w.fired && w.beamT > 0) { g.globalCompositeOperation = 'lighter'; g.strokeStyle = 'rgba(255,248,220,0.9)'; g.lineWidth = w.w; g.beginPath(); g.moveTo(w.x, w.y); g.lineTo(ex, ey); g.stroke(); g.strokeStyle = 'rgba(255,207,74,0.4)'; g.lineWidth = w.w * 2.4; g.stroke(); g.globalCompositeOperation = 'source-over'; }
+      } else if (w.kind === 'blast' && !w.fired) { // 迫击炮：落点一个越来越实的红圈，炮弹沿抛物线落下来
+        g.fillStyle = `rgba(255,90,60,${0.1 + 0.22 * u})`; g.beginPath(); g.arc(w.x, w.y, w.r, 0, TAU); g.fill();
+        g.strokeStyle = `rgba(255,140,100,${0.5 + 0.45 * u})`; g.lineWidth = 3; g.beginPath(); g.arc(w.x, w.y, w.r, 0, TAU); g.stroke();
+        g.lineWidth = 2; g.beginPath(); g.arc(w.x, w.y, w.r * (1 - u), 0, TAU); g.stroke();
+        if (w.from) { const sx = lerp(w.from.x, w.x, u), sy = lerp(w.from.y, w.y, u) - Math.sin(u * Math.PI) * 220; g.fillStyle = '#2a2440'; g.strokeStyle = '#ffb35c'; g.lineWidth = 2; g.beginPath(); g.arc(sx, sy, 7, 0, TAU); g.fill(); g.stroke(); }
+      } else if (w.kind === 'zone' && w.color === 'orange' && !w.fired) { // 钻头冲锋车：地上一条橙色虚线
+        g.fillStyle = `rgba(255,140,60,${0.06 + 0.12 * u})`; g.fillRect(w.x, w.y, w.w, w.h);
+        g.strokeStyle = `rgba(255,170,90,${0.45 + 0.5 * u})`; g.lineWidth = 3; g.setLineDash([16, 10]); g.lineDashOffset = t * 80; g.beginPath(); g.moveTo(w.x, w.y + w.h / 2); g.lineTo(w.x + w.w, w.y + w.h / 2); g.stroke(); g.setLineDash([]);
       } else if (w.kind === 'zone' && !w.fired) {
         g.fillStyle = `rgba(255,255,255,${0.05 + (bright ? 0.1 * u : 0)})`; g.fillRect(w.x, w.y, w.w, w.h);
         g.save(); g.beginPath(); g.rect(w.x, w.y, w.w, w.h); g.clip(); g.strokeStyle = `rgba(255,255,255,${bright ? 0.25 + 0.35 * u : 0.1})`; g.lineWidth = 3;
         for (let x = w.x - w.h; x < w.x + w.w; x += 36) { const o2 = (t * 60) % 36; g.beginPath(); g.moveTo(x + o2, w.y + w.h); g.lineTo(x + o2 + w.h, w.y); g.stroke(); }
         g.restore(); g.strokeStyle = `rgba(255,255,255,${0.4 + 0.5 * u})`; g.lineWidth = 3; g.strokeRect(w.x, w.y, w.w, w.h);
-      } else if (w.kind === 'swell' && !w.fired) { // 鱼群潮：右边缘一道往里推的波光
+      } else if (w.kind === 'swell' && !w.fired) { // 跃迁潮：右边缘一道波光，每个要跳进来的位置先亮一个收拢的光圈
         g.globalCompositeOperation = 'lighter';
-        const gr = g.createLinearGradient(w.x + w.w, 0, w.x - 40 * u, 0); gr.addColorStop(0, `rgba(159,227,240,${0.35 + 0.3 * u})`); gr.addColorStop(1, 'rgba(159,227,240,0)');
-        g.fillStyle = gr; g.fillRect(w.x - 40 * u, w.y, w.w + 40 * u, w.h);
-        g.strokeStyle = `rgba(220,250,255,${0.3 + 0.5 * u})`; g.lineWidth = 2;
-        for (let k = 0; k < 4; k++) { const x = w.x + w.w - ((t * 140 + k * 26) % w.w); g.beginPath(); g.moveTo(x, w.y + 6); g.quadraticCurveTo(x - 10, w.y + w.h / 2, x, w.y + w.h - 6); g.stroke(); }
+        const SW = this.W, gr = g.createLinearGradient(SW, 0, SW - 120 - 60 * u, 0); gr.addColorStop(0, `rgba(159,227,240,${0.3 + 0.3 * u})`); gr.addColorStop(1, 'rgba(159,227,240,0)');
+        g.fillStyle = gr; g.fillRect(SW - 180, w.y, 180, w.h);
+        for (const P of w.pts || []) { const k = clamp(u * 1.4 - (SW - P.x) / SW * 0.6, 0, 1); if (k <= 0) continue; g.strokeStyle = `rgba(200,245,255,${0.25 + 0.55 * k})`; g.lineWidth = 1.6; g.beginPath(); g.arc(P.x, P.y, 4 + 18 * (1 - k), 0, TAU); g.stroke(); g.fillStyle = `rgba(230,252,255,${0.4 * k})`; g.beginPath(); g.arc(P.x, P.y, 2 + 2 * k, 0, TAU); g.fill(); }
         g.globalCompositeOperation = 'source-over';
       } else if (w.kind === 'arc' && !w.fired) {
         g.fillStyle = `rgba(255,255,255,${bright ? 0.06 + 0.1 * u : 0.04})`; g.beginPath(); g.moveTo(w.x, w.y); g.arc(w.x, w.y, w.len, w.a0, w.a1); g.closePath(); g.fill();
@@ -1767,8 +1842,8 @@ class World {
     }
     if (this.flash > 0) { g.fillStyle = `rgba(${this.flashColor},${Math.min(0.55 * this.flashK(), this.flash * 0.6)})`; g.fillRect(0, 0, W, LH); }
     if (this.state === 'victory' && this.victoryT !== undefined) {
-      const s = Ease.outBack(clamp(this.victoryT / 0.6, 0, 1));
-      g.save(); g.translate(W / 2, LH * 0.42); g.scale(s, s); g.rotate(Math.sin(t * 2) * 0.05);
+      const s = Ease.outBack(clamp(this.victoryT / 0.6, 0, 1)) * 0.62; // 放在下半屏、小一号：上方是首领的战利品喷泉（§6.8），不能挡住
+      g.save(); g.translate(W / 2, LH * 0.62); g.scale(s, s); g.rotate(Math.sin(t * 2) * 0.05);
       g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 220, GLOW.gold, 0.8); g.globalCompositeOperation = 'source-over';
       drawIcon(g, 'star', 0, 0, 200, '#ffd76a', '#2d2358');
       const vt = this.vs ? '对抗结束' : `击败${this.stage.bossName}！`;

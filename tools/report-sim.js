@@ -18,7 +18,7 @@ const TARGETS = (() => {
   try {
     const md = require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'design.md'), 'utf8'), m = md.match(/```json report-targets\n([\s\S]*?)\n```/);
     if (!m) return fb; const t = JSON.parse(m[1]);
-    return { difficulty: Object.assign(fb.difficulty, t.difficulty || {}), career: Object.assign(fb.career, t.career || {}), from: 'docs/design.md' };
+    return { difficulty: Object.assign(fb.difficulty, t.difficulty || {}), career: Object.assign(fb.career, t.career || {}), loot: t.loot || {}, from: 'docs/design.md' };
   } catch (e) { console.error('读设计文档的目标失败，用兜底值：' + e.message); return fb; }
 })();
 if (flag('eval')) R(flag('eval')); // 调参试验：--eval "BUILD_CHECK.rage.max = 2"（子进程同样执行）
@@ -51,30 +51,72 @@ var PATH_LINKS = new Set(BUILD_PATHS.map((P) => P.path.find((x) => x.includes('+
 function randomPick(seed) { let n = 0, lastR = null, c = 0; return (gs) => { const r = (G.world && G.world.ritual) || gs; if (r !== lastR) { lastR = r; c = Math.floor(pilotHash(n++, seed) * gs.length); } return gs[Math.min(c, gs.length - 1)]; }; }
 var G = {};
 function buildPowerLv(w) { const p = w.player; return Object.values(p.gun || {}).reduce((a, b) => a + b, 0) + (p.support ? p.support.ulv : 0) + (p.links ? p.links.size * 2 : 0); } // 这一刻构筑攒了多少级（看构筑一路长大）
-/* 连续玩（DE19）：一个玩家从新存档开始带着局外成长连续打；打还没通的最前面一关，通了 1-3 就打最高的梦魇级；
-   照游戏推荐选（像按大招键的玩家）；结算和 ui.js 的 onRunEnd 一样；星尘够就升共享等级；每局另算 60 秒菜单和家园时间 */
+/* 连续玩（DE19、DE28，docs/design.md §12、§19）：一个玩家从新存档开始，带着站里的成长一张图一张图打下去。
+   出发点：最前面那张没打通的图；同一张图连输两局、而且走到过第 2 / 3 关时，一半的局从路标开始；连输四局回上一张图刷一局。
+   结算和 ui.js 的 onRunEnd 一样（Station.settle）；回站以后机器人做普通玩家会做的事：换上评分更高的、卖白、拆蓝、升设施、钱多就按缺的位赌。
+   每局另算 75 秒菜单和站里的时间。 */
+function careerStart(m, F) {
+  let mm = 1; for (const n of MAP_ORDER) if (Station.mapOpen(m, n)) mm = n; // 最前面开着的图
+  if (m.maps.cleared[mm] && mm < MAP_ORDER.length) mm++;
+  const f = F[mm] || { n: 0, at: null };
+  if (f.n >= 4 && mm > 1 && f.n % 5 === 4) return { stage: MAPS[mm - 1].stages[0], farm: true }; // 卡住了：回上一张图刷一局
+  const starts = Station.startStages(m, mm), deep = f.at && starts.includes(f.at) && stageNOf(f.at) > 1 ? f.at : null;
+  return { stage: deep && f.n >= 2 && f.n % 2 === 0 ? deep : MAPS[mm].stages[0], farm: false };
+}
+function careerStation(m, plane) {
+  const got = { eq: [], sold: 0, salv: 0, fac: [], gamble: 0 }, sc = () => Gear.score(Gear.compute(m.gear.eq), plane).total;
+  Station.flushInbox(m);
+  for (let pass = 0; pass < 3; pass++) { // 换装：每个位挑评分最高的、够得上等级的
+    let did = false;
+    for (const it of m.gear.stash.slice()) {
+      if (!Station.canEquip(m, it)) continue;
+      const c = Station.compare(m, it, plane); if (c.total > 1.01) { Station.equip(m, it.uid, c.slot); got.eq.push(it.q); did = true; }
+    }
+    if (!did) break;
+  }
+  const cap = Station.stashCap(m), keep = (it) => it.lock || it.q === 'gold' || it.q === 'green';
+  for (const it of m.gear.stash.slice()) { // 白的卖掉；拆解台开了就拆蓝的（够不上等级的好东西留着）
+    if (keep(it) || (it.q === 'yellow' && it.req > m.pilot.lv)) continue;
+    if (it.q === 'white') { got.sold += Station.sell(m, it.uid) > 0 ? 1 : 0; continue; }
+    if (m.unlock.salvage && (it.q === 'blue' || (it.q === 'yellow' && m.gear.stash.length > cap * 0.7))) { if (Station.salvage(m, it.uid)) got.salv++; }
+    else if (m.gear.stash.length > cap * 0.8) got.sold += Station.sell(m, it.uid) > 0 ? 1 : 0;
+  }
+  for (const id of ['stash', 'insure', 'salvage', 'black', 'shop', 'cube']) { // 设施：留 300 信用点，按这个顺序升
+    if (!m.unlock[id] && id !== 'stash') continue;
+    const c = Station.facCost(m, id); if (!c) continue;
+    if ((c.credits || 0) + 300 <= m.credits && Station.facUp(m, id)) got.fac.push(id + (m.fac[id]));
+  }
+  if (m.unlock.black) { // 钱多：给评分最低的位赌一件
+    const price = Station.gamblePrice(m, false);
+    while (m.credits > price * 3 && got.gamble < 3) {
+      const weakest = GEAR_SLOTS.filter((sl) => sl !== 'chip2').sort((a, b) => QUALS[(m.gear.eq[a] || { q: 'white' }).q].rank - QUALS[(m.gear.eq[b] || { q: 'white' }).q].rank)[0];
+      const it = Station.gamble(m, SLOT_KIND[weakest]); if (!it) break; got.gamble++;
+      if (Station.canEquip(m, it)) { const c = Station.compare(m, it, plane); if (c.total > 1.01) { Station.equip(m, it.uid, c.slot); got.eq.push(it.q); } }
+    }
+  }
+  return got;
+}
 function careerRun(seed, maxRuns, human, maxHours) {
-  const plane = PLANE_ORDER[0], meta = freshMeta(); meta.planes[plane] = newPlaneRecord(plane); meta.planes[plane].map = genStarMap(plane, seed); // 天赋树按种子生成（可复现）
-  const rec = meta.planes[plane], P = meta.progress, OVER = 60, log = []; let hours = 0, prevPow = null;
+  const plane = PLANE_ORDER[0], meta = Station.ensure(freshMeta()); meta.current = plane;
+  const OVER = 75, log = [], F = {}; let hours = 0, prevScore = null;
   for (let r = 0; r < maxRuns && hours < maxHours; r++) {
     // 玩家在学：头 2.5 小时从新手（反应 0.45 秒、常走神、瞄不准、常随手拿）长到普通玩家（0.25 秒，照推荐选）
     const k = Math.min(1, hours / 2.5), hum = { react: 0.45 - 0.2 * k, slip: 0.3 - 0.18 * k, aim: 26 - 12 * k }, mix = 0.45 + 0.5 * k;
-    // 三关连成一局：每局从 1-1 打起；首通以后打最高的梦魇级
-    const lad = LADDER_ON && P.cleared['1-3'] ? P.ladder || 0 : 0;
-    const cap = ULT_CAP.reduce((c, u) => (!u.need || P.cleared[u.need] ? Math.max(c, u.cap) : c), 1);
-    const st0 = planeStats(meta, plane), pow = st0.dmgK * st0.hearts, lv0 = meta.shared.level; // 开局看得见的战力：攻击 × 心数
-    const x = reportRun('1-1', -2, plane, (seed * 131 + r * 7919) >>> 0, human, { meta, ladder: lad, first: r === 0, ult: cap, hum, mix, chain: true });
-    const news = []; let pay = 0;
-    for (const id of x.cleared) { const fc = !P.cleared[id]; pay += endPay(STAGES[id], fc); if (fc) { news.push('clear ' + id); P.cleared[id] = true; } } // 每打倒一关的首领给一份通关奖励（首次更多）
-    const dust = Math.round((x.earned + pay + Math.floor(x.sand / 50)) * (1 + LADDER_PAY * lad));
-    meta.stardust += dust;
-    if (x.won && lad < LADDER_MAX && lad + 1 > (P.ladder || 0)) { P.ladder = lad + 1; news.push('ladder ' + P.ladder); }
-    const stage = x.reached;
-    while (meta.shared.level < SHARED.max && meta.stardust >= SHARED.cost[meta.shared.level + 1]) { meta.stardust -= SHARED.cost[meta.shared.level + 1]; meta.shared.level++; news.push('lv ' + meta.shared.level); }
-    while (treePoints(meta, rec) > 0) { const rr = recommendNode(rec); if (!rr) break; rec.lit[rr]++; } // 天赋点按推荐点亮
+    const S0 = careerStart(meta, F), start = S0.stage, mm = mapOfStage(start);
+    const st0 = planeStats(meta, plane), score = Gear.score(Gear.compute(meta.gear.eq), plane).total, lv0 = meta.pilot.lv, shipped = new Set();
+    const x = reportRun(start, -2, plane, (seed * 131 + r * 7919) >>> 0, human, { meta, first: r === 0, ult: 1, hum, mix, chain: true, career: { shipped, loot: Station.lootCfg(meta), catchUp: Station.catchUp(start) } });
+    const res = x.res; res.creditK = st0.credit || 0; res.shipped = shipped;
+    const out = Station.settle(meta, res); meta.firstRunDone = true;
+    const bot = careerStation(meta, plane);
+    const win = !!res.win, f = F[mm] || (F[mm] = { n: 0, at: null });
+    if (S0.farm) {} else if (win) { f.n = 0; f.at = null; } else { f.n++; f.at = x.reached; }
+    const news = [...out.unlocks.map((u) => 'unlock ' + u), ...(out.mapClear ? ['map ' + out.mapClear] : []), ...(out.lvUp ? ['lv ' + meta.pilot.lv] : []), ...bot.eq.map((q) => 'eq ' + q), ...bot.fac.map((id) => 'fac ' + id)];
+    const kq = {}; for (const it of out.kept) kq[it.q] = (kq[it.q] || 0) + 1;
     hours += (x.t + OVER) / 3600;
-    log.push({ r, stage, cleared: x.cleared, fights: (x.bosses || []).map((b) => [b.stage, b.strength, b.won]), lad, won: x.won, f: x.formed, t: x.t, h: Math.round(hours * 100) / 100, dust, lv: meta.shared.level, lv0, s: x.strength, rare: x.rare, on: x.rareOnBuild, news, stronger: prevPow === null ? null : pow > prevPow + 1e-9 });
-    prevPow = pow;
+    log.push({ r, start, farm: S0.farm, map: mm, stage: x.reached, cleared: x.cleared, fights: (x.bosses || []).map((b) => [b.stage, b.strength, b.won]), won: win, t: x.t, h: Math.round(hours * 100) / 100,
+      lv0, lv: meta.pilot.lv, credits: Math.round(meta.credits), loot: (res.loot && res.loot.n) || 0, kept: out.kept.length, lost: out.lost.length, kq, eq: bot.eq, sold: bot.sold, salv: bot.salv, gamble: bot.gamble, fac: bot.fac, s: x.strength, score: Math.round(score * 10) / 10,
+      stronger: prevScore === null ? null : score > prevScore * 1.001, news });
+    prevScore = score; // 下一局开局的装备评分和这一局开局比
   }
   return log;
 }
@@ -83,7 +125,9 @@ function reportRun(stage, archIdx, plane, seed, human, opt) {
   opt = opt || {};
   const S = STAGES[stage], P = archIdx < 0 ? null : BUILD_PATHS[archIdx]; let res = null;
   const meta = opt.meta || freshMeta(); if (!opt.meta) { meta.shared.level = opt.lv || S.rec; meta.planes[plane] = newPlaneRecord(plane); }
-  const w = new World({ mode: 'run', W: 1280, plane, stage, seed, ultCap: opt.ult || S.ult, stats: planeStats(meta, plane), target: P ? P.name : undefined, settings, ladder: opt.ladder || 0, first: !!opt.first, chain: !!opt.chain, seenMap: opt.first ? [] : Object.keys(MAP_OBJECTS), cb: { onEnd: (r) => res = r } }); // 地图装置：只有第一局按“都没见过”教一遍，之后都见过
+  const CR = opt.career; // 连续玩：掉落配置、路标补发、首领送回家都和游戏里一样（ui.js startRun）
+  const w = new World({ mode: 'run', W: 1280, plane, stage, seed, ultCap: opt.ult || S.ult, stats: planeStats(meta, plane), target: P ? P.name : undefined, settings, ladder: opt.ladder || 0, first: !!opt.first, chain: !!opt.chain, seenMap: opt.first ? [] : Object.keys(MAP_OBJECTS),
+    loot: CR ? CR.loot : undefined, catchUp: CR ? CR.catchUp : 0, cb: { onEnd: (r) => res = r, onCargo: CR ? (items) => Station.shipHome(meta, items, CR.shipped) : undefined } }); // 地图装置：只有第一局按“都没见过”教一遍，之后都见过
   G.world = w; w.pilotPickFn = P ? aimAt(P) : archIdx === -2 ? (gs) => gs[w.recIndex(w.ritual)] || gs[0] : randomPick(seed); // -2：照游戏推荐选（按大招键的新手）
   if (archIdx === -2 && opt.mix !== undefined) { const rp = randomPick(seed); let lastR = null, useRec = true, n = 0; w.pilotPickFn = (gs) => { if (w.ritual !== lastR) { lastR = w.ritual; useRec = pilotHash(n++, seed + 3) < opt.mix; } return useRec ? gs[w.recIndex(w.ritual)] || gs[0] : rp(gs); }; } // 还在学的玩家：mix 的概率照推荐，其余随手拿
   if (human) w.pilotHuman = Object.assign({ react: 0.25, slip: 0.12, aim: 14, seed }, opt.hum || {});
@@ -102,7 +146,7 @@ function reportRun(stage, archIdx, plane, seed, human, opt) {
     if (o.kind === 'link' && formedAt === null && PATH_LINKS.has(o.id)) formedAt = Math.round(t); // 成型：某个流派的启动件 + 回报件 + 它们的联动（倍增件）都到手
     _apply(o);
   };
-  while (t < (opt.chain ? 2400 : 1200)) {
+  while (t < (opt.chain ? (CR ? 1500 : 2400) : 1200)) {
     pilot(w); w.step(STEP); t += STEP; __now += STEP * 1000; frames++;
     // 构筑强度：首领战里每秒真正打掉的首领生命（不算自愈回来的）
     if (w.boss && (!cur || cur.obj !== w.boss)) { const b = w.boss, h = b.hit.bind(b), B0 = w.bossBudget(); cur = { obj: b, stage: w.stageId, hp: 0, regen: 0, t: 0, max: b.maxHp, T: B0.T, picks: picks.length, lv: buildPowerLv(w) }; fights.push(cur); b.hit = (o) => { const h0 = b.hp; h(o); if (b.hp < h0) cur && b === cur.obj && (cur.hp += h0 - b.hp); }; bossT = 0; bossD0 = w.m.dmgOut; }
@@ -116,12 +160,13 @@ function reportRun(stage, archIdx, plane, seed, human, opt) {
   const cl = (w.cleared || []).map((c) => c.id), bosses = fights.map((f) => ({ stage: f.stage, won: cl.includes(f.stage), picks: f.picks, strength: f.t >= 5 && f.max > 0 ? Math.round(((f.T * Math.max(0, (f.hp - f.regen) / f.t)) / f.max) * 100) / 100 : null }));
   const strength = bosses.length ? bosses[bosses.length - 1].strength : null;
   const pr = w.player.res; // 高品质件：拿到几件、其中几件对路、第一件在第几秒
-  return { stage, reached: w.stageId, cleared: cl, bosses, archetype: P ? P.name : archIdx === -2 ? 'rec' : 'random', strength, ladder: w.ladder, lv: meta.shared.level, rare: pr.rare || 0, rareOnBuild: w.player.rareOn || 0, rareAt: pr.rareAt === undefined ? null : Math.round(pr.rareAt), earned: Math.floor(w.m.earned || 0), sand: Math.floor(pr.dust || 0), character: plane, won: !!(res && res.win), picks, statOnly: stat, keyAt, archAt, formed: formedAt !== null, formedAt, t: Math.round(t), bossT: Math.round(bossT), bdps: bossT > 5 ? Math.round(bossD / bossT) : null, pickT, secs: Math.round(t), hurt: res && res.hurt, last: res && res.lastHurt, unfairSrc, lurkKills: w.m.lurkKills || 0, pace };
+  if (CR && !res) { w.done = true; res = w.result(false); res.abandoned = true; } // 时间到还没打完：按半路退出结算
+  return { res: CR ? res : undefined, stage, reached: w.stageId, cleared: cl, bosses, archetype: P ? P.name : archIdx === -2 ? 'rec' : 'random', strength, ladder: w.ladder, lv: meta.shared.level, rare: pr.rare || 0, rareOnBuild: w.player.rareOn || 0, rareAt: pr.rareAt === undefined ? null : Math.round(pr.rareAt), earned: Math.floor(w.m.earned || 0), sand: Math.floor(pr.dust || 0), character: plane, won: !!(res && res.win), picks, statOnly: stat, keyAt, archAt, formed: formedAt !== null, formedAt, t: Math.round(t), bossT: Math.round(bossT), bdps: bossT > 5 ? Math.round(bossD / bossT) : null, pickT, secs: Math.round(t), hurt: res && res.hurt, last: res && res.lastHurt, unfairSrc, lurkKills: w.m.lurkKills || 0, pace };
 }
 `);
 
 const sums = [], paces = [];
-const names = R('BUILD_PATHS.map((P) => P.name)'), planes = R('PLANE_ORDER.slice()'), LADDER_MAX_N = R('LADDER_MAX'), STAGE_ORDER_N = R('STAGE_ORDER.slice()'), LADDER_ON_N = R('LADDER_ON');
+const names = R('BUILD_PATHS.map((P) => P.name)'), planes = R('PLANE_ORDER.slice()'), LADDER_MAX_N = R('LADDER_MAX'), STAGE_ORDER_N = R('STAGE_ORDER.slice()'), LADDER_ON_N = R('LADDER_ON'), ALL_STAGES_N = R('ALL_STAGES.slice()'), MAP_ORDER = R('MAP_ORDER.slice()'), stageNOf = (id) => +id.split('-')[1];
 const ARCH = (flag('archetypes') || 'all').split(',').flatMap((x) => (x === 'all' ? names.map((_, i) => i) : x === 'random' ? [-1] : x === 'rec' ? [-2] : [/^\d+$/.test(x) ? +x : names.indexOf(x)]));
 if (ARCH.some((a) => a < -2 || a >= names.length)) throw new Error('未知流派：' + flag('archetypes'));
 const jobs = []; let k = 0;
@@ -129,7 +174,7 @@ for (const st of CHAIN ? ['1-1'] : STAGES_RUN) for (const a of ARCH) for (let r 
 const runJob = (j) => R(`reportRun('${j.st}', ${j.a}, '${j.plane}', ${j.seed}, ${HUMAN}, ${JSON.stringify({ ladder: LAD, first: FIRSTF, lv: CHAIN ? LV || 1 : LV, chain: CHAIN })})`);
 if (WORKER && CAREER) { // 连续玩：每个子进程跑分到的那几个玩家
   const [wi, wn] = WORKER.split('/').map(Number);
-  for (let i = 0; i < CAREER; i++) if (i % wn === wi) process.stdout.write('CAR ' + JSON.stringify({ i, log: R(`careerRun(${4001 + i * 97}, ${+(process.env.CAREER_RUNS || 120)}, ${HUMAN}, 20)`) }) + '\n');
+  for (let i = 0; i < CAREER; i++) if (i % wn === wi) process.stdout.write('CAR ' + JSON.stringify({ i, log: R(`careerRun(${4001 + i * 97}, ${+(process.env.CAREER_RUNS || 200)}, ${HUMAN}, ${+(process.env.CAREER_HOURS || 24)})`) }) + '\n');
   return;
 }
 if (WORKER) { // 并行的子进程：只跑分到的那几局，一行一局
@@ -370,72 +415,66 @@ async function careerReport() {
   })));
   out.sort((a, b) => a.i - b.i);
   const pc = (a, b) => (b ? Math.round((100 * a) / b) : 0), q = (a, f) => { const b = a.filter((x) => x != null).sort((x, y) => x - y); return b.length ? b[Math.min(b.length - 1, Math.floor(b.length * f))] : null; };
-  const hr = (x) => (x == null ? '—' : x.toFixed(1) + ' 小时'), W = [];
-  console.log(`连续玩（${out.length} 个玩家，${HUMAN ? '普通玩家机器人' : '完美反应机器人'}，照推荐选；每人最多 120 局或 20 小时；每局另算 60 秒菜单）`);
-  for (const P of out) for (const x of P.log) console.log(JSON.stringify(Object.assign({ p: P.i }, x)));
-  const first = out.map((P) => P.log[0]), fb = first.filter((x) => (x.cleared || []).includes('1-1')).length, fwin = first.filter((x) => x.won).length;
-  const fend = {}; for (const x of first) fend[x.won ? '通关' : `倒在 ${x.stage}`] = (fend[x.won ? '通关' : `倒在 ${x.stage}`] || 0) + 1;
-  console.log(`  第一局：打过第一个首领 ${pc(fb, first.length)}%；第一局就通关 ${pc(fwin, first.length)}%；第一局结局 ${Object.entries(fend).map(([k, v]) => `${k} ${v}`).join('，')}；时长中位 ${Math.round(q(first.map((x) => x.t + 60), 0.5) / 60)} 分钟`);
-  const when = (test) => out.map((P) => { const x = P.log.find(test); return x ? x.h : null; });
-  const has = (x, id) => (x.cleared || []).includes(id);
-  const MS = [['第一个首领', (x) => has(x, '1-1')], ['第二个首领（1-2）', (x) => has(x, '1-2')], ['首通（1-3）', (x) => has(x, '1-3') && !x.lad]];
-  if (LADDER_ON_N) for (let l = 1; l <= LADDER_MAX_N; l++) MS.push([`梦魇 ${l} 通关`, (x) => x.won && x.lad === l]);
-  const ms = {};
-  for (const [name, test] of MS) { const h = when(test), got = h.filter((x) => x != null); ms[name] = h; console.log(`  ${name}：${pc(got.length, out.length)}% 的人到了；中位 ${hr(q(h, 0.5))}（四分之一 ${hr(q(got, 0.25))}，四分之三 ${hr(q(got, 0.75))}）`); }
-  const all = out.flatMap((P) => P.log), white = all.filter((x) => !x.dust && !x.news.length).length, str = all.filter((x) => x.stronger != null), up = str.filter((x) => x.stronger).length;
-  const quiet = out.map((P) => { let m = 0, c = 0; for (const x of P.log) { c = x.news.length ? 0 : c + 1; m = Math.max(m, c); } return m; });
-  console.log(`  白打的局（什么都没带出来）：${white} / ${all.length}；下一局开局比上一局更强：${pc(up, str.length)}% 的局；最长连续没有新东西（升级 / 通关 / 解锁）：中位 ${q(quiet, 0.5)} 局，最多 ${Math.max(...quiet)} 局`);
-  const early = out.flatMap((P) => P.log.slice(0, 5)), late = out.flatMap((P) => P.log.slice(-5)), avgR = (L) => (L.reduce((a, x) => a + x.rare, 0) / Math.max(1, L.length)).toFixed(1);
-  console.log(`  高品质件：前五局每局 ${avgR(early)} 件，最后五局每局 ${avgR(late)} 件；共享等级 首通时中位 Lv${q(out.map((P) => { const x = P.log.find((y) => y.stage === '1-3' && y.won && !y.lad); return x ? x.lv : null; }), 0.5)}，最后中位 Lv${q(out.map((P) => P.log[P.log.length - 1].lv), 0.5)}`);
-  // 每一段（每个首领）是不是靠变强过去的（DE28）：第一次走到 / 第一次打倒时的等级和时间、打倒那一场的强度、
-  // 打倒之前（含那一场）的胜率和它随尝试次数怎么变；一段比一段难 = 这个胜率一段比一段低
-  const bins = ['第 1 次', '第 2 次', '第 3–4 次', '第 5–8 次', '第 9 次以后'], binOf = (k) => (k === 1 ? bins[0] : k === 2 ? bins[1] : k <= 4 ? bins[2] : k <= 8 ? bins[3] : bins[4]);
-  const lvOf = (x) => (x.lv0 != null ? x.lv0 : x.lv), rateOf = (L) => pc(L.filter(Boolean).length, L.length), seg = {};
-  for (const id of STAGE_ORDER_N) {
-    const S2 = { arrive: [], winLv: [], winH: [], meets: [], winS: [], tries: {}, front: [] };
-    for (const P of out) {
-      let k = 0;
-      for (const x of P.log) {
-        if (x.lad) break;
-        const f = (x.fights || []).find((g) => g[0] === id); if (!f) continue;
-        k++; S2.front.push(!!f[2]); if (k === 1) S2.arrive.push(lvOf(x));
-        (S2.tries[binOf(k)] = S2.tries[binOf(k)] || []).push(!!f[2]);
-        if (f[2]) { S2.winLv.push(lvOf(x)); S2.winH.push(x.h); S2.meets.push(k); S2.winS.push(f[1]); break; }
-      }
-    }
-    S2.low = pc(S2.winS.filter((v) => v < 1).length, S2.winS.length); seg[id] = S2;
-    const n = STAGE_ORDER_N.indexOf(id) + 1, sx = (v) => (v == null ? '—' : v.toFixed(2) + '×');
-    console.log(`  第 ${n} 段（${id} 首领）：第一次走到 Lv${q(S2.arrive, 0.5)}；第一次打倒 中位 ${hr(q(S2.winH, 0.5))}、Lv${q(S2.winLv, 0.5)}、第 ${q(S2.meets, 0.5)} 次见面（四分之三 ${q(S2.meets, 0.75)} 次）；打倒那一场强度中位 ${sx(q(S2.winS, 0.5))}，不到 1 倍 ${S2.low}%（${S2.winS.length} 人）；打倒之前（含）胜率 ${rateOf(S2.front)}%（${S2.front.length} 场）`);
-    console.log('    胜率随尝试：' + bins.filter((b) => S2.tries[b]).map((b) => `${b} ${rateOf(S2.tries[b])}%（${S2.tries[b].length}）`).join('，'));
-  }
-  if (LADDER_ON_N) console.log('  梦魇整局胜率：' + Array.from({ length: LADDER_MAX_N }, (_, i) => { const L = all.filter((x) => x.lad === i + 1); return `${i + 1} 级 ${pc(L.filter((x) => x.won).length, L.length)}%（${L.length}）`; }).join('，'));
-  const toClear = out.map((P) => { const i = P.log.findIndex((y) => has(y, '1-3') && !y.lad); return i < 0 ? null : { runs: i + 1 }; }).filter(Boolean);
-  if (toClear.length) console.log(`  首通前：中位打了 ${q(toClear.map((x) => x.runs), 0.5)} 局`);
-  // 目标从设计文档读（§7、§14 report-targets）
-  const C = TARGETS.career, fc = ms['首通（1-3）'].filter((x) => x != null);
+  const hr = (x) => (x == null ? '—' : x.toFixed(1) + ' 小时'), W = [], C = TARGETS.career, LT = TARGETS.loot || {};
+  console.log(`连续玩（${out.length} 个玩家，${HUMAN ? '普通玩家机器人' : '完美反应机器人'}，照推荐选；回站换装、卖白拆蓝、升设施、赌缺的位；每局另算 75 秒站里的时间）`);
+  if (argv.includes('--verbose')) for (const P of out) for (const x of P.log) console.log(JSON.stringify(Object.assign({ p: P.i }, x)));
+  const first = out.map((P) => P.log[0]), has = (x, id) => (x.cleared || []).includes(id);
+  const fb = first.filter((x) => has(x, '1-1')).length, fwin = first.filter((x) => x.won && x.map === 1).length;
+  console.log(`  第一局：打过第一个首领 ${pc(fb, first.length)}%；打通第 1 张图 ${pc(fwin, first.length)}%；驾驶员到 Lv${q(first.map((x) => x.lv), 0.5)}；时长中位 ${Math.round(q(first.map((x) => x.t + 75), 0.5) / 60)} 分钟`);
   if (pc(fb, first.length) < C.firstBoss) W.push(`第一局打过首领只有 ${pc(fb, first.length)}%（目标 ≥ ${C.firstBoss}%）`);
-  if (C.firstWinMax != null && pc(fwin, first.length) > C.firstWinMax) W.push(`第一局就通关的 ${pc(fwin, first.length)}%（目标 ≤ ${C.firstWinMax}%）`);
-  STAGE_ORDER_N.forEach((id, i) => {
-    const S2 = seg[id], n = i + 1;
-    // 一段比一段难：打倒之前的胜率比上一段低
-    const prev = i ? seg[STAGE_ORDER_N[i - 1]] : null;
-    if (prev && S2.front.length >= 10 && prev.front.length >= 10 && rateOf(S2.front) >= rateOf(prev.front)) W.push(`第 ${n} 段（${id}）打倒之前的胜率 ${rateOf(S2.front)}%，不比第 ${n - 1} 段（${rateOf(prev.front)}%）难`);
-    if (R(`!!BUILD_CHECK.free['${id}']`)) return; // 不考构筑的首领（第一段）不查下面两条
-    if (S2.winS.length >= 5 && S2.low > 50) W.push(`第 ${n} 段（${id}）多数人第一次打倒它是在强度不到 1 倍的局（${S2.low}%）：碰运气碰出来的（DE28）`);
-    // 胜率随尝试次数爬上去：第 3 次以后至少是第 1 次的两倍（第 1 次是 0 时至少 10%；第 1 次已经过半的不查）
-    const t1 = S2.tries[bins[0]] || [], tL = bins.slice(2).flatMap((b) => S2.tries[b] || []), r1 = rateOf(t1), rL = rateOf(tL);
-    if (C.climb && t1.length >= 5 && tL.length >= 5 && r1 < 50 && rL < Math.max(2 * r1, r1 + 10)) W.push(`第 ${n} 段（${id}）第 3 次以后的胜率 ${rL}%，第 1 次 ${r1}%：胜率没有随尝试爬上去`);
-  });
-  if (fc.length && (q(fc, 0.5) < C.clearMedian[0] || q(fc, 0.5) > C.clearMedian[1])) W.push(`首通中位 ${hr(q(fc, 0.5))}（目标 ${C.clearMedian.join('–')} 小时）`);
-  if (fc.length && q(fc, 0.25) < C.clearP25) W.push(`四分之一的人 ${hr(q(fc, 0.25))} 就首通了（目标不早于 ${C.clearP25} 小时）`);
-  if (fc.length < out.length * 0.5) W.push(`20 小时内只有 ${pc(fc.length, out.length)}% 的人首通`);
+  if (C.firstWinMax != null && pc(fwin, first.length) > C.firstWinMax) W.push(`第一局就打通第 1 张图 ${pc(fwin, first.length)}%（目标 ≤ ${C.firstWinMax}%）`);
+  // 第一件蓝 / 黄 / 绿 / 金：第几局带回家
+  const firstQ = (qq) => out.map((P) => { const x = P.log.find((y) => y.kq && y.kq[qq]); return x ? x.r + 1 : null; });
+  const fq = { blue: firstQ('blue'), yellow: firstQ('yellow'), green: firstQ('green'), gold: firstQ('gold') };
+  console.log(`  第一件：蓝 第 1 局 ${pc(fq.blue.filter((v) => v === 1).length, out.length)}%；黄 中位第 ${q(fq.yellow, 0.5)} 局；绿 中位第 ${q(fq.green, 0.5)} 局；金 中位第 ${q(fq.gold, 0.5)} 局（${pc(fq.gold.filter((v) => v != null).length, out.length)}% 的人拿到过）`);
+  const inR = (v, r) => v != null && v >= r[0] && v <= r[1];
+  if (LT.firstBlue && pc(fq.blue.filter((v) => v === 1).length, out.length) < 95) W.push(`第一局就带回蓝装的只有 ${pc(fq.blue.filter((v) => v === 1).length, out.length)}%（目标 ≥ 95%）`);
+  for (const [k, name] of [['yellow', 'firstYellow'], ['green', 'firstSet'], ['gold', 'firstUnique']]) if (LT[name] && !inR(q(fq[k], 0.5), LT[name])) W.push(`第一件${{ yellow: '黄', green: '绿', gold: '金' }[k]}中位第 ${q(fq[k], 0.5)} 局（目标 ${LT[name].join('–')}）`);
+  // 换上更好的装备：两次之间隔几局（前 3 小时 / 之后）
+  const gaps = (early) => out.flatMap((P) => { const ups = P.log.filter((x) => x.eq.length && (early ? x.h <= 3 : x.h > 3)).map((x) => x.r), g = []; for (let k = 1; k < ups.length; k++) g.push(ups[k] - ups[k - 1]); return g; });
+  const gE = q(gaps(true), 0.5), gL = q(gaps(false), 0.5);
+  console.log(`  换上更好的装备：两次之间 前 3 小时中位 ${gE} 局，之后中位 ${gL} 局`);
+  if (LT.upgradeGapEarly && gE != null && gE > LT.upgradeGapEarly) W.push(`前 3 小时两次换装中位隔 ${gE} 局（目标 ≤ ${LT.upgradeGapEarly}）`);
+  if (LT.upgradeGapLate && gL != null && gL > LT.upgradeGapLate) W.push(`3 小时以后两次换装中位隔 ${gL} 局（目标 ≤ ${LT.upgradeGapLate}）`);
+  // 打穿一张图的局掉多少
+  const full = out.flatMap((P) => P.log.filter((x) => x.won && !x.farm).map((x) => x.loot)), half = out.flatMap((P) => P.log.filter((x) => !x.won && x.stage && stageNOf(x.stage) === 2).map((x) => x.loot));
+  console.log(`  每局掉落：打穿一张图中位 ${q(full, 0.5)} 件（${full.length} 局），倒在第 2 关中位 ${q(half, 0.5)} 件`);
+  if (LT.fullRun && full.length >= 5 && !inR(q(full, 0.5), LT.fullRun)) W.push(`打穿一张图中位掉 ${q(full, 0.5)} 件（目标 ${LT.fullRun.join('–')}）`);
+  // 必需功能全开：仓库、商人、保险舱、拆解台、改造台
+  const NEED = ['stash', 'shop', 'insure', 'salvage', 'cube'], allOpen = out.map((P) => { const seen = new Set(); for (const x of P.log) { for (const n of x.news) if (n.startsWith('unlock ')) seen.add(n.slice(7)); if (NEED.every((u) => seen.has(u))) return x.r + 1; } return null; });
+  console.log(`  必需功能全开：中位第 ${q(allOpen, 0.5)} 局`);
+  if (q(allOpen, 0.5) == null || q(allOpen, 0.5) > 5) W.push(`必需功能中位第 ${q(allOpen, 0.5)} 局才全开（目标第 5 局以前）`);
+  // 每张图的首通（小时）和那时的驾驶员等级
+  const clearH = {}, clearLv = {};
+  for (const n of MAP_ORDER) { clearH[n] = out.map((P) => { const x = P.log.find((y) => y.news.includes('map ' + n)); return x ? x.h : null; }); clearLv[n] = out.map((P) => { const x = P.log.find((y) => y.news.includes('map ' + n)); return x ? x.lv : null; }); }
+  for (const n of MAP_ORDER) { const got = clearH[n].filter((v) => v != null); console.log(`  打通第 ${n} 张图：${pc(got.length, out.length)}% 的人；中位 ${hr(q(clearH[n], 0.5))}（四分之一 ${hr(q(got, 0.25))}，四分之三 ${hr(q(got, 0.75))}）；驾驶员中位 Lv${q(clearLv[n], 0.5)}`); }
+  const c1 = clearH[1].filter((v) => v != null);
+  if (c1.length && (q(c1, 0.5) < C.clearMedian[0] || q(c1, 0.5) > C.clearMedian[1])) W.push(`第 1 张图首通中位 ${hr(q(c1, 0.5))}（目标 ${C.clearMedian.join('–')} 小时）`);
+  if (c1.length && q(c1, 0.25) < C.clearP25) W.push(`四分之一的人 ${hr(q(c1, 0.25))} 就打通了第 1 张图（目标不早于 ${C.clearP25} 小时）`);
+  for (const n of MAP_ORDER.slice(1)) { const d = out.map((P, k) => (clearH[n][k] != null && clearH[n - 1][k] != null ? clearH[n][k] - clearH[n - 1][k] : null)), r = C.maps && C.maps[n]; if (r && d.some((v) => v != null) && !inR(q(d, 0.5), r)) W.push(`第 ${n} 张图比上一张多用 ${hr(q(d, 0.5))}（目标 ${r.join('–')} 小时）`); }
+  const fin = clearH[MAP_ORDER.length].filter((v) => v != null);
+  if (C.finalMedian && fin.length < out.length * 0.5) W.push(`只有 ${pc(fin.length, out.length)}% 的人打倒了混沌祭司（目标中位 ${C.finalMedian.join('–')} 小时）`);
+  else if (C.finalMedian && !inR(q(clearH[MAP_ORDER.length], 0.5), C.finalMedian)) W.push(`打倒混沌祭司中位 ${hr(q(clearH[MAP_ORDER.length], 0.5))}（目标 ${C.finalMedian.join('–')} 小时）`);
+  // 每个首领：第一次输给它以后多少局打过；打倒那一场的强度（DE28）
+  const bossIds = ALL_STAGES_N, stuck = [], lowWins = {};
+  for (const id of bossIds) {
+    const after = [], winS = [];
+    for (const P of out) { let lostAt = null; for (const x of P.log) { const f = (x.fights || []).find((g) => g[0] === id); if (!f) continue; if (!f[2] && lostAt === null) lostAt = x.r; if (f[2]) { winS.push(f[1]); if (lostAt !== null) after.push(x.r - lostAt); break; } } }
+    if (after.length) stuck.push(q(after, 0.5));
+    const low = pc(winS.filter((v) => v != null && v < 1).length, winS.filter((v) => v != null).length); lowWins[id] = low;
+    if (winS.length) console.log(`  ${id} 首领：${winS.length} 人打倒；打倒那一场强度中位 ${q(winS, 0.5)}×，不到 1 倍 ${low}%；输过以后中位 ${after.length ? q(after, 0.5) : '—'} 局打过（${after.length} 人输过）`);
+    if (winS.length >= 5 && low > 50 && !R(`!!BUILD_CHECK.free['${id}']`)) W.push(`${id} 多数人第一次打倒它是在强度不到 1 倍的局（${low}%）：碰运气碰出来的（DE28）`);
+  }
+  const stuckMax = stuck.length ? Math.max(...stuck) : null;
+  if (C.stuckRuns && stuckMax != null && stuckMax > C.stuckRuns) W.push(`卡在某个首领的人中位 ${stuckMax} 局才打过（目标 ≤ ${C.stuckRuns}）`);
+  // 连续没有新东西、白打的局、下一局开局更强
+  const all = out.flatMap((P) => P.log), white = all.filter((x) => !x.kept && !x.news.length).length, str = all.filter((x) => x.stronger != null), up = str.filter((x) => x.stronger).length;
+  const quiet = out.map((P) => { let m = 0, c = 0; for (const x of P.log) { c = x.news.length || x.kq.green || x.kq.gold ? 0 : c + 1; m = Math.max(m, c); } return m; });
+  console.log(`  白打的局：${white} / ${all.length}；下一局开局更强（装备评分）：${pc(up, str.length)}% 的局；最长连续没有新东西：中位 ${q(quiet, 0.5)} 局，最多 ${Math.max(...quiet)} 局`);
+  if (q(quiet, 0.5) > C.quietMax) W.push(`玩家中位连续 ${q(quiet, 0.5)} 局没有新东西（目标 ≤ ${C.quietMax}）`);
   if (white) W.push(`${white} 局什么都没带出来`);
-  // 多久没有新东西：梦魇开着时量到打完最高一级，收起来时量到首通（普通难度这一段）
-  const endOf = (P) => (LADDER_ON_N ? (P.log.find((x) => x.lad === LADDER_MAX_N && x.won) || {}).r : (P.log.find((x) => has(x, '1-3')) || {}).r);
-  const quietPre = out.map((P) => { const end = endOf(P); let m = 0, c = 0; for (const x of P.log) { if (end !== undefined && x.r > end) break; c = x.news.length ? 0 : c + 1; m = Math.max(m, c); } return m; });
-  const upto = LADDER_ON_N ? `打完梦魇 ${LADDER_MAX_N}` : '首通';
-  if (q(quietPre, 0.5) > C.quietMax) W.push(`${upto}之前，玩家中位连续 ${q(quietPre, 0.5)} 局没有新东西（目标 ≤ ${C.quietMax}）`);
-  console.log(`  ${upto}之前最长连续没有新东西：中位 ${q(quietPre, 0.5)} 局；之后内容用完（第二章之前）`);
+  const last = out.map((P) => P.log[P.log.length - 1]);
+  console.log(`  最后：中位 ${hr(q(last.map((x) => x.h), 0.5))}、${q(out.map((P) => P.log.length), 0.5)} 局、驾驶员 Lv${q(last.map((x) => x.lv), 0.5)}、信用点 ${q(last.map((x) => x.credits), 0.5)}`);
   for (const w of W) console.log('  WARN ' + w);
   console.log(W.length ? `连续玩有 ${W.length} 条警告` : '连续玩无警告');
 }

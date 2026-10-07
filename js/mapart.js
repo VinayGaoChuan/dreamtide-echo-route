@@ -1,14 +1,14 @@
 'use strict';
-/* 梦潮：回声航线 v0.6/v0.7 — 地图物件美术：梦灯屋（主炮转盘）、断桥灯环、星砂矿、救援站、巨型梦境生物。
+/* 梦潮：回声航线 v0.6/v0.7 — 地图物件美术：信标亭（主炮转盘）、断桥灯环、星砂矿、救援站、巨型梦境生物。
    全部 Canvas 程序绘制，沿用 Q 版深蓝紫描边 + 暖灯发光；远处剪影 → 靠近感应环 → 充能圈三层提示。 */
 
 function glowAt(g, x, y, r, color, a) { g.globalCompositeOperation = 'lighter'; drawGlow(g, x, y, r, color, a); g.globalCompositeOperation = 'source-over'; }
 function mapFont(px) { return `400 ${px}px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif`; }
 
 /* 浮岛底座：顶面在 y=0，向下 h */
-function floatRock(g, w, h, t, top = '#a393e6', body = '#6a5bb3') {
+function floatRock(g, w, h, t, top = '#8a7a80', body = '#4a3c48') { // 拾荒宇宙：小行星（原来是梦里的浮岛和云）
   g.save();
-  g.fillStyle = 'rgba(255,255,255,0.8)';
+  g.fillStyle = 'rgba(60,48,62,0.95)';
   for (const [x, y, r] of [[-w * 0.46, h * 0.22, h * 0.24], [-w * 0.32, h * 0.42, h * 0.2], [w * 0.44, h * 0.28, h * 0.26], [w * 0.3, h * 0.46, h * 0.18]]) { g.beginPath(); g.arc(x + Math.sin(t * 0.8 + x) * 2, y, r, 0, TAU); g.fill(); }
   g.fillStyle = body; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
   g.beginPath(); g.moveTo(-w / 2, 0); g.quadraticCurveTo(-w * 0.44, h * 0.65, -w * 0.12, h); g.quadraticCurveTo(0, h * 1.12, w * 0.14, h * 0.96); g.quadraticCurveTo(w * 0.44, h * 0.62, w / 2, 0); g.closePath(); g.fill(); g.stroke();
@@ -83,24 +83,26 @@ function drawRewardOrb(g, x, y, icon, color, t, s = 1) {
   drawIcon(g, icon, x, y, 20 * s, color, PAL.ink);
 }
 
-/* ================================================== 梦灯屋 ================================================== */
+/* ================================================== 信标亭 ================================================== */
 /* o: { lit 0..1 充能, done, open 0..1, turn -1..1（转向飞机）, bulbs 0..8, look } */
 function drawLampHouse(g, x, y, o, t) {
   g.save(); g.translate(x, y + Math.sin(t * 1.3) * 5);
   const lit = o.done ? 1 : 0, warm = Math.max(o.lit || 0, lit);
   if (warm > 0) glowAt(g, 0, -20, 150 + warm * 50, 'rgba(255,207,74,0.55)', 0.35 + warm * 0.5);
-  floatRock(g, 190, 74, t, '#a393e6', '#6a5bb3');
+  floatRock(g, 190, 74, t);
   g.rotate((o.turn || 0) * 0.07);
-  // chimney
-  g.fillStyle = '#b39cf0'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
-  g.fillRect(28, -104, 16, 30); g.strokeRect(28, -104, 16, 30);
+  // 天线桅杆（原来的烟囱）：顶上一盏一闪一闪的信标灯
+  g.fillStyle = '#9aa0b8'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
+  g.fillRect(32, -128, 8, 54); g.strokeRect(32, -128, 8, 54);
+  glowAt(g, 36, -132, 22, 'rgba(255,90,80,0.9)', 0.4 + 0.4 * Math.max(0, Math.sin(t * 4))); g.fillStyle = '#ff6a5a'; g.beginPath(); g.arc(36, -132, 5, 0, TAU); g.fill(); g.stroke();
   if (o.done) for (let i = 0; i < 3; i++) { const k = ((t * 0.6 + i / 3) % 1); g.fillStyle = `rgba(255,255,255,${0.6 * (1 - k)})`; g.beginPath(); g.arc(36 + k * 20, -110 - k * 40, 6 + k * 8, 0, TAU); g.fill(); }
   // body
-  const bg = g.createLinearGradient(0, -44, 0, 40); bg.addColorStop(0, '#fff6e6'); bg.addColorStop(1, lit ? '#ffe3b0' : '#d9cdf0');
+  const bg = g.createLinearGradient(0, -44, 0, 40); bg.addColorStop(0, '#e8ecf6'); bg.addColorStop(1, lit ? '#ffe3b0' : '#8e94ad'); // 金属舱
   g.fillStyle = bg; g.beginPath(); g.moveTo(-52, 0); g.lineTo(-52, -42); g.lineTo(52, -42); g.lineTo(52, 0); g.closePath(); g.fill();
   g.lineWidth = 2.8; g.stroke();
   // roof
-  g.fillStyle = '#9d7ff0'; g.beginPath(); g.moveTo(-68, -36); g.quadraticCurveTo(-30, -84, 0, -112); g.quadraticCurveTo(30, -84, 68, -36); g.quadraticCurveTo(0, -46, -68, -36); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = '#4f5f96'; g.beginPath(); g.moveTo(-68, -36); g.quadraticCurveTo(-60, -96, 0, -104); g.quadraticCurveTo(60, -96, 68, -36); g.quadraticCurveTo(0, -46, -68, -36); g.closePath(); g.fill(); g.stroke(); // 圆顶（原来的屋顶）
+  g.strokeStyle = 'rgba(20,16,40,0.4)'; g.lineWidth = 1.5; for (const k of [-0.5, 0, 0.5]) { g.beginPath(); g.moveTo(k * 120, -40); g.quadraticCurveTo(k * 60, -90, 0, -102); g.stroke(); }
   g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 3; g.beginPath(); g.moveTo(-40, -52); g.quadraticCurveTo(-18, -80, -2, -98); g.stroke();
   // roof lamp ring: bulbs light up one by one
   const n = 8, on = o.done ? n : Math.floor((o.lit || 0) * n + 0.001);
@@ -108,14 +110,14 @@ function drawLampHouse(g, x, y, o, t) {
     const u = i / (n - 1), bx = lerp(-60, 60, u), by = -38 - Math.sin(u * Math.PI) * 66;
     const lit2 = i < on;
     if (lit2) glowAt(g, bx, by, 16, o.bulb ? (o.bulb.startsWith('#') ? hexA(o.bulb, 0.9) : o.bulb) : GLOW.gold, 0.8);
-    g.fillStyle = lit2 ? (o.bulb || '#fff3b0') : '#5a4d96'; g.strokeStyle = PAL.ink; g.lineWidth = 1.5;
+    g.fillStyle = lit2 ? (o.bulb || '#fff3b0') : '#3a3f5c'; g.strokeStyle = PAL.ink; g.lineWidth = 1.5;
     g.beginPath(); g.arc(bx, by, 4.6, 0, TAU); g.fill(); g.stroke();
   }
   // windows = eyes
   for (const side of [-1, 1]) {
     const wx = side * 26, wy = -20;
     if (lit || warm > 0.6) glowAt(g, wx, wy, 30, GLOW.gold, 0.6 + warm * 0.3);
-    g.fillStyle = lit ? '#ffe38a' : warm > 0.3 ? `rgba(255,227,138,${warm})` : '#3a3170'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
+    g.fillStyle = lit ? '#ffe38a' : warm > 0.3 ? `rgba(255,227,138,${warm})` : '#1f1d34'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
     g.beginPath(); g.arc(wx, wy, 13, 0, TAU); g.fill(); g.stroke();
     if (lit) {
       const lk = (o.look || 0) * 3;
@@ -129,9 +131,9 @@ function drawLampHouse(g, x, y, o, t) {
   if (lit) blush(g, 0, -6, 38, 5);
   // door = mouth
   const op = clamp(o.open || 0, 0, 1);
-  g.fillStyle = op > 0 ? '#ffd76a' : '#6b52b8'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
+  g.fillStyle = op > 0 ? '#ffd76a' : '#3a3f5c'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
   g.beginPath(); g.moveTo(-12, 0); g.lineTo(-12, -14); g.arc(0, -14, 12, Math.PI, 0); g.lineTo(12, 0); g.closePath(); g.fill(); g.stroke();
-  if (op > 0) { glowAt(g, 0, -8, 40, GLOW.gold, op); g.fillStyle = '#8f6fd8'; g.beginPath(); g.moveTo(-12, 0); g.lineTo(-12, -14); g.lineTo(-12 + 24 * (1 - op) * 0.9, -12); g.lineTo(-12 + 24 * (1 - op) * 0.9, 0); g.closePath(); g.fill(); g.stroke(); }
+  if (op > 0) { glowAt(g, 0, -8, 40, GLOW.gold, op); g.fillStyle = '#5a6080'; g.beginPath(); g.moveTo(-12, 0); g.lineTo(-12, -14); g.lineTo(-12 + 24 * (1 - op) * 0.9, -12); g.lineTo(-12 + 24 * (1 - op) * 0.9, 0); g.closePath(); g.fill(); g.stroke(); }
   g.restore();
 }
 /* 转盘：四格主炮改造；停下时本次两个候选的格子亮起 */
@@ -232,7 +234,7 @@ function drawMine(g, x, y, o, t) {
   }
   // lumpy rock
   const seed = o.seed || 1, n = 11;
-  const gr = g.createRadialGradient(-r * 0.3, -r * 0.35, 4, 0, 0, r * 1.1); gr.addColorStop(0, '#b3a6ef'); gr.addColorStop(1, '#5b4ea8');
+  const gr = g.createRadialGradient(-r * 0.3, -r * 0.35, 4, 0, 0, r * 1.1); gr.addColorStop(0, '#a89aa6'); gr.addColorStop(1, '#4a3c4a'); // 矿核小行星
   g.fillStyle = gr; g.strokeStyle = PAL.ink; g.lineWidth = 3;
   g.beginPath();
   for (let i = 0; i <= n; i++) { const a = (i / n) * TAU, rr = r * (0.88 + 0.14 * Math.sin(seed * 7 + i * 2.3)); const px = Math.cos(a) * rr, py = Math.sin(a) * rr; if (i === 0) g.moveTo(px, py); else g.lineTo(px, py); }

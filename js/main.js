@@ -3,9 +3,9 @@
 
 (function boot() {
   const cv = $('#cv'), ctx = cv.getContext('2d'), stage = $('#stage'), app = $('#app');
-  G.meta = Store.load(); Home.ensure(G.meta); Tele.bind(G.meta);
+  G.meta = Store.load(); Station.ensure(G.meta); Tele.bind(G.meta);
   if (!G.meta.seenTitle && window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) { G.meta.settings.shake = false; G.meta.settings.reduceFlash = true; G.meta.settings.flash = 0.3; }
-  G.sea = new SeaScene(); G.hub = new HubScene(); G.map = new MapScene(); G.homeScene = new HomeScene();
+  G.sea = new SpaceScene(); G.hub = new HubScene(); G.map = new MapScene(); G.stationScene = new StationScene();
   try { document.documentElement.style.setProperty('--paper-tex', `url(${makePaper().toDataURL()})`); } catch (e) { /* canvas export blocked */ }
 
   // 拖动：整块舞台（含黑边）都能拖，HUD 按钮自己拦截
@@ -87,7 +87,7 @@
       case 'title':
         G.sea.dim = 0;
         G.sea.draw(ctx, W, LH); drawTrail(W * 0.3, LH * 0.56, t); drawHero(cur, W * 0.3, LH * 0.56, 2.6, t); break;
-      case 'home': G.homeScene.draw(ctx, W, LH, G.meta, G.homeUI); break; // 家园：浮空港
+      case 'station': G.stationScene.draw(ctx, W, LH, G.meta); break; // 站
       case 'hub':
         G.hub.draw(ctx, W, LH); if (G.screen === 'hub') { drawTrail(W / 2, LH * 0.4, t); drawHero(cur, W / 2, LH * 0.4, 2.2, t); } break;
       case 'map':
@@ -99,40 +99,54 @@
     overlay(W);
   }
 
-  /* ---------- 商店主图：用游戏自己的画法拼一张关键美术（920×430 主图从 16:9 画面中间裁出来） ----------
-     左边：标题 + 月兔号带着刚长出来的穿透光轨冲出去；中间：一群泡泡水母被打散；右边：失控闹钟；右下：沉睡巨鲸浮上来 */
+  /* ---------- 商店主图：用游戏自己的画法拼一张关键美术（920×430 主图从 16:9 画面中间裁出来，上下各留约 60 像素） ----------
+     左上：标题；左边：拾荒飞船拖着光轨冲出去，三道光枪打进一群族无人机；中间：精英炸开，金光柱从天上砸下来（暗金掉落）；
+     右上：日食里混沌祭司的剪影；地上还有蓝、绿两道掉落的光柱。G.keyEn = 英文（商店页用） */
   function drawKeyArt(W, t) {
-    G.sea.setTheme('bay'); G.sea.dim = 0; G.sea.draw(ctx, W, LH);
-    const px = W * 0.3, py = LH * 0.6;
-    drawGiant(ctx, W * 0.6, LH * 0.86, 0.8, { kind: 'whale', eye: 1, act: 1, mouth: 0.5 }, t);
-    ctx.save(); ctx.translate(W * 0.83, LH * 0.36); ctx.scale(1.05, 1.05); drawClockBoss(ctx, { x: 0, y: 0, phase: 2, minA: t * 2 + 1, hourA: 2.2, weakT: 0, mouth: 0.7, lookA: Math.PI, shield: 0, hitFlash: 0 }, t); ctx.restore();
-    // 四路穿透光轨（金色长尾），尖头打进水母群
-    ctx.globalCompositeOperation = 'lighter';
-    for (const dy of [-42, -14, 14, 42]) {
-      for (let k = 0; k < 4; k++) {
-        const x = px + 120 + k * 150 + (dy * 0.3), y = py + dy * (1 + k * 0.08), L = 110, gr = ctx.createLinearGradient(x - L, y, x, y);
-        gr.addColorStop(0, 'rgba(255,227,138,0)'); gr.addColorStop(1, 'rgba(255,250,225,0.95)');
-        ctx.strokeStyle = gr; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x - L, y); ctx.lineTo(x, y); ctx.stroke();
-      }
-    }
+    const en = !!G.keyEn, sp = G.keySpace || (G.keySpace = new SpaceScene());
+    sp.setTheme('5-3'); sp.dim = 0; sp.t = 6; sp.scroll = 900; sp.draw(ctx, W, LH);
+    // 祭司：日食前一个巨大的剪影，只有面具和信号环发光
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.translate(W * 0.8, LH * 0.44); ctx.scale(1.3, 1.3); ctx.translate(-W * 0.8, -LH * 0.44); drawPriest(ctx, { x: W * 0.8, y: LH * 0.44, phase: 1, rings: [0, 1, 2].map((i) => ({ a: t * 0.3 + i * 2.1, r: 120 + i * 26 })), swing: t, hitFlash: 0, weakT: 1 }, t); ctx.restore();
+    ctx.fillStyle = 'rgba(6,4,14,0.25)'; ctx.fillRect(0, 0, W, LH);
+    // 敌弹：几串粉色圆弹和蓝色菱形斜着穿过画面（这是一张射击游戏的图）
+    for (let i = 0; i < 18; i++) { const x = W * (0.42 + (i % 6) * 0.07), y = LH * (0.2 + Math.floor(i / 6) * 0.28) + (i % 6) * 9; BulletArt.draw(ctx, i % 3 ? 'pink' : 'blue', x, y, 0, 1); }
+    // 族无人机：橙（穿甲矿业）、紫（星砂商会）、电青（电弧公司）
+    const foes = [[0.55, 0.36, 'drill', 'jelly', 1.5], [0.6, 0.62, 'ledger', 'tick', 1.4], [0.69, 0.48, 'arc', 'star', 1.6], [0.5, 0.74, 'drill', 'moth', 1.6], [0.73, 0.72, 'ledger', 'jelly', 1.3], [0.64, 0.28, 'arc', 'moth', 1.5], [0.82, 0.6, 'drill', 'boat', 1.4]];
+    for (const [fx, fy, race, type, sc] of foes) { ctx.save(); ctx.translate(W * fx, LH * fy); ctx.scale(sc, sc); EnemyArt[type](ctx, { r: 20, hitFlash: 0, base: type, type, race, seed: fx * 10, charge: 0 }, t + fx * 7); ctx.restore(); }
+    // 主角的三道光枪
+    const px = W * 0.25, py = LH * 0.56;
+    ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    for (const dy of [-26, 0, 26]) { const x0 = px + 70, x1 = W * 0.6 + dy * 0.6, y = py + dy * 1.4; const gr = ctx.createLinearGradient(x0, y, x1, y); gr.addColorStop(0, 'rgba(120,230,255,0)'); gr.addColorStop(1, 'rgba(210,250,255,0.95)'); ctx.strokeStyle = gr; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(x0, py + dy * 0.3); ctx.lineTo(x1, y); ctx.stroke(); }
     ctx.globalCompositeOperation = 'source-over';
-    for (const dy of [-42, -14, 14, 42]) for (let k = 0; k < 4; k++) BulletArt.draw(ctx, 'crescent', px + 120 + k * 150 + dy * 0.3, py + dy * (1 + k * 0.08), 0, 1.25);
-    // 被打散的水母：几只完整的、几团爆开的碎片
-    const C = ['#fff3c8', '#c9a8ff', '#ffffff', '#9fe3f0'];
-    [[0.62, 0.5], [0.66, 0.66], [0.58, 0.74], [0.7, 0.54], [0.55, 0.42]].forEach(([fx, fy], i) => {
-      const x = W * fx, y = LH * fy;
-      if (i % 2) { ctx.save(); ctx.translate(x, y); ctx.scale(1.4, 1.4); EnemyArt.jelly(ctx, { r: 20, hitFlash: 0, base: 'jelly', type: 'jelly' }, t + i); ctx.restore(); }
-      else { ctx.globalCompositeOperation = 'lighter'; drawGlow(ctx, x, y, 60, 'rgba(255,243,200,0.9)', 0.8); ctx.globalCompositeOperation = 'source-over'; for (let k = 0; k < 14; k++) { const a = (k / 14) * TAU + i, r = 20 + (k % 3) * 16; ctx.fillStyle = C[k % 4]; ctx.beginPath(); ctx.arc(x + Math.cos(a) * r, y + Math.sin(a) * r, 4 + (k % 3), 0, TAU); ctx.fill(); } }
-    });
-    drawTrail(px, py, t); drawHero('moon', px, py, 2.3, t);
-    // 标题：中文大字 + 英文副标题（左上，避开主角和 Boss）
-    ctx.save(); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    const lx = W * 0.055, ly = LH * 0.36;
-    ctx.font = '400 170px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineJoin = 'round';
-    ctx.lineWidth = 16; ctx.strokeStyle = '#3a2c72'; ctx.strokeText('梦潮', lx, ly);
-    ctx.shadowColor = 'rgba(255,201,74,0.75)'; ctx.shadowBlur = 36; ctx.fillStyle = '#fff6ee'; ctx.fillText('梦', lx, ly); ctx.fillStyle = '#ffd76a'; ctx.fillText('潮', lx + ctx.measureText('梦').width, ly); ctx.shadowBlur = 0;
-    ctx.font = '400 54px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineWidth = 8; ctx.strokeText('回声航线', lx + 8, ly + 66); ctx.fillStyle = '#e4d8ff'; ctx.fillText('回声航线', lx + 8, ly + 66);
-    ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('DREAMTIDE · ECHO ROUTE', lx + 10, ly + 112); ctx.fillStyle = '#9fe3f0'; ctx.fillText('DREAMTIDE · ECHO ROUTE', lx + 10, ly + 112);
+    // 精英炸开：碎片 + 光圈；金光柱从天上砸下来
+    const ex = W * 0.6, ey = LH * 0.5;
+    // 金光柱：从画面顶上砸下来，两边几道光线
+    ctx.globalCompositeOperation = 'lighter';
+    const pg = ctx.createLinearGradient(0, 0, 0, ey + 80); pg.addColorStop(0, 'rgba(255,200,90,0)'); pg.addColorStop(0.7, 'rgba(255,214,120,0.55)'); pg.addColorStop(1, 'rgba(255,240,200,0.95)');
+    ctx.fillStyle = pg; ctx.fillRect(ex - 34, 0, 68, ey + 80); ctx.fillStyle = 'rgba(255,250,230,0.8)'; ctx.fillRect(ex - 8, 0, 16, ey + 80);
+    for (let i = 0; i < 7; i++) { const a = -Math.PI / 2 + (i - 3) * 0.32; ctx.strokeStyle = 'rgba(255,214,140,0.35)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(ex, ey + 70); ctx.lineTo(ex + Math.cos(a) * 260, ey + 70 + Math.sin(a) * 260); ctx.stroke(); }
+    drawGlow(ctx, ex, ey, 170, 'rgba(255,214,140,0.9)', 0.9); ctx.globalCompositeOperation = 'source-over';
+    const C = ['#ffd76a', '#ff8a3d', '#ffffff', '#d9a443'];
+    for (let k = 0; k < 26; k++) { const a = (k / 26) * TAU, r = 40 + (k % 4) * 26; ctx.fillStyle = C[k % 4]; ctx.save(); ctx.translate(ex + Math.cos(a) * r, ey + Math.sin(a) * r * 0.8); ctx.rotate(a); ctx.fillRect(-5, -3, 10 + (k % 3) * 4, 6); ctx.restore(); }
+    ctx.strokeStyle = 'rgba(255,230,170,0.8)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(ex, ey, 118, 0, TAU); ctx.stroke();
+    const mk = (q, name, x, y, kt) => { const it = Gear.make({ ilvl: 8, q, kind: 'gun' }); it.uni = null; return { item: Object.assign(it, { _label: name }), x, y, t: kt, fx: LOOT_FX[q] }; };
+    const drops = [mk('gold', en ? 'THE OLD SCAVENGER' : '老拾荒者', ex + 6, ey + 70, 0.9), mk('blue', en ? 'Blazing Chain Cannon' : '爆燃的链式速射炮', W * 0.44, LH * 0.82, 1.2), mk('green', en ? 'Drill · Engine' : '钻头 · 引擎', W * 0.82, LH * 0.84, 1.1)];
+    for (const k of drops) drawLootCrate(ctx, k, t);
+    for (const k of drops) drawLootLabel(ctx, k);
+    drawTrail(px, py, t); drawHero('moon', px, py, 2.5, t);
+    // 标题（左上，避开主角和金光柱）
+    ctx.save(); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.lineJoin = 'round';
+    const lx = W * 0.05, ly = LH * 0.27;
+    if (en) {
+      ctx.font = '800 128px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 16; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('LOOTWING', lx, ly);
+      const tg = ctx.createLinearGradient(0, ly - 100, 0, ly); tg.addColorStop(0, '#fff3c8'); tg.addColorStop(0.55, '#ffd76a'); tg.addColorStop(1, '#d9883a');
+      ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = tg; ctx.fillText('LOOTWING', lx, ly); ctx.shadowBlur = 0;
+      ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('SHOOT  ·  LOOT  ·  SALVAGE', lx + 8, ly + 44); ctx.fillStyle = '#bfe9ff'; ctx.fillText('SHOOT  ·  LOOT  ·  SALVAGE', lx + 8, ly + 44);
+    } else {
+      ctx.font = '400 140px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineWidth = 16; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('拾荒之翼', lx, ly);
+      ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = '#ffd76a'; ctx.fillText('拾荒之翼', lx, ly); ctx.shadowBlur = 0;
+      ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('LOOTWING', lx + 8, ly + 44); ctx.fillStyle = '#bfe9ff'; ctx.fillText('LOOTWING', lx + 8, ly + 44);
+    }
     ctx.restore();
   }
   /* ---------- 联机主循环：按真实时间推进；本机每 1/30 秒采一帧操作，凑齐所有人的这一帧才往下模拟 ---------- */
@@ -196,7 +210,7 @@
         if (Input.gameActive && Input.consume('pause')) pauseGame();
       } else {
         acc = 0; if (waitShown) mpWait('');
-        if (G.bg === 'home') G.homeScene.update(dt); else if (G.bg === 'hub') G.hub.update(dt); else if (G.bg === 'map') G.map.update(dt); else G.sea.update(dt);
+        if (G.bg === 'station') G.stationScene.update(dt); else if (G.bg === 'hub') G.hub.update(dt); else if (G.bg === 'map') G.map.update(dt); else G.sea.update(dt);
       }
       if (!Input.gameActive) navUpdate();
       render(now / 1000);

@@ -52,7 +52,7 @@ const PLANES = {
     burst: { name: '时间暂停', desc: '时间暂停，恢复时被标记的敌人一起爆开' },
     passive: { name: '准点充能', desc: 'Boss 换阶段时大招自动充一截' },
     star3: '暂停更久',
-    special: '暂停时失控闹钟的指针也会停下',
+    special: '暂停时失控主钟的指针也会停下',
     colors: { body: '#ffd76a', accent: '#fff3c8', exp: ['#ffd76a', '#fff3c8', '#ff9a6b'] },
   },
 };
@@ -174,7 +174,7 @@ const NODE_TYPES = {
   boss: { name: 'Boss 伤害', icon: 'n-crown', min: 12, max: 20, fmt: () => '打 Boss 更疼', word: 'Boss 伤害', score: 2, why: '打 Boss 更快' },
   pierceX: { name: '穿透强化', icon: 's-pierce', min: 1, max: 1, fmt: () => '拿到穿透后穿得更多', word: '穿透', score: 2, why: '拿到穿透后才生效', needs: 'pierce' },
   homingX: { name: '追踪强化', icon: 's-homing', min: 15, max: 15, fmt: () => '拿到追踪后拐得更快', word: '追踪', score: 2, why: '拿到追踪后才生效', needs: 'homing' },
-  houseFast: { name: '地图充能', icon: 'i-hangar', min: 15, max: 20, fmt: () => '梦灯屋和星砂矿更快出奖励', word: '地图', score: 2, why: '地图奖励来得更快' },
+  houseFast: { name: '地图充能', icon: 'i-hangar', min: 15, max: 20, fmt: () => '信标亭和星砂矿更快出奖励', word: '地图', score: 2, why: '地图奖励来得更快' },
   npcBoost: { name: '伙伴辅助', icon: 'i-heart', min: 25, max: 35, fmt: () => '救出的伙伴更能打', word: '伙伴', score: 1, why: '伙伴更能打' },
 };
 /* 大招容量：账号共享的固定里程碑 */
@@ -186,54 +186,60 @@ const SHARED = { max: 20, cost: Array.from({ length: 21 }, (_, lv) => (lv < 2 ? 
 const sharedAtk = (lv) => Math.pow(SHARED.atk, lv - 1);
 const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 
-/* 章节 / 关卡：一关 = 一次完整出击（约 6~8 分钟），只在出击结束时结算。难度固定，不跟随玩家成长抬高。
-   v0.8 起关卡按目标链推进（STAGE_PLANS），fill = 背景杂兵的出兵速度（只/秒）。 */
-const STAGES = {
-  '1-1': { id: '1-1', ch: 1, name: '梦灯海湾', theme: 'bay', segs: 6, segDur: 54, hpK: 1, avg: 5, peak: 9, fill: 2.3, elites: ['jellyE'], boss: 'captain', bossName: '泡泡小队长', bossHp: 6000, rec: 1, reward: 120, fail: [30, 90], ult: 1,
-    map: ['house', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '第一次出击：开局只会直射；先清普通怪群，再对付越来越硬的厚甲怪。' },
-  '1-2': { id: '1-2', ch: 1, name: '纸船灯河', theme: 'river', segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, elites: ['tickE', 'jellyE'], boss: 'captain2', bossName: '裂纹闹钟队长', bossHp: 9000, rec: 3, reward: 150, fail: [40, 100], ult: 2,
-    map: ['house', 'bridge', 'mine', 'npc', 'house', 'mine', 'npc'], intro: '敌人会从裂缝、上下方钻出来；途中要护送一位伙伴。' },
-  '1-3': { id: '1-3', ch: 1, name: '失眠钟塔', theme: 'tower', segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, elites: ['starE', 'tickE', 'jellyE'], boss: 'clock', bossName: '失控闹钟', bossHp: 1000, rec: 7, reward: 190, fail: [50, 120], ult: 2,
-    map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'], intro: '后方追兵和空间裂缝一起出现，最后是第一章 Boss：失控闹钟。' },
+/* 地图（docs/design.md §10）：一张地图 = 三关连打的一局。races = 这张图的族（敌人的颜色和防御、套装偏向），mission = 开图时“回声”念的一句任务，
+   home = 打通后站里多的那样东西。hpK = 这张图敌人的生命系数（按第一次走到这里时的装备和构筑定，--career 量）；bossDef = 三个首领的防御 */
+const MAPS = {
+  1: { id: 1, name: '锈带残骸场', en: 'Rust Belt Wreckfield', races: ['drill', 'ledger'], mission: '接通第一座信号塔，让站里亮起灯。', home: '信号塔：站里的灯全亮了', homeId: 'beacon', stages: ['1-1', '1-2', '1-3'], hpK: 1, bossDef: ['armor', 'shield', 'armor'], color: '#e8925a' },
+  2: { id: 2, name: '霜晶环带', en: 'Frost Ring', races: ['frost', 'hive'], mission: '从冰环里拖回一台温室核心。', home: '温室穹顶：站里第一次有绿色', homeId: 'dome', stages: ['2-1', '2-2', '2-3'], hpK: 2.2, bossDef: ['shield', 'armor', 'shield'], color: '#bfe9ff' },
+  3: { id: 3, name: '霓虹电弧城', en: 'Neon Arc City', races: ['arc', 'neon'], mission: '从公司的地盘里偷出一张船坞许可证。', home: '大船坞：机库扩建，飞船停成一排', homeId: 'dock', stages: ['3-1', '3-2', '3-3'], hpK: 4, bossDef: ['shield', 'shield', 'shield'], color: '#ff6fe0' },
+  4: { id: 4, name: '熔核前线', en: 'Molten Front', races: ['forge', 'drill'], mission: '在炮火下抢回一门防御炮。', home: '防御炮台：站外有了自己的炮', homeId: 'turret', stages: ['4-1', '4-2', '4-3'], hpK: 6.5, bossDef: ['armor', 'armor', 'armor'], color: '#ff7a3a' },
+  5: { id: 5, name: '寂静圣所', en: 'Silent Sanctum', races: ['drill', 'ledger', 'frost', 'hive', 'arc', 'neon', 'forge'], chaos: true, mission: '找到切断所有信号的人。', home: '中继天线：听见地球的杂音', homeId: 'relay', stages: ['5-1', '5-2', '5-3'], hpK: 10, bossDef: ['shield', 'armor', 'chaos'], color: '#b98aff' },
 };
-const STAGE_ORDER = ['1-1', '1-2', '1-3'];
+const MAP_ORDER = [1, 2, 3, 4, 5];
+const mapOfStage = (id) => +(String(id || '1-1').split('-')[0]) || 1;
+const stageNOf = (id) => +(String(id || '1-1').split('-')[1]) || 1;
+/* 关：一关 3–4 分钟，三关连成一局。theme = 场景（spaceart.js），lurk = 会出手的地图用哪一套（mapfx.js） */
+const STAGE_BASE = {
+  1: { segs: 6, segDur: 54, hpK: 1, avg: 5, peak: 9, fill: 2.3, boss: 'captain', bossHp: 6000, reward: 120, fail: [30, 90], ult: 1, lurk: 'bay', map: ['house', 'mine', 'npc', 'house', 'mine', 'npc'] },
+  2: { segs: 7, segDur: 50, hpK: 9 / 8, avg: 6, peak: 11, fill: 2.7, boss: 'captain2', bossHp: 9000, reward: 150, fail: [40, 100], ult: 2, lurk: 'river', map: ['house', 'bridge', 'mine', 'npc', 'house', 'mine', 'npc'] },
+  3: { segs: 8, segDur: 42, hpK: 10 / 8, avg: 7, peak: 13, fill: 3.1, boss: 'clock', bossHp: 1000, reward: 190, fail: [50, 120], ult: 2, lurk: 'tower', map: ['house', 'mine', 'bridge', 'npc', 'giant', 'house', 'mine', 'npc'] },
+};
+const STAGE_DEFS = [
+  ['1-1', '外环废料带', '矿业拖船', ['jellyE'], '第一次出击：开局只会直射；先清普通怪群，再对付越来越硬的厚甲。'],
+  ['1-2', '残骸河', '商会收账船', ['tickE', 'jellyE'], '敌人会从裂缝、上下方钻出来；途中要护送一个救生舱。'],
+  ['1-3', '停摆钟楼站', '失控主钟', ['starE', 'tickE', 'jellyE'], '后方追兵和空间裂缝一起出现，最后是这张图的大首领：失控主钟。'],
+  ['2-1', '冰环外缘', '冰棱巡逻舰', ['jellyE', 'starE'], '霜晶族的冰墙板会挡子弹：绕过去，或者集中打碎它。'],
+  ['2-2', '蜂巢冰洞', '群翼母巢', ['tickE', 'starE'], '群翼族的工蜂打碎会分成三只：清群的构筑更好打。'],
+  ['2-3', '霜心王座', '霜心女王', ['starE', 'tickE', 'jellyE'], '冰墙和工蜂一起来，最后是霜心女王。'],
+  ['3-1', '广告牌大道', '保安队长', ['tickE', 'jellyE'], '电弧公司的电塔两两拉电：打掉一座电就断。'],
+  ['3-2', '马戏穹顶', '马戏团长', ['starE', 'tickE'], '霓虹马戏的弹跳球撞到上下边缘就弹回来，越弹越快。'],
+  ['3-3', '董事会塔', '电弧董事', ['starE', 'tickE', 'jellyE'], '电塔和弹跳球一起来，最后是电弧董事。'],
+  ['4-1', '焦土平原', '熔核步兵长', ['jellyE', 'tickE'], '熔核军团的迫击炮往你的位置抛炮弹：离开红圈。'],
+  ['4-2', '炮兵阵地', '攻城炮车', ['tickE', 'starE'], '迫击炮和钻头车一起来。'],
+  ['4-3', '熔炉要塞', '熔核将军', ['starE', 'tickE', 'jellyE'], '全是熔核军团的编队，最后是熔核将军。'],
+  ['5-1', '无声回廊', '执事', ['jellyE', 'starE'], '七族的信徒都在这里，精英带着混沌词缀：防御在护盾和装甲之间换。'],
+  ['5-2', '唱诗大厅', '唱诗班', ['tickE', 'starE'], '静默带扫过的地方，飞机打不出子弹：先离开那条带子。'],
+  ['5-3', '祭坛', '混沌祭司', ['starE', 'tickE', 'jellyE'], '找到切断所有信号的人。'],
+];
+const STAGES = {};
+for (const [id, name, bossName, elites, intro] of STAGE_DEFS) {
+  const m = mapOfStage(id), n = stageNOf(id), B = STAGE_BASE[n];
+  STAGES[id] = Object.assign({}, B, { id, ch: m, n, name, theme: id, hpK: B.hpK * MAPS[m].hpK, elites, bossName, intro, bossDef: MAPS[m].bossDef[n - 1], rec: [1, 3, 7][n - 1] + (m - 1) * 5 });
+}
+const STAGE_ORDER = ['1-1', '1-2', '1-3']; // 第 1 张图（工具和第一局默认从这里走）
+const ALL_STAGES = MAP_ORDER.flatMap((m) => MAPS[m].stages);
 /* 连成一局时第 2、3 关的普通战斗加压（§3.9）：hp = 普通敌人（含厚甲、精英、地图伸手）的生命再乘，fill = 背景杂兵来得更密。
    带过来的构筑比从零开始强得多，不加压的话一关比一关轻松（1-3 的普通战斗压力只有 1-1 的四分之一）。
    按关固定，不随玩家临场强弱变；首领战另按 BUILD_CHECK.bossK */
 // 量法：普通敌人平均击破用时第 2、3 关回到第 1 关的水平（不加压时 1.03 → 0.52 → 0.33 秒），普通战斗强度一关比一关高
-const CHAIN_FOE = { '1-2': { hp: 8, fill: 1.3 }, '1-3': { hp: 20, fill: 1.6 } };
+const CHAIN_FOE_N = { 2: { hp: 8, fill: 1.3 }, 3: { hp: 20, fill: 1.6 } }; // 按关号（每张图的第 2、3 关）
+const CHAIN_FOE = Object.fromEntries(ALL_STAGES.filter((id) => CHAIN_FOE_N[stageNOf(id)]).map((id) => [id, CHAIN_FOE_N[stageNOf(id)]]));
 
-/* ================================================== 家园（v0.10 第一阶段：救援 → 建设 → 改变下一局）==================================================
-   资源三种：星尘（策划里叫“星砂”的账户货币；局内拾取的星砂按 50:1 折成星尘）、梦木（地图装置掉落）、货物（工坊用梦木加工）。
-   工作周期按“有效战斗时间”推进（4 分钟一轮），不按现实时间；离线、暂停、升级仪式都不算。 */
-const HOME = { cycle: 240, recipe: 8, sell: 20, startStardust: 120, plots: 8, cols: 4 };
-/* 每个目标完成时当场入账的星尘（失败也保留）；通关另给终点奖励 */
-const beatPay = (S) => Math.round(S.reward / 12);
+/* 局外货币（§8.2）：每完成一个目标当场记一份赏金（失败也保留），首领另给通关奖励；地图装置掉的残骸材料回家折成废料 */
+const beatPay = (S) => Math.round(8 * (1 + 0.6 * ((S && S.ch) || 1) - 0.6)); // 每完成一个目标的赏金（信用点，§8.2），和结算用同一个数
 const endPay = (S, first) => Math.round(S.reward * (first ? 0.5 : 0.3));
-/* 地图装置给的梦木（每次出击 18~26 左右） */
+/* 地图装置给的残骸材料（每次出击 18~26 左右，回家按 2:1 折成废料） */
 const WOOD_DROP = { house: 4, wind: 4, mine: 8, npc: 4, cmdr: 3, bridge: 5, giant: 7 };
-/* 常驻 NPC：一个主职 + 一个副职（成为“伙伴”后开放），职责免费改，每次回家最多改一项 */
-const HOME_NPCS = {
-  bunny: { bld: 'rescue', main: { id: 'clue', name: '整理救援线索', line: '下一局要救的伙伴更早出现，一路有箭头' }, side: { id: 'beacon', name: '准备救援信标', line: '修理点更大，吊舱更耐打' }, bond: '救回云朵爷爷' },
-  grandpa: { bld: 'workshop', main: { id: 'craft', name: '看着工坊', line: '工坊每个工作周期把梦木加工成货物' }, side: { id: 'scout', name: '风向观察', line: '风车塔的上下两个风圈会写明各通向哪里' }, bond: '修好风道' },
-  merchant: { bld: 'shop', main: { id: 'sell', name: '看店卖货', line: '每个工作周期卖出货架上的货物换星尘' }, side: { id: 'keep', name: '守着库存', line: '货物先留着不卖，攒给项目和委托' }, bond: '完成第一份委托' },
-};
-const NPC_STAGES = ['初见', '伙伴', '知己'];
-/* 功能建筑：机库一开始就有；其他由救回的 NPC 开放（第一座免费摆放） */
-const HOME_BUILDINGS = {
-  hangar: { name: '机库', icon: 'i-hangar', color: '#ffd76a', line: '换飞机、点天赋、共享升级', fixed: true },
-  rescue: { name: '救援台', icon: 'i-heart', color: '#ff9fcf', line: '追踪下一位要救的伙伴', npc: 'bunny', plot: 0 },
-  workshop: { name: '工坊', icon: 'n-repeat', color: '#9fe3f0', line: '修风道；把梦木加工成货物', npc: 'grandpa', plot: 2, lock: '救回云朵爷爷后开放' },
-  shop: { name: '巡游店', icon: 'i-gacha', color: '#ff9fcf', line: '卖货物换星尘；商人的委托', npc: 'merchant', plot: 5, lock: '修好风道、救回糖果商人后开放' },
-};
-/* 世界项目：交付就完成，下一局地图真的变了 */
-const HOME_PROJECTS = {
-  windRoad: { name: '修风道 · 上层云桥', bld: 'workshop', cost: { wood: 12 }, line: '风车塔多出一个上层风圈：飞进去走高空航路', done: '上层风圈亮了：下一局在风车塔上方' },
-};
-/* 商人的第一份委托：交货物 → 糖果号 */
-const COMMISSIONS = {
-  candy: { name: '糖果商人的第一份委托', need: { goods: 1 }, reward: 'candy', line: '交 1 件货物，商人把糖果号送给你' },
-};
 
 /* 可以追的流派（大厅“下一局目标”、暂停、结算、升级卡片共用） */
 const BUILD_PATHS = [
@@ -250,7 +256,7 @@ const BUILD_PATHS = [
    Boss / 队长打了 rage.at 秒还没倒就失控：攻击一路加快（rage.ramp 秒加满 rage.max），提前 rage.warn 秒预告。
    失控 wipe 秒后超载（先在血条上倒数，提前 5 秒喊）：全屏冲击、全队倒下——首领战有确定的期限，构筑强度按它算。
    只有成型的火力能在失控前打完；没成型的局要靠操作硬扛失控段 */
-const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 5.1, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: { '1-1': 1.3, '1-2': 8, '1-3': 15 }, regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: { '1-1': 40, '1-2': 70, '1-3': 55 }, warn: 5, ramp: 15, max: 4, wipe: 35 } };
+const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 5.1, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: Object.fromEntries(ALL_STAGES.map((id) => [id, [1.3, 8, 15][stageNOf(id) - 1] * MAPS[mapOfStage(id)].hpK])), regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: Object.fromEntries(ALL_STAGES.map((id) => [id, [40, 70, 55][stageNOf(id) - 1]])), warn: 5, ramp: 15, max: 4, wipe: 35 } }; // 首领厚度按地图乘 MAPS.hpK（§10.4）；只有第 1 张图的第一个首领不考构筑
 /* 第一局（§3.6，上手 = 上钩）：第一个完整仪式保底史诗，第一个联动只要两件 1 级（头几分钟一次构筑小爆发），鱼群潮更勤；
    第一个首领（free 里的关）在基础难度下不自愈、不失控：几乎人人打得过 */
 const FIRST_RUN = { rareTier: 1, needLv: 1, swellK: 0.75, hearts: 2 }; // rareTier：第一局第一个完整仪式保底史诗（一档一档认识品质）；hearts：多两颗心
@@ -313,9 +319,9 @@ const HURT_TIPS = {
   rear: { label: '后方追兵', tip: '左边缘出现红影时，先移到虚线弧的另一侧，等追兵绕到前面再打' },
   lane: { label: '预警航道里的攻击', tip: '条纹航道亮起就先离开那条横线，攻击扫过去再回来' },
   aimed: { label: '瞄准你的子弹', tip: '敌人朝你当前的位置开火：连续打的时候隔一会儿上下挪一小段' },
-  ring: { label: '闹钟的弹环', tip: '弹环总留着缺口：看准缺口从那里穿过去' },
-  laser: { label: '白线激光', tip: '灯塔眼先画白线再射：看到白线就离开那条线' },
-  drop: { label: '纸船投下的弹', tip: '纸船灯往下投弹：别待在它们正下方' },
+  ring: { label: '炮塔的弹环', tip: '弹环总留着缺口：看准缺口从那里穿过去' },
+  laser: { label: '白线激光', tip: '狙击眼先画白线再射：看到白线就离开那条线' },
+  drop: { label: '无人机投下的弹', tip: '投弹无人机往下投弹：别待在它们正下方' },
   boss: { label: 'Boss 的弹幕', tip: '先对准正面护甲打；弹幕来时只小幅移动找空隙，别大范围乱飞' },
   rage: { label: 'Boss 超载', tip: '首领打太久会失控，再拖就超载（全屏冲击）：先凑齐流派、接上联动（成型后火力翻倍），在超载前打完' },
   lurk: { label: '地图伸出来的手 / 醒来的装饰', tip: '先看先兆：冒泡、抽动、睁眼、折痕出现时，离开那一列 / 那条白线，再回头打碎它拿奖励' },
@@ -343,40 +349,45 @@ function hurtCat(src) {
    前一个目标完成才推进（慢的玩家不会被新压力叠上来）；普通杂兵一直都在。
    kind：crowd 清普通怪群 / armor1 第一只厚甲怪 / pack 厚甲编队 / cmdr 带队精英 / chase 多方向来敌 / spawner 地形刷怪点 / surprise 场景惊喜 / boss
    from：主目标从哪里入场；map：目标期间出现的可选地图互动；reward：目标完成后出现的奖励装置（core = 精英掉落的核心）。 */
-const STAGE_PLANS = {
-  '1-1': [
+const STAGE_PLAN_TEMPLATES = {
+  1: (S, m) => [
     { id: 'crowd', goal: '清掉普通怪群', kind: 'crowd', n: 36, map: 'house', mapAt: 15 },
-    { id: 'armor1', goal: '击破第一只厚甲怪', kind: 'armor1', from: 'shell', reward: 'wind' },
+    { id: 'armor1', goal: '击破第一只厚甲拖船', kind: 'armor1', from: 'shell', reward: 'wind' },
     { id: 'pack', goal: '快速处理厚甲编队', kind: 'pack', from: 'front', reward: 'mine', map: 'npc', mapAt: 3 },
     { id: 'cmdr', goal: '击败带队精英', kind: 'cmdr', from: 'crack', reward: 'core' },
     { id: 'rear', goal: '挡住后方追兵', kind: 'chase', event: 'rear', waves: 4 },
-    { id: 'moon', goal: '月亮不太对劲', kind: 'surprise', surprise: 'moon' },
-    { id: 'boss', goal: '击败泡泡小队长', kind: 'boss' },
+    m === 1 ? { id: 'moon', goal: '那颗卫星不太对劲', kind: 'surprise', surprise: 'moon' } : { id: 'mimic', goal: '角落的标签在动？', kind: 'surprise', surprise: 'mimic' },
+    { id: 'boss', goal: `击败${S.bossName}`, kind: 'boss' },
   ],
-  '1-2': [
+  2: (S) => [
     { id: 'crowd', goal: '清掉普通怪群', kind: 'crowd', n: 38, map: 'house', mapAt: 15 },
-    { id: 'armor1', goal: '击破从裂缝钻出的厚甲怪', kind: 'armor1', from: 'rift', reward: 'bridge' },
+    { id: 'armor1', goal: '击破从裂缝钻出的厚甲拖船', kind: 'armor1', from: 'rift', reward: 'bridge' },
     { id: 'pack', goal: '处理上下钻出的厚甲编队', kind: 'pack', from: 'drop', map: 'npc', mapAt: 3 },
     { id: 'spawner', goal: '摧毁残骸里的刷怪核心', kind: 'spawner', reward: 'mine' },
     { id: 'cmdr', goal: '击败带队精英', kind: 'cmdr', from: 'crack', reward: 'core' },
-    { id: 'mimic', goal: '角落的贴纸在动？', kind: 'surprise', surprise: 'mimic' },
-    { id: 'boss', goal: '击败裂纹闹钟队长', kind: 'boss' },
+    { id: 'mimic', goal: '角落的标签在动？', kind: 'surprise', surprise: 'mimic' },
+    { id: 'boss', goal: `击败${S.bossName}`, kind: 'boss' },
   ],
-  '1-3': [
+  3: (S) => [
     { id: 'crowd', goal: '清掉普通怪群', kind: 'crowd', n: 40, map: 'house', mapAt: 15 },
-    { id: 'armor1', goal: '击破后方绕来的厚甲怪', kind: 'armor1', from: 'rear', reward: 'wind' },
+    { id: 'armor1', goal: '击破后方绕来的厚甲拖船', kind: 'armor1', from: 'rear', reward: 'wind' },
     { id: 'pack', goal: '处理从远处推近的厚甲编队', kind: 'pack', from: 'push', reward: 'giant' },
     { id: 'rift', goal: '清掉空间裂缝里的来敌', kind: 'chase', event: 'rift', waves: 4, map: 'npc', mapAt: 2 },
     { id: 'cmdr', goal: '击败带队精英', kind: 'cmdr', from: 'front', reward: 'core' },
-    { id: 'hmimic', goal: '这间梦灯屋怪怪的', kind: 'surprise', surprise: 'houseMimic' },
-    { id: 'boss', goal: '击败失控闹钟', kind: 'boss' },
+    { id: 'hmimic', goal: '这座信标亭怪怪的', kind: 'surprise', surprise: 'houseMimic' },
+    { id: 'boss', goal: `击败${S.bossName}`, kind: 'boss' },
   ],
 };
-/* 结算时留一个“还没见过”的场景线索，吸引下一局 */
+const STAGE_PLANS = Object.fromEntries(ALL_STAGES.map((id) => [id, STAGE_PLAN_TEMPLATES[stageNOf(id)](STAGES[id], mapOfStage(id))]));
+/* 结算时留一个“还没见过”的线索，吸引下一局 */
 const STAGE_CLUES = {
-  '1-1': ['海面的倒影好像比你慢了半拍……', '远处那片像礁石的鲸鳍，一直没有浮上来。'],
-  '1-2': ['纸船灯河的尽头，有一扇门只在起风时出现。', '有一间梦灯屋的烟囱，冒烟的节奏像在呼吸。'],
-  '1-3': ['钟塔背后的天空，好像和海湾那道裂缝连在一起。', '救出的伙伴说，海面下还有一支跟着你的倒影小队。'],
+  '1-1': ['那颗小卫星的影子，好像比你慢了半拍……', '碎片带深处有一艘船，舱灯还亮着。'],
+  '1-2': ['残骸河的尽头，有一节货柜只在你转身时开门。', '有一座信标亭，闪灯的节奏像在呼吸。'],
+  '1-3': ['钟楼站背后的星空，好像和外环那道裂缝连在一起。', '回声说：钟楼的主钟停在地球失联的那一刻。'],
+  '2-1': ['冰环里冻着一艘没见过的船。'], '2-2': ['蜂巢最深处有一间空着的育婴室。'], '2-3': ['女王的王座下面，有人刻了一串坐标。'],
+  '3-1': ['有块广告牌一直在放同一句话：别抬头。'], '3-2': ['马戏团的票根上，印着下一场演出的地点。'], '3-3': ['董事会的会议记录里，有一页被撕掉了。'],
+  '4-1': ['焦土上有一行车辙，往圣所的方向去了。'], '4-2': ['一门炮的炮管上，有人用粉笔写了“回家”。'], '4-3': ['将军的熔炉里，烧着一叠祷文。'],
+  '5-1': ['回廊尽头传来很轻的歌声。'], '5-2': ['唱诗班里有一个声音在走调。'], '5-3': ['……还有人吗？'],
 };
 const STAR_COST = [30, 60, 100, 150, 220, 300];
 const STAR_UP = { 2: { cost: 10, gain: '大招视觉升级：更大、更亮' }, 3: { cost: 20, gain: '解锁第二段大招联动' }, 4: { cost: 30, gain: '星盘多一个随机节点' }, 5: { cost: 50, gain: '解锁终极爆炸演出' } };
@@ -418,23 +429,24 @@ const COSMETICS = {
 
 
 const ENEMY_INFO = {
-  jelly: { name: '泡泡水母', desc: '成排漂来，一发就散' },
-  moth: { name: '梦尘蛾', desc: '成群乱飞，掉很多星砂' },
-  boat: { name: '纸船灯', desc: '横着飞过，往下投弹' },
-  tick: { name: '小闹钟', desc: '摇铃炸出一圈子弹，圈上有缝' },
-  star: { name: '星星鱼', desc: '冲到你的高度射星弹' },
-  beacon: { name: '灯塔眼', desc: '先画白线，再沿线射击' },
-  jellyE: { name: '守望水母', desc: '精英：吐旋转弹涡，打倒充很多大招' },
-  tickE: { name: '裂纹闹钟', desc: '精英：双层弹环加十字弹' },
-  starE: { name: '双瞳星鱼', desc: '精英：连射金色星弹' },
-  armor: { name: '厚甲河豚', desc: '先敲碎正面的甲，再打软核心' },
+  jelly: { name: '浮游雷', desc: '成排漂来，一发就散' },
+  moth: { name: '碎屑虫', desc: '成群乱飞，掉很多星砂' },
+  boat: { name: '投弹无人机', desc: '横着飞过，往下投弹' },
+  tick: { name: '环形炮塔', desc: '炸出一圈子弹，圈上有缝' },
+  star: { name: '突击艇', desc: '冲到你的高度射星弹' },
+  beacon: { name: '狙击眼', desc: '先画白线，再沿线射击' },
+  jellyE: { name: '浮游雷母舰', desc: '精英：吐旋转弹涡，打倒充很多大招' },
+  tickE: { name: '裂纹炮塔', desc: '精英：双层弹环加十字弹' },
+  starE: { name: '双瞳突击艇', desc: '精英：连射金色星弹' },
+  armor: { name: '厚甲拖船', desc: '先敲碎正面的甲，再打软核心' },
   cmdr: { name: '带队精英', desc: '举旗时打旗头水晶，它倒下护卫就散' },
-  wreck: { name: '残骸刷怪核心', desc: '一直放出梦尘蛾，打碎核心才停' },
-  mcore: { name: '月亮怪', desc: '月亮掉下来了：先打碎片，再打核心' },
+  thief: { name: '收账小偷', desc: '吸走你身边的星砂就跑；追上打倒，吐出两倍和一袋装备' },
+  wreck: { name: '残骸刷怪核心', desc: '一直放出碎屑虫，打碎核心才停' },
+  mcore: { name: '卫星怪', desc: '卫星掉下来了：先打碎片，再打核心' },
   mimic: { name: '贴纸拟态', desc: '角落的贴纸长出眼睛跳进战场' },
-  hmimic: { name: '拟态梦灯屋', desc: '会呼吸的假梦灯屋，打倒照样有奖励' },
-  mirror: { name: '镜像闹钟', desc: '闹钟召唤的镜像，分身会自动锁定' },
-  clock: { name: '失控闹钟', desc: '第一章 Boss，会对你的 Build 做出反应' },
+  hmimic: { name: '拟态信标亭', desc: '会呼吸的假信标亭，打倒照样有奖励' },
+  mirror: { name: '镜像主钟', desc: '主钟召唤的镜像，分身会自动锁定' },
+  clock: { name: '失控主钟', desc: '第一章 Boss，会对你的 Build 做出反应' },
 };
 
 /* 数据验收标准（文档 §16） */
@@ -460,27 +472,27 @@ const METRIC_TARGETS = [
 /* ================================================== v0.6 飞机—地图交互 ================================================== */
 /* 地图物件：飞近会回应；停留 / 穿环 / 绕行 / 看眼睛，全部只靠移动完成 */
 const MAP_OBJECTS = {
-  house: { id: 'house', name: '梦灯屋', verb: '点亮', how: 'touch', tag: '主炮', color: '#ffd76a', icon: 'star',
-    hint: ['碰一下梦灯屋门前的铃铛', '屋子会变成转盘，转出主炮改造'], desc: '碰铃铛，转出两个主炮改造' },
+  house: { id: 'house', name: '信标亭', verb: '点亮', how: 'touch', tag: '主炮', color: '#ffd76a', icon: 'star',
+    hint: ['碰一下信标亭门前的铃铛', '屋子会变成转盘，转出主炮改造'], desc: '碰铃铛，转出两个主炮改造' },
   wind: { id: 'wind', name: '风车塔', verb: '吹开', how: 'ring', tag: '推一排', color: '#9fe3f0', icon: 'wing',
     hint: ['从风车前面的宽风环穿过去', '吹开入口，一排敌人被推到炮口前'], desc: '穿过风环，吹开入口、推来一排敌人' },
   mine: { id: 'mine', name: '星砂矿', verb: '炸开', how: 'tow', tag: '强化', color: '#c9a8ff', icon: 'charge',
     hint: ['碰一下发光的矿核，把它拖到标记的岩壁', '矿核会跟着你飞，碰到岩壁就炸开'], desc: '把矿核拖到岩壁，炸开新航道' },
   npc: { id: 'npc', name: '救援吊舱', verb: '救出', how: 'escort', tag: '支援', color: '#ff9fcf', icon: 'heart',
-    hint: ['碰一下伙伴的吊舱，沿光带护送到修理点', '吊舱挨几下也不怕，送到后伙伴加入'], desc: '把吊舱送到修理点，伙伴加入' },
+    hint: ['碰一下救生舱，沿光带护送到修理点', '救生舱挨几下也不怕，送到后幸存者加入'], desc: '把救生舱送到修理点，幸存者加入' },
   bridge: { id: 'bridge', name: '断桥', verb: '修复', how: 'path', tag: '安全航道', color: '#9fe3f0', icon: 'wing',
     hint: ['依次穿过三个灯环', '尾流把灯环连成一座桥，桥上一段时间敌弹会化掉'], desc: '穿过三个灯环接起断桥：一段安全航道 + 二选一' },
   giant: { id: 'giant', name: '沉睡巨鲸', verb: '唤醒', how: 'eye', tag: '清场', color: '#6ff0ff', icon: 'crown',
     hint: ['飞到巨鲸的眼睛旁边停一下', '它醒来会把附近的敌人一口吞掉，不会伤到你'], desc: '飞到眼睛旁边叫醒巨鲸：吞掉附近的敌人 + 稀有二选一' },
 };
-const MAP_ORDER = ['house', 'wind', 'mine', 'npc'];
+const MAP_OBJ_ORDER = ['house', 'wind', 'mine', 'npc'];
 /* 伙伴：救出后跟着飞机，自动射击，并各有一个效果；Boss 出现前各帮一次忙 */
 const NPCS = {
-  bunny: { id: 'bunny', name: '小梦兔', trap: 'bubble', color: '#e7d8ff', effect: '把附近的奖励叼回来' },
-  grandpa: { id: 'grandpa', name: '云朵爷爷', trap: 'vine', color: '#dff2ff', effect: '定时铺一层云，帮你挡一下' },
-  miner: { id: 'miner', name: '星星矿工', trap: 'vine', color: '#ffe38a', effect: '打倒一排敌人就挖出星砂' },
-  merchant: { id: 'merchant', name: '糖果商人', trap: 'bubble', color: '#ff9fcf', effect: '每次升级放一次糖果爆炸' },
-  clockling: { id: 'clockling', name: '小闹钟', trap: 'gear', color: '#ffd76a', effect: 'Boss 每换一个阶段补一次大招' },
+  bunny: { id: 'bunny', name: '兔耳维修工', trap: 'bubble', color: '#e7d8ff', effect: '把附近的奖励叼回来' },
+  grandpa: { id: 'grandpa', name: '老领航员', trap: 'vine', color: '#dff2ff', effect: '定时铺一层云，帮你挡一下' },
+  miner: { id: 'miner', name: '星矿工', trap: 'vine', color: '#ffe38a', effect: '打倒一排敌人就挖出星砂' },
+  merchant: { id: 'merchant', name: '行商', trap: 'bubble', color: '#ff9fcf', effect: '每次升级放一次糖果爆炸' },
+  clockling: { id: 'clockling', name: '钟表机器人', trap: 'gear', color: '#ffd76a', effect: 'Boss 每换一个阶段补一次大招' },
 };
 const NPC_ORDER = ['bunny', 'grandpa', 'miner', 'merchant', 'clockling'];
 /* 巨型梦境生物：可以互动的活景观 */

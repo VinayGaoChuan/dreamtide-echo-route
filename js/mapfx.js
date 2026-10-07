@@ -1,6 +1,6 @@
 'use strict';
 /* 梦潮：回声航线 v0.8 — 飞机与地图的关系。相邻两次互动的操作和结局都不一样，完成后都会留下看得见的痕迹：
-   梦灯屋：碰一下门前的铃铛 → 屋顶折起、烟囱变摇柄、整间屋子变成转盘（完整升级仪式）→ 变成亮着的补给点，下一批敌人经过时帮你打一发。
+   信标亭：碰一下门前的铃铛 → 屋顶折起、烟囱变摇柄、整间屋子变成转盘（完整升级仪式）→ 变成亮着的补给点，下一批敌人经过时帮你打一发。
    风车塔：从宽风环穿过去 → 云层被吹开、露出藏着的入口，一排敌人被推到炮口前 → 二选一。
    星砂矿：碰一下矿核，它会跟着你飞 → 拖到标记的岩壁上炸开 → 新航道 + 动力装置（二选一），之后敌人从裂口钻出来。
    救援吊舱：碰一下吊舱挂上拖绳 → 沿安全光带护送到修理点（吊舱有三格耐久，挨一发不会坏）→ 伙伴加入、修好炮台、支援二选一。
@@ -167,7 +167,7 @@ Object.assign(World.prototype, {
       case 'house':
         if (o.state === 'idle') {
           const sx = o.x + o.sensor.dx, sy = o.y + o.sensor.dy;
-          // 第一间梦灯屋保证能拿到：等久了会慢慢飘到飞机的高度
+          // 第一间信标亭保证能拿到：等久了会慢慢飘到飞机的高度
           if (o.first && o.phase === 'wait' && o.t > 9) { o.y = smooth(o.y, clamp(p.y - o.sensor.dy, this.arena.top + 150, this.arena.bottom - 60), 0.8, dt); o.seek = true; }
           if (p.alive && dist2(p.x, p.y, sx, sy) < (o.sensor.r + reach) ** 2) this.houseTrigger(o);
         } else if (o.state === 'supply') this.houseSupply(o, dt);
@@ -265,7 +265,7 @@ Object.assign(World.prototype, {
     }
   },
 
-  /* ---------- 梦灯屋 ---------- */
+  /* ---------- 信标亭 ---------- */
   houseTrigger(o) {
     o.state = 'ritual'; o.engageT = this.runT;
     Sound.sfx('bell', { pan: this.pan(o.x) });
@@ -346,7 +346,7 @@ Object.assign(World.prototype, {
   /* ---------- 救援吊舱：护送 ---------- */
   podHit(o) {
     const pod = o.pod; pod.hp--; pod.inv = 1.1; Sound.sfx('podHit', { pan: this.pan(pod.x) });
-    this.text(pod.hp > 0 ? `吊舱被打中 · 还剩 ${pod.hp} 格` : '吊舱坏了！伙伴自己跳伞', pod.x, pod.y - 44, '#ffb2a8', 16, 4);
+    this.text(pod.hp > 0 ? `吊舱被打中 · 还剩 ${pod.hp} 格` : '救生舱坏了！幸存者自己跳伞', pod.x, pod.y - 44, '#ffb2a8', 16, 4);
     if (pod.hp <= 0) { o.state = 'bail'; pod.towed = false; }
   },
   npcDock(o, bailed) {
@@ -396,7 +396,7 @@ Object.assign(World.prototype, {
     if (this.mapHintKind === o.kind) { this.mapHintKind = null; this.emit('maphint', { kind: null }); }
     if (this.cb.onMap) this.cb.onMap(o.kind, o.sub);
   },
-  /* 梦木：一小把从装置里蹦出来，自动飞向飞机（多人时每人一份） */
+  /* 残骸零件：一小把从装置里蹦出来，自动飞向飞机（多人时每人一份）；回家两个折一份废料 */
   dropWood(x, y, n) { for (let i = 0; i < n; i++) this.dropPickup('wood', x + srand(-30, 30), y + srand(-30, 30), { value: 1, vx: srand(-160, 160), vy: srand(-220, -40) }); this.later(0.5, () => { for (const k of this.pickups) if (k.kind === 'wood') k.attract = true; }); },
   /* ---------- 上层云桥：风道修好后才有的高空航路（v0.10 §10） ---------- */
   windUpper(o) {
@@ -407,10 +407,10 @@ Object.assign(World.prototype, {
     if (this.wantsMerchant()) { // 高空护送：糖果商人困在云桥上
       this.later(0.8, () => this.spawnMapObject('npc', { sub: 'merchant', y: top + 150, reward: true }));
       this.text('上层云桥 · 糖果商人困在这里！', clamp(p.x + 260, 220, this.W - 220), top + 120, '#ffd76a', 22, 5);
-    } else { // 密集清怪：一大串梦尘蛾从云桥扑下来，掉更多星砂和梦木
+    } else { // 密集清怪：一大串碎屑虫从云桥扑下来，掉更多星砂和零件
       for (let i = 0; i < 14; i++) this.later(i * 0.12, () => this.addEnemy('moth', { x: this.W + 30 + (i % 3) * 30, y: top + 60 + (i % 5) * 50, path: 'line', vx: -170 }));
       this.dropWood(this.W * 0.75, top + 120, 3);
-      this.text('上层云桥 · 一大串梦尘蛾扑下来', clamp(p.x + 260, 220, this.W - 220), top + 120, '#9fe3f0', 20, 5);
+      this.text('上层云桥 · 一大串碎屑虫扑下来', clamp(p.x + 260, 220, this.W - 220), top + 120, '#9fe3f0', 20, 5);
     }
     this.remember('飞上了上层云桥', 3);
     o.onRitual = () => { o.state = 'done'; o.phase = 'out'; };
@@ -475,7 +475,7 @@ Object.assign(World.prototype, {
     for (const b of this.orbs) if (!b.done) { b.done = true; b.apply(); }
     this.orbs = [];
     this.text('Boss 来了 · 没有大招的补上一次', p.x, p.y - 60, '#ffd76a', 20, 5); // 补库存在 startBoss 里按每架飞机做
-    if (this.companions.length) this.later(1.2, () => { for (const c of this.companions) this.fx(c.x, c.y, 2, 50, [NPCS[c.id].color, '#ffffff']); this.text('伙伴助力！', p.x, p.y + 60, '#ff9fcf', 18, 4); for (const q of this.players) q.res.dust += 10 * this.companions.length; });
+    if (this.companions.length) this.later(1.2, () => { for (const c of this.companions) this.fx(c.x, c.y, 2, 50, [NPCS[c.id].color, '#ffffff']); this.text('幸存者助力！', p.x, p.y + 60, '#ff9fcf', 18, 4); for (const q of this.players) q.res.dust += 10 * this.companions.length; });
   },
   onCompanionBossPhase() {
     if (!this.companions.some((c) => c.id === 'clockling')) return;
@@ -575,11 +575,11 @@ function drawBell(g, x, y, r, near, t) {
 }
 function drawWindTower(g, x, y, rot, t, ringR, ringDx, near) {
   g.save(); g.translate(x, y + Math.sin(t) * 4);
-  floatRock(g, 150, 60, t, '#8fd8e8', '#5a9fb8');
-  g.fillStyle = '#e6f6ff'; g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
+  floatRock(g, 150, 60, t);
+  g.fillStyle = '#c8cedf'; // 太阳风车：金属塔，叶片是太阳能板 g.strokeStyle = PAL.ink; g.lineWidth = 2.4;
   g.beginPath(); g.moveTo(-18, 0); g.lineTo(-10, -120); g.lineTo(10, -120); g.lineTo(18, 0); g.closePath(); g.fill(); g.stroke();
   g.save(); g.translate(0, -124); g.rotate(rot);
-  for (let i = 0; i < 4; i++) { g.rotate(TAU / 4); g.fillStyle = i % 2 ? '#9fe3f0' : '#ff9fcf'; g.beginPath(); g.moveTo(0, 0); g.lineTo(58, -10); g.lineTo(52, 12); g.closePath(); g.fill(); g.stroke(); }
+  for (let i = 0; i < 4; i++) { g.rotate(TAU / 4); g.fillStyle = '#2f5fbf'; g.beginPath(); g.moveTo(6, -8); g.lineTo(60, -12); g.lineTo(60, 12); g.lineTo(6, 8); g.closePath(); g.fill(); g.stroke(); g.strokeStyle = 'rgba(160,210,255,0.6)'; g.lineWidth = 1; for (let k = 1; k < 4; k++) { g.beginPath(); g.moveTo(6 + k * 13.5, -9 - k * 0.8); g.lineTo(6 + k * 13.5, 9 + k * 0.8); g.stroke(); } g.strokeStyle = PAL.ink; g.lineWidth = 2.4; }
   g.fillStyle = '#ffd76a'; g.beginPath(); g.arc(0, 0, 7, 0, TAU); g.fill(); g.stroke();
   g.restore(); g.restore();
   if (ringR) {
@@ -661,13 +661,13 @@ const LURK_THEMES = {
   tower: { order: ['top', 'scene', 'rear', 'bottom'], kinds: [{ kind: 'hand', side: 'top', look: 'clock' }, { kind: 'wake', side: 'scene', look: 'clock' }, { kind: 'close', side: 'scene', look: 'gear' }] },
 };
 const LURK_INFO = {
-  'hand:tide': { name: '潮汐之手', hint: '海面冒泡的那一列会伸出一只手：离开那一列，或打碎它的手掌', color: '#7fd8ff', tell: 'tide' },
-  'hand:paper': { name: '折纸手', hint: '上方纸面起皱的那一列会伸下一只纸手：离开那一列，或打碎手掌', color: '#fff1d6', tell: 'peel' },
+  'hand:tide': { name: '机械爪', hint: '下方冒火花的那一列会伸出一只机械爪：离开那一列，或打碎它', color: '#7fd8ff', tell: 'tide' },
+  'hand:paper': { name: '吊臂', hint: '上方震动的那一列会伸下一只吊臂：离开那一列，或打碎它', color: '#fff1d6', tell: 'peel' },
   'hand:clock': { name: '发条手', hint: '上方齿轮转起来的那一列会伸下一只发条手：离开那一列，或打碎它', color: '#ffd76a', tell: 'rewind' },
-  'wake:lantern': { name: '咬人灯笼', hint: '灯串上抖动、睁眼的灯笼会沿白线扑过来：躲开白线，或打掉它', color: '#ffcf6a', tell: 'houseWake' },
-  'wake:boat': { name: '纸船怪', hint: '河上抖动、睁眼的纸船会沿白线扑过来：躲开白线，或打掉它', color: '#fff1d6', tell: 'houseWake' },
+  'wake:lantern': { name: '伪装信标灯', hint: '顶上抖动、睁眼的信标灯会沿白线扑过来：躲开白线，或打掉它', color: '#ffcf6a', tell: 'houseWake' },
+  'wake:boat': { name: '货柜怪', hint: '抖动、睁眼的货柜会沿白线扑过来：躲开白线，或打掉它', color: '#fff1d6', tell: 'houseWake' },
   'wake:clock': { name: '钟面怪', hint: '背景里睁眼的小钟会沿白线扑过来：躲开白线，或打掉它', color: '#ffb3e6', tell: 'moonBlink' },
-  'close:paper': { name: '折页合拢', hint: '上下纸页起折痕就会往里合：打碎两边发光的封印，马上打开', color: '#fff1d6', tell: 'riftOpen' },
+  'close:paper': { name: '货柜门合拢', hint: '上下货柜门起折痕就会往里合：打碎两边发光的锁，马上打开', color: '#fff1d6', tell: 'riftOpen' },
   'close:gear': { name: '齿轮墙', hint: '上下边缘裂开，齿轮墙会往里压：打碎两边发光的齿轮心，马上退回', color: '#ffcf7a', tell: 'riftOpen' },
 };
 const HAZ = '#ff5f87'; // 地图出手的统一危险色：和自己的子弹（青 / 白 / 金）分得开

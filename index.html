@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>梦潮回声航线</title>
+<title>拾荒之翼</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- 字体不挡页面：先用系统字体显示，谷歌字体能加载就换上（国内打不开谷歌时不会白屏） -->
@@ -317,6 +317,15 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .hud-tr{position:absolute;top:calc(10px*var(--u));right:calc(14px*var(--u));display:flex;gap:8px;align-items:center}
 .pause-btn{width:max(40px,calc(48px*var(--u)));height:max(40px,calc(48px*var(--u)));border-radius:14px;background:rgba(20,16,54,.72);border:1.5px solid var(--edge);display:grid;place-items:center}
 .pause-btn svg{width:50%;height:50%;fill:var(--text)}
+.cargo-list .cl-items{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.cargo-list .cl-it{font-size:var(--fs-xs);padding:2px 9px;border-radius:8px;background:rgba(255,255,255,.07);font-weight:600}
+.cargo-list .cl-it.safe::before{content:'✓ ';color:#9ff2c8}
+.cargo-card{position:absolute;right:calc(24px*var(--u));bottom:calc(150px*var(--tb) + 34px*var(--u));display:grid;gap:2px;justify-items:end;padding:8px 12px;border-radius:12px;background:rgba(22,16,44,.82);border:1px solid rgba(255,210,122,.35);color:#fff;font-family:var(--f-display);pointer-events:none;max-width:min(42vw,360px)}
+.cargo-card .ic{position:absolute;left:-14px;top:-12px;width:30px;height:30px;fill:#ffd27a;filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
+.cargo-card .cc-t{display:flex;align-items:center;gap:8px;font-size:calc(18px*var(--u))}
+.cargo-card .cc-n{font-size:calc(22px*var(--u));color:#ffd27a}
+.cargo-card .cc-best{width:12px;height:12px;border-radius:3px;background:#e8e8e8;box-shadow:0 0 8px currentColor}
+.cargo-card .cc-last{font-family:var(--f-body,inherit);font-size:calc(14px*var(--u));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .streak{position:absolute;right:calc(24px*var(--u));top:56%;opacity:.8;text-align:right;font-family:var(--f-display);color:#fff;pointer-events:none;transition:opacity .3s}
 .streak .n{font-family:var(--f-num);font-weight:800;font-size:max(26px,calc(42px*var(--u)));line-height:1;text-shadow:0 0 18px var(--hc,#6ff0ff),0 4px 0 #2d2358;color:var(--hc2,#fff)}
 .streak .t{font-size:var(--fs-m);color:var(--hc,#aeeaff)}
@@ -558,6 +567,86 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .team .hp{letter-spacing:-1px;color:#ff8fa8}
 #mpwait{position:absolute;left:50%;bottom:calc(120px*var(--u));transform:translateX(-50%);padding:.4em 1.2em;border-radius:999px;background:rgba(15,12,42,.85);border:1.5px solid rgba(159,227,240,.6);color:var(--paper);font-size:var(--fs-s);pointer-events:none;z-index:6}
 @media (max-width:760px){.mp-wrap{grid-template-columns:1fr}}
+
+/* ---------- 站（stationui.js） ---------- */
+.st-top{display:flex;align-items:center;gap:calc(10px*var(--u));flex-wrap:wrap;position:relative;z-index:2}
+.st-top .icon-btn{width:max(52px,calc(68px*var(--u)));min-height:max(52px,calc(68px*var(--u)))}
+.pilot-badge{display:flex;flex-direction:column;gap:4px;min-width:calc(150px*var(--u));padding:.35em .9em;border-radius:14px;background:rgba(20,16,44,.78);border:1.5px solid rgba(255,210,122,.45)}
+.pilot-badge b{font-family:var(--f-display);font-weight:400;font-size:var(--fs-m);color:#ffe7b0}
+.pilot-badge.big{min-width:0;width:100%}
+.curname{color:var(--dim);font-size:var(--fs-xs)}
+.st-hot{--hc:#ffcf8a;font-size:var(--fs-s);padding:.3em .9em}
+.st-hot.locked{--hc:#6a6288;color:var(--mute);background:rgba(16,12,36,.7)}
+.st-hot .dot{position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--coral);box-shadow:0 0 8px var(--coral)}
+.st-launch{position:absolute;right:max(16px,calc(28px*var(--u)));bottom:calc(18px*var(--u));width:min(calc(420px*var(--u)),calc(100% - 32px));padding:calc(12px*var(--u)) calc(16px*var(--u));display:flex;flex-direction:column;gap:8px;z-index:2}
+.st-launch .mission{font-family:var(--f-display);font-size:var(--fs-m);color:#ffe7b0}
+.stage-node{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;padding:.35em .8em;border-radius:12px;background:rgba(255,255,255,.05);border:1.5px solid var(--edge);font-size:var(--fs-xs);color:var(--dim)}
+.stage-node b{font-family:var(--f-num);font-weight:800;color:var(--paper)}
+.stage-node.sel{border-color:var(--lamp);box-shadow:0 0 12px rgba(255,201,74,.35);color:var(--paper)}
+.stage-node.cleared i{font-style:normal;color:#9ff2c8}
+.stage-node.locked{opacity:.45}
+.st-panel{position:absolute;left:max(16px,calc(24px*var(--u)));right:max(16px,calc(24px*var(--u)));top:calc(86px*var(--u));bottom:calc(16px*var(--u));overflow:auto;padding:calc(14px*var(--u)) calc(18px*var(--u));display:flex;flex-direction:column;gap:10px;z-index:4;background:linear-gradient(180deg,rgba(26,20,52,.97),rgba(14,11,32,.97))}
+.equip{display:grid;grid-template-columns:minmax(260px,.95fr) minmax(0,1.15fr) minmax(300px,1fr);grid-template-areas:"ship stash detail" "stats stash detail";gap:calc(12px*var(--u));align-items:start}
+.eq-ship{grid-area:ship;position:relative;height:calc(300px*var(--u));min-height:240px;border-radius:16px;background:radial-gradient(70% 60% at 50% 50%,rgba(90,70,150,.35),rgba(10,8,24,.2));border:1px solid var(--edge)}
+.eq-plane{position:absolute;left:50%;top:52%;width:46%;height:auto;transform:translate(-50%,-50%)}
+.eq-slot{position:absolute;display:flex;flex-direction:column;align-items:center;gap:2px;transform:translate(-50%,-50%);font-size:var(--fs-xs);color:var(--dim)}
+.eq-slot canvas{width:max(44px,calc(56px*var(--u)));height:max(44px,calc(56px*var(--u)))}
+.eq-slot.on canvas{filter:drop-shadow(0 0 6px rgba(255,210,122,.8))}
+.eq-slot.s-gun{left:88%;top:44%}.eq-slot.s-aux{left:62%;top:84%}.eq-slot.s-core{left:50%;top:16%}.eq-slot.s-armor{left:38%;top:84%}
+.eq-slot.s-engine{left:11%;top:46%}.eq-slot.s-radar{left:74%;top:16%}.eq-slot.s-chip1{left:24%;top:16%}.eq-slot.s-chip2{left:86%;top:84%}
+.eq-stats{grid-area:stats;display:flex;flex-direction:column;gap:2px;font-size:var(--fs-s)}
+.eq-stats .sr{display:flex;justify-content:space-between;gap:10px;padding:2px 6px;border-bottom:1px solid rgba(255,255,255,.05)}
+.eq-stats .sr span{color:var(--dim)}
+.eq-stash{grid-area:stash;display:flex;flex-direction:column;gap:8px;min-width:0}
+.gcells{display:grid;grid-template-columns:repeat(auto-fill,minmax(max(48px,calc(58px*var(--u))),1fr));gap:6px}
+.gcells.small{grid-template-columns:repeat(auto-fill,minmax(48px,1fr))}
+.gcell{position:relative;border-radius:10px;padding:2px;aspect-ratio:1/1}
+.gcell canvas{width:100%;height:100%}
+.gcell.sel{outline:2px solid var(--lamp);border-radius:12px}
+.gcell.junk{opacity:.45}
+.gcell.req canvas{filter:grayscale(.6) brightness(.8)}
+.gcell .better{position:absolute;right:2px;top:0;font-style:normal;color:#6fe39a;font-size:12px;text-shadow:0 0 4px #000}
+.gcell .lk{position:absolute;left:3px;bottom:1px;font-style:normal;font-size:10px;color:#ffd27a}
+.eq-detail{grid-area:detail;display:flex;flex-direction:column;gap:8px}
+.eq-hint{padding:1em}
+.tips{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+.gtip{flex:1 1 200px;min-width:200px;padding:.6em .8em;border-radius:12px;background:rgba(8,6,18,.92);border:1.5px solid var(--qc);box-shadow:0 0 18px rgba(0,0,0,.4);display:flex;flex-direction:column;gap:2px;font-size:var(--fs-s)}
+.gt-head{font-size:var(--fs-xs);color:var(--mute)}
+.gt-name{font-family:var(--f-display);font-size:var(--fs-m)}
+.gt-line.small{font-size:var(--fs-xs)}
+.gt-tier{margin-left:.5em;color:var(--mute);font-size:.8em}
+.gt-set{margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,.08);font-size:var(--fs-xs);color:#6a8f6a}
+.gt-set .on,.gt-pieces .on{color:#3ee05a}
+.gt-req{font-size:var(--fs-xs);color:var(--dim)}.gt-req.bad{color:#ff7a6b}
+.cmp{padding:.5em .8em;border-radius:12px;background:rgba(255,255,255,.04);font-size:var(--fs-s)}
+.cmp-sum{font-family:var(--f-display);font-size:var(--fs-m)}
+.cmp-line.up{color:#6fe39a}.cmp-line.down{color:#ff7a6b}
+.st-foot{padding-top:6px;border-top:1px solid rgba(255,255,255,.06)}
+.tog{display:inline-flex;align-items:center;gap:.4em;font-size:var(--fs-s);color:var(--dim)}
+.shop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(300px*var(--u)),1fr));gap:8px}
+.shop-item{display:flex;align-items:center;gap:10px;padding:.4em .6em;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--edge)}
+.shop-item.sel{border-color:var(--lamp)}
+.shop-item canvas{width:max(44px,calc(56px*var(--u)));height:max(44px,calc(56px*var(--u)));flex:none}
+.si-body{display:flex;flex-direction:column;flex:1;min-width:0}
+.reveal{animation:revealIn .5s both}
+.cx-sets{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(320px*var(--u)),1fr));gap:8px}
+.cx-set{display:flex;flex-direction:column;gap:4px;padding:.5em .7em;border-radius:12px;background:rgba(255,255,255,.04)}
+.cx-unis{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(220px*var(--u)),1fr));gap:6px}
+.cx-uni{display:flex;flex-direction:column;gap:2px;padding:.4em .6em;border-radius:10px;background:rgba(255,255,255,.03);font-size:var(--fs-xs)}
+.cx-uni.got{border:1px solid rgba(217,164,67,.5)}
+.maps{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(300px*var(--u)),1fr));gap:10px}
+.map-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:.7em .9em;border-radius:14px;background:rgba(255,255,255,.04);border:1.5px solid var(--mc);font-size:var(--fs-s)}
+.map-card b{font-family:var(--f-display);font-weight:400;font-size:var(--fs-m);color:var(--mc)}
+.map-card small{color:var(--dim)}
+.map-card.sel{box-shadow:0 0 18px var(--mc)}
+.map-card.locked{opacity:.45;border-style:dashed}
+.loot-list{display:flex;flex-wrap:wrap;gap:6px}
+.loot-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 2px;border-radius:10px;background:rgba(8,6,18,.7);border:1px solid var(--qc);color:var(--qc);font-size:var(--fs-s)}
+.loot-chip canvas{width:32px;height:32px}
+.loot-chip.lost{opacity:.4;filter:grayscale(.8);text-decoration:line-through}
+.loot-lost{display:flex;flex-wrap:wrap;gap:6px;align-items:center;width:100%}
+.end-loot{grid-column:span 1}
+@media (max-width:980px){.equip{grid-template-columns:1fr 1fr;grid-template-areas:"ship detail" "stats detail" "stash stash"}}
 </style>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -577,6 +666,16 @@ table.metrics td.num{text-align:right;white-space:nowrap}
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M3 5.5C5.5 4 8.5 4 11 5.5V20c-2.5-1.5-5.5-1.5-8 0zM13 5.5c2.5-1.5 5.5-1.5 8 0V20c-2.5-1.5-5.5-1.5-8 0z"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M10.5 2h3l.6 2.6 2.2 1 2.3-1.4 2.1 2.1-1.4 2.3 1 2.2 2.7.7v3l-2.7.6-1 2.2 1.4 2.3-2.1 2.1-2.3-1.4-2.2 1-.6 2.7h-3l-.6-2.7-2.2-1-2.3 1.4-2.1-2.1 1.4-2.3-1-2.2L2 13.5v-3l2.6-.7 1-2.2-1.4-2.3 2.1-2.1 2.3 1.4 2.2-1zM12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/></symbol>
     <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M6 3h12v2h3v3a4 4 0 0 1-4 4h-.4A5 5 0 0 1 13 15v3h3v3H8v-3h3v-3a5 5 0 0 1-3.6-3H7a4 4 0 0 1-4-4V5h3zm-1 4v1a2 2 0 0 0 1.4 1.9L6 7zm14 0h-1v2.9A2 2 0 0 0 19 8z"/></symbol>
+    <symbol id="i-credit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M12 6.5v11M9 9.5c0-1.2 1.3-2 3-2s3 .8 3 2-1.3 1.8-3 2.2-3 1-3 2.3 1.3 2 3 2 3-.8 3-2" fill="none" stroke="#2a1e30" stroke-width="1.8"/></symbol>
+    <symbol id="i-scrap" viewBox="0 0 24 24"><path d="M3 15l6-9 4 3 3-4 5 7-3 6H6z"/></symbol>
+    <symbol id="i-shard" viewBox="0 0 24 24"><path d="M12 2l6 7-6 13-6-13z"/></symbol>
+    <symbol id="i-core" viewBox="0 0 24 24"><path d="M12 2l8.5 5v10L12 22l-8.5-5V7z"/><circle cx="12" cy="12" r="3.5" fill="#2a1e30"/></symbol>
+    <symbol id="i-stash" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v11l-9 4-9-4zm9 2.2L5.6 6.6 12 4.2l6.4 2.4z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5.5-3.5 9.5-8 11-4.5-1.5-8-5.5-8-11V5z"/></symbol>
+    <symbol id="i-salv" viewBox="0 0 24 24"><path d="M14.5 2.5a5 5 0 0 0-4.6 6.9L2.5 16.8 7.2 21.5l7.4-7.4a5 5 0 0 0 6.9-4.6l-3 3-3.5-.7-.7-3.5z"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 2l9 5v10l-9 5-9-5V7zm0 2.3L5.4 8 12 11.7 18.6 8zM4.8 9.6v6.3l6.2 3.5v-6.3zm14.4 0L13 13.1v6.3l6.2-3.5z"/></symbol>
+    <symbol id="i-dice" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><circle cx="8.5" cy="8.5" r="1.6" fill="#2a1e30"/><circle cx="15.5" cy="15.5" r="1.6" fill="#2a1e30"/><circle cx="12" cy="12" r="1.6" fill="#2a1e30"/><circle cx="15.5" cy="8.5" r="1.6" fill="#2a1e30"/><circle cx="8.5" cy="15.5" r="1.6" fill="#2a1e30"/></symbol>
+    <symbol id="g-gun" viewBox="0 0 24 24"><path d="M2 9h9V7h3v2h8v4h-8v2h-3v-2H7v5H4v-5H2z"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><path d="M7 10V7.5a5 5 0 0 1 10 0V10h1.5v11h-13V10zm2.5 0h5V7.5a2.5 2.5 0 0 0-5 0z"/></symbol>
     <symbol id="i-sound" viewBox="0 0 24 24"><path d="M3 9h4l5-4.5v15L7 15H3z"/><path d="M15 8.2a5 5 0 0 1 0 7.6l-1.3-1.5a3 3 0 0 0 0-4.6zM17.6 5.2a9 9 0 0 1 0 13.6l-1.3-1.5a7 7 0 0 0 0-10.6z"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M3 9h4l5-4.5v15L7 15H3z"/><path d="M15.5 8.5l1.4-1.4 2.1 2.1 2.1-2.1 1.4 1.4L20.4 10.6l2.1 2.1-1.4 1.4-2.1-2.1-2.1 2.1-1.4-1.4 2.1-2.1z"/></symbol>
@@ -621,21 +720,27 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 
 <script src="js/util.js" charset="utf-8"></script>
 <script src="js/data.js" charset="utf-8"></script>
+<script src="js/gear.js" charset="utf-8"></script>
+<script src="js/station.js" charset="utf-8"></script>
 <script src="js/audio.js" charset="utf-8"></script>
 <script src="js/input.js" charset="utf-8"></script>
 <script src="js/art.js" charset="utf-8"></script>
+<script src="js/spaceart.js" charset="utf-8"></script>
 <script src="js/mapart.js" charset="utf-8"></script>
 <script src="js/world.js" charset="utf-8"></script>
 <script src="js/foes.js" charset="utf-8"></script>
 <script src="js/mapfx.js" charset="utf-8"></script>
 <script src="js/offers.js" charset="utf-8"></script>
+<script src="js/loot.js" charset="utf-8"></script>
 <script src="js/director.js" charset="utf-8"></script>
 <script src="js/surprise.js" charset="utf-8"></script>
 <script src="js/boss.js" charset="utf-8"></script>
+<script src="js/priest.js" charset="utf-8"></script>
 <script src="js/captain.js" charset="utf-8"></script>
+<script src="js/spacefoes.js" charset="utf-8"></script>
+<script src="js/racefoes.js" charset="utf-8"></script>
 <script src="js/vs.js" charset="utf-8"></script>
-<script src="js/home.js" charset="utf-8"></script>
-<script src="js/homeart.js" charset="utf-8"></script>
 <script src="js/net.js" charset="utf-8"></script>
 <script src="js/ui.js" charset="utf-8"></script>
+<script src="js/stationui.js" charset="utf-8"></script>
 <script src="js/main.js" charset="utf-8"></script>

@@ -60,7 +60,7 @@ function load(dir) {
     navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
   };
   ctx.globalThis = ctx; vm.createContext(ctx);
-  for (const f of ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
+  for (const f of ['util', 'data', 'gear', 'station', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
   const R = (code) => vm.runInContext(code, ctx);
   R('var settings = DEFAULT_SETTINGS();\n' + PILOT_SRC);
   return { R, ctx };

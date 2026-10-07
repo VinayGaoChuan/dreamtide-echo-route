@@ -24,6 +24,14 @@ const HELPER = PILOT_SRC + `
 })();
 window.__S = {
   hold: false,
+  // 摆拍用的一身装备：按地图给一身那个阶段像样的东西（装备长在船上，截图里看得见）
+  loadout(mapN) {
+    const R = Gear.rng(5150 + mapN), mk = (o) => Gear.make(Object.assign({ rnd: R, ilvl: [3, 9, 14, 19, 24][mapN - 1] || 9 }, o)), m = G.meta;
+    const eq = mapN <= 1 ? { gun: mk({ q: 'blue', kind: 'gun', base: 'missile' }), armor: mk({ q: 'white', kind: 'armor' }), engine: mk({ q: 'blue', kind: 'engine' }) }
+      : mapN <= 3 ? { gun: mk({ q: 'yellow', kind: 'gun', base: 'beam' }), armor: mk({ q: 'green', set: 'frost', kind: 'armor' }), aux: mk({ q: 'green', set: 'frost', kind: 'aux' }), engine: mk({ q: 'blue', kind: 'engine' }), radar: mk({ q: 'gold', uni: 'scavEye' }), chip1: mk({ q: 'blue', kind: 'chip' }) }
+      : { gun: mk({ q: 'yellow', kind: 'gun', base: 'missile' }), armor: mk({ q: 'green', set: 'forge', kind: 'armor' }), aux: mk({ q: 'green', set: 'forge', kind: 'aux' }), core: mk({ q: 'yellow', kind: 'core' }), engine: mk({ q: 'yellow', kind: 'engine' }), radar: mk({ q: 'gold', uni: 'scavEye' }), chip1: mk({ q: 'gold', uni: 'twinChip' }), chip2: mk({ q: 'blue', kind: 'chip' }) };
+    m.gear.eq = Object.assign({ gun: null, aux: null, core: null, armor: null, engine: null, radar: null, chip1: null, chip2: null }, eq);
+  },
   expire() {
     const w = G.world; if (!w) return;
     if (__S.bannerAt !== undefined && w.t - __S.bannerAt > __S.bannerDur) { $('#banner').innerHTML = ''; banner._until = 0; __S.bannerAt = undefined; }
@@ -45,31 +53,43 @@ window.__S = {
 };
 `;
 
-/* 时刻表：截图（02~06）和预告片 9 帧都从这里挑 */
+/* 时刻表：截图（02~06）和预告片 9 帧都从这里挑。五张截图是五个不同的场景（lessons SD9）：
+   熔核前线的割草潮、霜晶环带大首领的战利品喷泉、霓虹电弧城的升级二选一、站里的装备栏和比较、混沌祭司的首领战 */
+const STATION_JS = `clearScreens(); const m = G.meta; m.seenTitle = true; m.firstRunDone = true; m.tutorialDone = true; Station.ensure(m); m.pilot.lv = 14; m.credits = 4820; m.mats = { scrap: 64, shard: 23, core: 7 };
+  for (const k of ['stash', 'shop', 'insure', 'salvage', 'cube', 'black', 'hangar', 'codex', 'waypoint']) m.unlock[k] = true; for (const id of ['1-1','1-2','1-3','2-1','2-2','2-3','3-1']) { m.maps.reached[id] = true; m.maps.firstBoss[id] = true; } m.maps.cleared[1] = true; m.maps.cleared[2] = true; m.station.homes.beacon = true; m.station.homes.dome = true;
+  const R = Gear.rng(20261007); const mk = (o) => Gear.make(Object.assign({ rnd: R }, o));
+  m.gear.eq = { gun: mk({ ilvl: 14, q: 'yellow', kind: 'gun', base: 'beam' }), aux: mk({ ilvl: 12, q: 'green', set: 'frost', kind: 'aux' }), core: mk({ ilvl: 11, q: 'blue', kind: 'core', base: 'coreTwin' }), armor: mk({ ilvl: 12, q: 'green', set: 'frost', kind: 'armor' }), engine: mk({ ilvl: 9, q: 'blue', kind: 'engine' }), radar: mk({ ilvl: 13, q: 'yellow', kind: 'radar' }), chip1: mk({ ilvl: 10, q: 'blue', kind: 'chip' }), chip2: null };
+  m.gear.stash = []; for (let i = 0; i < 22; i++) m.gear.stash.push(mk({ ilvl: 6 + (i % 9), q: ['white','blue','blue','yellow','white','blue','yellow','green'][i % 8], kind: GEAR_KIND_ORDER[i % 7], set: i % 8 === 7 ? 'hive' : null }));
+  const star = mk({ ilvl: 13, q: 'gold', uni: 'thunderThroat' }); m.gear.stash.unshift(star); m.gear.stash.push(mk({ ilvl: 13, q: 'gold', uni: 'scavEye' }));
+  G.st.panel = 'equip'; G.st.filter = 'all'; G.st.sel = star.uid; showStation();`;
 const PLAN = [
   { name: 'title', screen: 'title' },
   { name: 'keyart', screen: 'keyart' }, // 商店主图：游戏自己的画法拼的关键美术
-  // 1-1 梦灯海湾：开场、梦灯屋转盘、二选一、风车塔推一排、带队精英
-  { name: 'open', start: '1-1', until: 'w.runT > 5', max: 10 },
-  { name: 'ritual-roll', until: "w.ritual && w.ritual.st === 'roll'", max: 60 },
-  { name: 'ritual-choose', until: "w.ritual && w.ritual.st === 'choose'", max: 10, hold: true },
-  { name: 'wind', until: "w.mapObjs.some((o) => o.kind === 'wind' && o.state === 'blow' && o.blowT > 0.5)", max: 120 },
-  { name: 'hand', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.spawnLurk(LURK_THEMES.bay.kinds[0], false)", until: "w.lurks && w.lurks.some((L) => L.kind === 'hand' && ((L.st === 'reach' && L.t > 0.3) || L.st === 'grab'))", max: 30, clean: true, wait: 60 }, // 地图出手：海里伸出来的手（真实机制，在这一刻触发）
-  { name: 'elite', until: "w.goal && w.goal.kind === 'cmdr' && w.enemies.some((e) => e.alive && e.type === 'cmdr' && e.x < w.W - 60 && e.rally > 0)", max: 150 },
-  // 1-2 纸船灯河：断桥灯环、厚甲编队、大招、队长
-  { name: 'bridge', start: '1-2', until: "w.mapObjs.some((o) => o.kind === 'bridge' && (o.lit.filter(Boolean).length >= 2 || o.state === 'build'))", max: 120 },
-  { name: 'pack', until: "w.goal && w.goal.kind === 'pack' && w.enemies.filter((e) => e.alive && e.type === 'armor' && e.x < w.W).length >= 3", max: 120 },
-  { name: 'swell', setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.swell()", until: "w.enemies.filter((e) => e.alive && e.swell && e.x < w.W * 0.95).length >= 6 || (!w.warns.some((x) => x.kind === 'swell') && !w.enemies.some((e) => e.alive && e.swell) && !w.focusBusy() && w.D.st === 'goal' && !w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp') && (w.swell(), false))", max: 30, clean: true, wait: 60 }, // 鱼群潮：满屏割草（这张清掉临时横幅，只看玩法）；被巨鲸吞掉或换目标清掉了就再叫一次
+  // 1-1 锈带残骸场：开场
+  { name: 'open', start: '1-1', until: 'w.runT > 6', max: 12 },
+  // 1-2 锈带残骸场：收账小偷背着越吸越鼓的钱袋躲你的高度（摆拍：这一只打不死，周围撒一把星砂让它吸）
+  { name: 'thief', start: '1-2', build: true, setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); const w = G.world; w.spawnFormation('vee'); w.spawnFormation('line'); __S.until('false', 1.2); const e = w.spawnThief(); e.hp = e.maxHp = 1e6; e.x = w.W * 0.86; for (let i = 0; i < 26; i++) w.dropPickup('dust', w.W * (0.6 + 0.012 * i), e.y + srand(-90, 90), { value: 1, vx: -20, vy: 0 });",
+    until: "(() => { const e = w.enemies.find((q) => q.type === 'thief'); return e && e.t > 1.1 && e.sack > 0.25; })()", max: 8, wait: 60 },
+  // 2-1 霜晶环带：精英炸开，金光柱砸下来（摆拍：这一刻真的掉一件暗金）
+  { name: 'loot', start: '2-1', hold: true, until: "w.goal && w.goal.kind === 'pack' && w.enemies.filter((e) => e.alive && e.x < w.W && e.x > w.W * 0.4).length >= 3", max: 200, clean: true, wait: 60,
+    setup2: "const w = G.world; w.spawnFormation('vee'); w.spawnFormation('line'); w.spawnFormation('boats'); __S.until('false', 2.2); w.texts.length = 0; w.loot = []; const P = [[0.6, 0.4, 'gold'], [0.71, 0.62, 'yellow'], [0.5, 0.7, 'blue'], [0.79, 0.34, 'green']]; for (const [fx, fy, q] of P) { const k = w.lootRoll('elite', w.W * fx, LH * fy, { q }); if (k) { k.vx = 0; k.vy = -30; } } __S.hold = true; __S.until('false', 0.45); w.texts.length = 0; banner._until = 0; $('#banner').innerHTML = ''; $('#toast').innerHTML = '';" },
+  // 3-1 霓虹电弧城：升级仪式二选一
+  { name: 'ritual-roll', start: '3-1', build: true, setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1', 40); const w = G.world, q = w.me; w.queueRitual('core', { who: q.idx, full: true, q: 2, x: w.W * 0.58, y: (TOP + BOTTOM) / 2, device: 'crystal', opts: [w.withPlayer(q, () => w.optGun('multi')), w.withPlayer(q, () => w.optBmod('thunderB'))] })", until: "w.ritual && w.ritual.st === 'roll'", max: 60 },
+  { name: 'ritual-choose', until: "w.ritual && w.ritual.st === 'choose'", max: 10, hold: true, clean: true, wait: 500 },
+  // 站：装备栏，选中一件暗金，和身上的并排比较
+  { name: 'station', screen: 'eval', js: STATION_JS, wait: 1500 },
+  // 4-1 熔核前线：成型的追踪雷链扫一整屏的割草潮
+  { name: 'swell', start: '4-1', build: true, setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.swell()", until: "w.enemies.filter((e) => e.alive && e.swell && e.x < w.W - 10).length >= 30 || (!w.warns.some((x) => x.kind === 'swell') && !w.enemies.some((e) => e.alive && e.swell) && !w.focusBusy() && (w.swell(), false))", max: 40, clean: true, freeze: true, wait: 60 },
   { name: 'burst', setup: 'G.world.pilotNoBurst = false; G.world.me.stock = Math.max(1, G.world.me.stock); G.world.setInput(0, { burst: true })', until: 'w.bursting && w.bursting.t > 0.5', max: 6 },
-  { name: 'captain', setup: 'G.world.pilotNoBurst = true', until: 'w.boss && w.bossIntroT <= 0 && w.boss.t > 5 && w.bullets.count() > 12', max: 240 },
-  // 1-3 失眠钟塔：巨鲸、Boss、通关
-  { name: 'giant', start: '1-3', build: true, until: "w.mapObjs.some((o) => o.kind === 'giant' && o.state === 'gulp' && o.stT > 0.35)", max: 160 },
-  { name: 'boss-late', setup: 'G.world.testNoWipe = true', until: 'w.boss && w.boss.phase >= 2 && w.bullets.count() > 20', max: 240 }, // 摆拍不拍超载
-  { name: 'victory', until: "w.state === 'victory'", max: 200 },
-  { name: 'result', wait: 3500 },
-  { name: 'hub-ladder', screen: 'eval', js: "clearScreens(); const P = G.meta.progress; P.ladder = 3; P.ladderSel = 2; P.selected = '1-3'; showHub()", wait: 1200 }, // 家园出击区：梦魇级选择
+  // 1-3 锈带残骸场的大首领（失控主钟）倒下：4 件战利品一件接一件扇形喷开（首杀：一件本图族的套装 + 至少一件黄）
+  { name: 'fountain', start: '1-3', build: true, setup: "const w = G.world; w.pilotNoBurst = true; w.testNoWipe = true; w.lootCfg.firstBoss = {}; w.beginBeat(w.plan.length - 1); __S.until('w.boss && w.bossIntroT <= 0 && w.boss.t > 3', 120); const b = w.boss; if (b) { b.phase = 3; b.nextPhase = 3; b.transT = 0; b.shield = 0; b.hp = 25; }",
+    until: 'w.loot && w.loot.length >= 4 && w.loot[w.loot.length - 1].t > 0.35', max: 40, hold: true, clean: true, wait: 60 },
+  { name: 'cargo', until: '!!w.cargoPod', max: 20, freeze: true, wait: 450 }, // 货运舱的动画按画面时间走：停住世界，画面照常把它画出去
+  // 5-3 寂静圣所：混沌祭司
+  { name: 'priest', start: '5-3', build: true, setup: "G.world.testNoWipe = true; G.world.beginBeat(G.world.plan.length - 1)", until: 'w.boss && w.bossIntroT <= 0 && w.boss.fightT > 4 && w.bullets.count() > 18', max: 160 },
+  { name: 'priest-late', setup: 'const b = G.world.boss; if (b && b.phase === 1) { b.hp = 640; b.startTransition(2); }', until: 'w.boss && w.boss.phase >= 2 && w.boss.bands && w.boss.bands.some((x) => x.t > x.warn) && w.bullets.count() > 14', max: 60 },
 ];
-const SHOTS = ['hand', 'ritual-choose', 'bridge', 'swell', 'boss-late']; // 02~06：地图出手、升级、断桥、割草、Boss
+const SHOTS = ['swell', 'fountain', 'ritual-choose', 'station', 'priest-late']; // 02~06：五个不同的场景
 /* 标志时刻：到点后按真实时间连拍（游戏照常跑），看动画而不是一张静帧 */
 const MOMENTS = [
   { name: 'ritual', start: '1-1', until: "w.ritual && w.ritual.st === 'trigger'", max: 60, seq: { n: 16, every: 260 } },
@@ -84,7 +104,7 @@ const MOMENTS = [
   { name: 'boss-in', start: '1-3', setup: 'G.world.beginBeat(G.world.plan.length - 1)', until: 'w.phase === "boss" && w.bossIntroT > 2.4', max: 20, seq: { n: 12, every: 280 } },
   { name: 'boss-down', setup: 'const b = G.world.boss; if (b) { b.phase = 3; b.nextPhase = 3; b.transT = 0; b.shield = 0; b.hp = 25; }', until: 'w.boss && w.boss.dying > 0', max: 60, seq: { n: 16, every: 260 } },
 ];
-const TRAILER = ['open', 'hand', 'ritual-roll', 'bridge', 'swell', 'burst', 'giant', 'boss-late', 'victory']; // 3×3
+const TRAILER = ['open', 'loot', 'thief', 'ritual-roll', 'swell', 'fountain', 'cargo', 'station', 'priest']; // 3×3
 const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a,b：只拍这几个时刻（同一局里按顺序走）
 
 (async () => {
@@ -106,20 +126,21 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
     for (const s of SEL) {
       if (s.screen === 'title') { await sleep(1500); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
       if (s.screen === 'eval') { await ev(s.js + '; true'); await sleep(s.wait || 900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; } // 任意界面：先执行 js 再截
-      if (s.screen === 'keyart') { await ev("clearScreens(); G.bg = 'keyart'; true"); await sleep(900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
+      if (s.screen === 'keyart') { await ev(`clearScreens(); G.keyEn = ${EN_MODE}; G.bg = 'keyart'; true`); await sleep(900); await shot(s.name); log.push({ name: s.name, ok: true }); continue; }
       if (s.start) {
-        await ev(`(() => { const m = G.meta; m.seenTitle = true; m.firstRunDone = true; m.tutorialDone = true; m.shared.level = 16; m.progress.cleared['1-1'] = true; m.progress.cleared['1-2'] = true; startRun('${s.start}');
-          // 游戏里一局总从 1-1 连打；截图要拍后面的关：直接换到那一关，当成单关局拍（不加连打的普通战斗加压）
-          const w = G.world; while (w.stageId !== '${s.start}' && w.nextStageId()) w.advanceStage(); if (w.stageId !== '1-1') { w.chain = false; w.events.length = 0; G.sea.setTheme(STAGES[w.stageId].theme); }
-          // 摆拍：连打到最后一关时手上本来就有一套成型的构筑——追踪、雷球升满（自动接上追踪雷链），再加爆破、多重
+        await ev(`(() => { const m = Station.ensure(G.meta); m.seenTitle = true; m.firstRunDone = true; m.tutorialDone = true; m.pilot.lv = 24; G.st.panel = null; __S.loadout(mapOfStage('${s.start}')); startRun('${s.start}');
+          const w = G.world; w.catchUp = 0; for (const q of w.players) q.ritualQueue = []; // 截图：不走路标的补发仪式
+          // 摆拍：走到后面的图时手上本来就有一套成型的构筑——追踪、雷球升满（自动接上追踪雷链），再加爆破、多重
           if (${!!s.build}) { const add = (kind, id, to) => w.applyOption({ kind, id, from: to - 1, to }); for (const [k, id, to] of [['gun', 'homing', 1], ['support', 'thunder', 1], ['gun', 'homing', 2], ['support', 'thunder', 2], ['gun', 'homing', 3], ['support', 'thunder', 3], ['gun', 'bomb', 1], ['gun', 'bomb', 2], ['gun', 'multi', 1]]) add(k, id, to); w.events.length = 0; }
           return true; })()`);
         await sleep(400); await ev('__S.attach(); G.world.pilotNoBurst = true; true'); // 像玩家一样攒着大招，只在“大招”那一刻放
       }
-      if (s.setup) await ev(s.setup);
+      if (s.setup) await ev('{ ' + s.setup + ' } true');
       let r = { ok: true };
       if (s.until) r = await ev(`__S.until(${JSON.stringify(s.until)}, ${s.max})`);
+      if (s.setup2) await ev('{ ' + s.setup2 + ' } true');
       if (s.hold) await ev('__S.hold = true; true');
+      if (s.freeze) await ev('__S.freeze = true; true'); // 停在这一帧（页面照常画）：一闪而过的时刻也拍得到
       if (s.clean) await ev("banner._until = 0; $('#banner').innerHTML = ''; $('#toast').innerHTML = ''; true");
       if (s.seq) { // 连拍：默认游戏按真实时间跑，每隔 every 毫秒一张；给了 dt 就冻住游戏，每张之间快进 dt 秒游戏时间（短先兆也能拍到每一步）
         if (s.seq.dt) await ev('__S.freeze = true; true');
@@ -130,6 +151,7 @@ const MOMENTS_MODE = args.includes('--moments'), ONLY = opt('only'); // --only a
       await sleep(s.wait || 180);
       await shot(s.name);
       if (s.hold) await ev('__S.hold = false; true');
+      if (s.freeze) await ev('__S.freeze = false; true');
       log.push(Object.assign({ name: s.name }, r));
       console.log(s.name, JSON.stringify(r));
     }

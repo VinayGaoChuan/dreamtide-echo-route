@@ -1,5 +1,5 @@
 'use strict';
-/* 梦潮：回声航线 — 区域 Boss「失控闹钟」：三个乐章，每段教一个攻击再叠一层规则；会回应玩家的 Build。
+/* 梦潮：回声航线 — 区域 Boss「失控主钟」：三个乐章，每段教一个攻击再叠一层规则；会回应玩家的 Build。
    HP 1000，70% / 35% 切换阶段，每阶段至少两次弱点暴露。 */
 const BOSS_DMG_K = 0.19; // v0.7：主炮改为单发直射后重新校准，推荐 Build 约 45~75 秒
 
@@ -266,7 +266,7 @@ class ClockBoss {
   }
 
   hudInfo() {
-    return { name: '失控闹钟', phase: this.transT > 0 ? this.nextPhase : this.phase, phaseName: CLOCK_PHASES[this.transT > 0 ? this.nextPhase : this.phase].name, hp: this.hp, maxHp: this.maxHp, shield: this.shield, shieldMax: this.shieldMax, weak: this.weakT > 0 };
+    return { name: this.w.stage.bossName || '失控主钟', def: this.def, phase: this.transT > 0 ? this.nextPhase : this.phase, phaseName: CLOCK_PHASES[this.transT > 0 ? this.nextPhase : this.phase].name, hp: this.hp, maxHp: this.maxHp, shield: this.shield, shieldMax: this.shieldMax, weak: this.weakT > 0 };
   }
 
   draw(g) {

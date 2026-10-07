@@ -2,7 +2,7 @@
 /* 梦潮：回声航线 v0.8 — 场景惊喜。每个都先给看得见的线索，再变身，变身后能用直射解决，结束后场景留下痕迹。
    1-1 月亮怪：月亮眨眼、影子移动、缺口在转 → 脱离天空长出牙和手 → 先打碎嘴边四块碎片再打核心 → 天空留下裂缝，碎片变成光环航道 + 重要升级。
    1-2 贴纸拟态：HUD 旁边的装饰贴纸晃动、长眼睛、卷边 → 撕下来跳进战场 → 先预警再咬 → 可攻击。真正的血条 / 暂停 / 大招库存 / 按键提示始终可靠。
-   1-3 拟态梦灯屋：窗户跟着心跳闪、烟囱像在呼吸、门缝有牙 → 醒来长腿 → 打倒后奖励照样拿（不会出现在教学用的第一间屋）。
+   1-3 拟态信标亭：窗户跟着心跳闪、烟囱像在呼吸、门缝有牙 → 醒来长腿 → 打倒后奖励照样拿（不会出现在教学用的第一间屋）。
    一局最多一个主要惊喜；和升级仪式互斥，不同时发生。 */
 
 const MOON_TEETH = [[-92, -66], [-106, -22], [-106, 22], [-92, 66]];
@@ -10,9 +10,9 @@ const MOON_TEETH = [[-92, -66], [-106, -22], [-106, 22], [-92, 66]];
 Object.assign(World.prototype, {
   startSurprise(kind) {
     this.surprise = { kind, st: 'clue', t: 0, busy: false, done: false, title: null, prog: null, sub: null, guide: null, parts: [] };
-    if (kind === 'moon') { this.scene.moonFx = { blink: 0, notch: 0, shade: 0, gone: false, rift: false }; this.surprise.title = '月亮不太对劲…'; this.surprise.sub = '抬头看看天上的月亮'; }
+    if (kind === 'moon') { this.scene.moonFx = { blink: 0, notch: 0, shade: 0, gone: false, rift: false }; this.surprise.title = '那颗卫星不太对劲…'; this.surprise.sub = '抬头看看那颗卫星'; }
     if (kind === 'mimic') { const S = this.surprise; S.title = '角落的贴纸在动？'; S.sub = '右上角那张星星贴纸'; S.sx = this.W - 240; S.sy = TOP + 46; }
-    if (kind === 'houseMimic') { const S = this.surprise; S.title = '这间梦灯屋怪怪的'; S.sub = '窗户在跟着心跳闪'; S.hx = this.W + 200; S.hy = (this.arena.top + this.arena.bottom) / 2 + 40; }
+    if (kind === 'houseMimic') { const S = this.surprise; S.title = '这座信标亭怪怪的'; S.sub = '窗户在跟着心跳闪'; S.hx = this.W + 200; S.hy = (this.arena.top + this.arena.bottom) / 2 + 40; }
   },
   updateSurprise(dt) {
     const S = this.surprise; if (!S || S.done || this.phase !== 'fight') return;
@@ -28,8 +28,8 @@ Object.assign(World.prototype, {
     const F = this.scene.moonFx, mid = (this.arena.top + this.arena.bottom) / 2, p = this.player;
     if (S.st === 'clue') {
       F.blink = (S.t % 1.7) < 0.18 ? 1 : 0; F.notch += dt * 1.4; F.shade = clamp(S.t / 7, 0, 1);
-      if (S.t > 3 && !S.said) { S.said = true; this.text('月亮刚刚……眨了一下眼？', this.W * 0.4, LH * 0.2 + 90, '#dcd0ff', 18, 4); Sound.sfx('moonBlink'); }
-      if (S.t > 7 && !this.worldRitual()) { this.surpriseTo(S, 'detach'); S.busy = true; this.clearBullets(true); Sound.sfx('moonDetach'); this.shake(0.3); this.rumble(0.5, 0.3, 300); S.title = '月亮掉下来了！'; S.sub = null; }
+      if (S.t > 3 && !S.said) { S.said = true; this.text('那颗卫星刚刚……眨了一下眼？', this.W * 0.4, LH * 0.2 + 90, '#dcd0ff', 18, 4); Sound.sfx('moonBlink'); }
+      if (S.t > 7 && !this.worldRitual()) { this.surpriseTo(S, 'detach'); S.busy = true; this.clearBullets(true); Sound.sfx('moonDetach'); this.shake(0.3); this.rumble(0.5, 0.3, 300); S.title = '卫星掉下来了！'; S.sub = null; }
     } else if (S.st === 'detach') {
       const u = Ease.inOutCubic ? Ease.inOutCubic(clamp(S.t / 2.2, 0, 1)) : clamp(S.t / 2.2, 0, 1);
       F.gone = true;
@@ -40,7 +40,7 @@ Object.assign(World.prototype, {
         S.parts = MOON_TEETH.map((o, i) => this.addEnemy('mtooth', { elite: true, x: S.mx + o[0], y: S.my + o[1], path: 'fixed', sup: true, k: i }));
         for (const e of [S.core, ...S.parts]) { e.goal = true; this.goal && this.goal.targets.push(e.id); }
         if (this.cb.onSeenEnemy) this.cb.onSeenEnemy('mcore');
-        S.title = '打碎月亮嘴边的碎片';
+        S.title = '打碎卫星嘴边的碎片';
       }
     } else if (S.st === 'fight') {
       S.mx = this.W * 0.74 + Math.sin(S.t * 0.5) * 30; S.my = mid + Math.sin(S.t * 0.7) * 70; S.r = 105;
@@ -48,7 +48,7 @@ Object.assign(World.prototype, {
       S.parts.forEach((e, i) => { if (e.alive) { e.x = S.mx + MOON_TEETH[i][0]; e.y = S.my + MOON_TEETH[i][1]; } });
       if (S.core.alive) { S.core.x = S.mx - 10; S.core.y = S.my; S.core.guarded = teeth.length > 0; }
       S.prog = teeth.length ? { type: 'count', n: 4 - teeth.length, total: 4 } : { type: 'hp', u: S.core.hp / S.core.maxHp };
-      S.title = teeth.length ? '打碎月亮嘴边的碎片' : '碎片没了 · 打月亮的核心';
+      S.title = teeth.length ? '打碎卫星嘴边的碎片' : '碎片没了 · 打卫星的核心';
       S.sub = teeth.length ? '碎片在不同高度，对准了打' : '核心露出来了';
       if (!teeth.length && !S.exposed) { S.exposed = true; Sound.sfx('weakOpen'); this.text('核心露出来了！', S.mx, S.my - 140, '#fff3c8', 22, 5); }
       // 攻击：咬（先画出一条航道预警）/ 手臂甩出扇形弹
@@ -65,8 +65,8 @@ Object.assign(World.prototype, {
       if (!S.core.alive) {
         this.surpriseTo(S, 'break'); S.busy = true; this.clearBullets(true); this.warns = [];
         this.fx(S.mx, S.my, 5, 420, ['#f6f0ff', '#cfc2ff', '#ffe38a']); this.hitStop(0.06); this.shake(0.8); this.rumble(1, 0.7, 260); Sound.sfx('moonBreak', { prio: true });
-        this.scene.moonFx.rift = true; this.remember('打碎了会咬人的月亮', 5);
-        S.title = '月亮碎了'; S.prog = null; S.sub = null;
+        this.scene.moonFx.rift = true; this.remember('打碎了会咬人的卫星', 5);
+        S.title = '卫星碎了'; S.prog = null; S.sub = null;
       }
     } else if (S.st === 'break') {
       if (S.t > 1.3) {
@@ -128,7 +128,7 @@ Object.assign(World.prototype, {
       }
     }
   },
-  /* ---------- 拟态梦灯屋 ---------- */
+  /* ---------- 拟态信标亭 ---------- */
   updHouseMimic(S, dt) {
     const p = this.player, mid = (this.arena.top + this.arena.bottom) / 2;
     if (S.st === 'clue') {
@@ -137,7 +137,7 @@ Object.assign(World.prototype, {
       if (S.t > 3.5 && !S.said) { S.said = true; S.sub = '烟囱在呼吸，门缝里好像有牙'; }
       if ((this.players.some((q) => q.alive && dist2(q.x, q.y, bx, by) < 60 * 60) || S.t > 12) && !this.worldRitual()) {
         this.surpriseTo(S, 'wake'); S.busy = true; S.guide = null; this.clearBullets(true); Sound.sfx('houseWake'); this.shake(0.4); this.rumble(0.6, 0.4, 200);
-        S.title = '梦灯屋站起来了！'; S.sub = null;
+        S.title = '信标亭站起来了！'; S.sub = null;
       }
     } else if (S.st === 'wake') {
       S.legs = clamp(S.t / 1.2, 0, 1);
@@ -145,7 +145,7 @@ Object.assign(World.prototype, {
         this.surpriseTo(S, 'fight'); S.busy = false; S.atkT = 1.5; S.ty = S.hy;
         S.e = this.addEnemy('hmimic', { elite: true, x: S.hx, y: S.hy - 30, path: 'fixed', sup: true, portrait: 'hmimic' });
         this.addTarget(S.e); if (this.cb.onSeenEnemy) this.cb.onSeenEnemy('hmimic');
-        S.title = '打倒拟态梦灯屋 · 奖励照样拿';
+        S.title = '打倒拟态信标亭 · 奖励照样拿';
       }
     } else if (S.st === 'fight') {
       const e = S.e;
@@ -160,8 +160,8 @@ Object.assign(World.prototype, {
           S.sub = '跳到哪里会先画出落点';
         }
       } else {
-        S.st = 'reward'; S.t = 0; this.warns = []; S.title = '拟态梦灯屋倒下了 · 奖励还在'; S.prog = null; S.sub = null;
-        this.remember('拆穿了假梦灯屋', 5);
+        S.st = 'reward'; S.t = 0; this.warns = []; S.title = '拟态信标亭倒下了 · 奖励还在'; S.prog = null; S.sub = null;
+        this.remember('拆穿了假信标亭', 5);
         this.queueRitual('house', { full: true, q: 1, x: S.hx, y: S.hy - 60, device: 'wheel', obj: { onRitual: () => { S.done = true; } } });
       }
     }

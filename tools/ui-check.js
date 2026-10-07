@@ -52,11 +52,13 @@ window.__ui = {
     return document.querySelector(key);
   },
   pos(key) { const e = this.find(key); if (!e) return null; e.scrollIntoView({ block: 'center', inline: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; },
-  // 玩过一阵的存档：教学做完、1-1 打过、星尘和券够用，家园的建筑都在
+  // 玩过一阵的存档：教学做完、第 1 张图打通、信用点和材料够用、站里的设施都开了、仓库里有一些装备
   seed() {
-    const m = G.meta; m.firstRunDone = true; m.tutorialDone = true; m.stardust = 5000; m.tickets = 5; m.cosTickets = 2;
-    m.progress.cleared['1-1'] = true; m.records.runs = Math.max(m.records.runs, 3);
-    Home.ensure(m); persist();
+    const m = Station.ensure(G.meta); m.firstRunDone = true; m.tutorialDone = true; m.credits = 5000; m.mats = { scrap: 40, shard: 20, core: 12 }; m.pilot.lv = 12;
+    for (const k of ['stash', 'shop', 'insure', 'salvage', 'cube', 'black', 'hangar', 'codex', 'waypoint']) m.unlock[k] = true;
+    for (const id of ['1-1', '1-2', '1-3', '2-1', '2-2']) { m.maps.reached[id] = true; m.maps.firstBoss[id] = true; } m.maps.cleared[1] = true; m.records.runs = Math.max(m.records.runs, 3);
+    const R = Gear.rng(7); for (let i = 0; i < 14; i++) Station.addItem(m, Gear.make({ rnd: R, ilvl: 4 + i, q: ['white', 'blue', 'yellow', 'green', 'gold'][i % 5], kind: GEAR_KIND_ORDER[i % 7] }), true);
+    m.gear.eq.gun = Gear.make({ rnd: R, ilvl: 6, q: 'blue', kind: 'gun' }); Station.restock(m); persist();
   },
   // 战斗里：没有本局就开一局，等它进入战斗
   async run() { if (!G.world || G.world.done) { startRun('1-1'); } for (let i = 0; i < 40 && !(G.world && G.world.state === 'play' && Input.gameActive); i++) await new Promise((r) => setTimeout(r, 100)); },
@@ -66,16 +68,12 @@ true`;
 // 界面：名字 + 打开它的代码（每按一个按钮前都重新执行）
 const SCREENS = [
   ['标题', 'showTitle()'],
-  ['家园', "G.homeUI.panel = null; G.homeUI.place = null; showHub()"],
-  ['机库', 'showPlanes(showHub)'],
-  ['天赋', 'showStarMap(G.meta.current, showHub)'],
-  ['任务', 'showTasks(showHub)'],
-  ['外观', 'showCosmetics(showHub)'],
-  ['图鉴', 'showCodex(null, showHub)'],
+  ['站', "G.st.panel = null; G.st.sel = null; showStation()"],
+  ['装备栏（选中一件）', "G.st.panel = 'equip'; G.st.filter = 'all'; G.st.sel = G.meta.gear.stash[0].uid; showStation()"],
+  ['图鉴（局内）', 'showCodex(null, showHub)'],
   ['记录', 'showRecords(showHub)'],
   ['设置', 'showSettings(showHub)'],
   ['操作说明', 'showHelp(showHub)'],
-  ['招募', 'showGacha(showHub)'],
   ['联机大厅', 'if (Lobby.code) Lobby.leave(); showMultiplayer(showHub)'],
   // 战斗：暂停键平时收着、大招键有库存才在——像玩家那样先把它们叫出来（鼠标移到右上角 / 按大招键）
   ['战斗', "await __ui.run(); if (G.paused) resumeGame(); hudFly('pause', 30); hudFly('burst', 30)"],
@@ -90,10 +88,8 @@ const SCREENS = [
   try {
     await ev(HELPER);
     await ev('__ui.seed(); true');
-    // 家园里每个建筑的面板也是一个界面（点场景里的建筑打开）
-    await ev("G.homeUI.panel = null; showHub(); true"); await sleep(SETTLE);
-    const hots = await ev("[...document.querySelectorAll('[data-hot]')].map((e) => e.dataset.hot)");
-    for (const h of hots) SCREENS.splice(2, 0, ['家园面板 ' + h, `G.homeUI.panel = ${JSON.stringify(h)}; G.homeUI.place = null; showHub()`]);
+    // 站里每个设施的面板也是一个界面（点设施打开）
+    for (const f of ['equip', 'stash', 'shop', 'insure', 'salvage', 'cube', 'black', 'hangar', 'codex', 'starmap']) SCREENS.splice(2, 0, ['站 · ' + f, `G.st.panel = ${JSON.stringify(f)}; G.st.sel = null; G.st.reveal = null; showStation()`]);
     const click = async (x, y) => {
       await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
       await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });

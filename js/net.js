@@ -348,8 +348,10 @@ const MpDriver = {
 /* 每个人的在场状态 mp：{ code 房间号, host, name, plane, prof 局外属性, start 房主的开局单, ls 操作帧 }
    开局单里的名单顺序 = 玩家编号（房主第一个，其余按 peer 排），各端据此建出完全相同的世界。 */
 const MP_MAX = 4;
-function compactStats(st) { // 局外属性只带玩法用到的数，四舍五入，省在场状态的空间
-  const o = {}; for (const k in st) if (k !== 'raw' && typeof st[k] === 'number') o[k] = Math.round(st[k] * 1e4) / 1e4; return o;
+function compactStats(st) { // 局外属性只带玩法用到的数，四舍五入，省在场状态的空间；装备的武器、+1 级、自带技能、暗金标记原样带上
+  const o = {}; for (const k in st) if (k !== 'raw' && typeof st[k] === 'number') o[k] = Math.round(st[k] * 1e4) / 1e4;
+  for (const k of ['gun', 'plus', 'grant', 'flags', 'burstSwap', 'sets', 'look']) if (st[k] !== undefined && st[k] !== null) o[k] = JSON.parse(JSON.stringify(st[k]));
+  return o;
 }
 const Lobby = {
   net: null, code: null, isHost: false, roster: null, gameId: null, session: null, seenLs: new Map(), onUpdate: null, onStart: null,

@@ -1,12 +1,12 @@
 'use strict';
-/* 梦潮：回声航线 v0.7 — 关卡队长（1-1 泡泡小队长 / 1-2 裂纹闹钟队长）。
-   接口与失控闹钟一致：update / draw / hit / hudInfo / freezeHands / openFromExplosion，打倒后 w.onBossDead()。
+/* 梦潮：回声航线 v0.7 — 关卡队长（1-1 矿业拖船 / 1-2 商会收账船）。
+   接口与失控主钟一致：update / draw / hit / hudInfo / freezeHands / openFromExplosion，打倒后 w.onBossDead()。
    50% 血量进入第二阶段：攻击更密，并带散兵出场。
    v0.8 Boss 小目标：先打碎正面三块护甲（护甲在时核心只吃 30%）→ 核心暴露 → 召唤散兵时撑起护盾，清掉散兵护盾才消失。 */
 
 const CAPTAINS = {
-  captain: { base: 'jelly', name: '泡泡小队长', scale: 2.4, color: '#ff9fcf', cycle: ['spiral', 'fan', 'ring', 'fan'], cycle2: ['spiral', 'summon', 'fan', 'ring', 'fan'] },
-  captain2: { base: 'tick', name: '裂纹闹钟队长', scale: 2.2, color: '#ffd76a', cycle: ['ring', 'cross', 'volley', 'summon'], cycle2: ['ring', 'cross', 'summon', 'volley', 'fan', 'summon'] },
+  captain: { base: 'jelly', name: '矿业拖船', scale: 2.4, color: '#ff9fcf', cycle: ['spiral', 'fan', 'ring', 'fan'], cycle2: ['spiral', 'summon', 'fan', 'ring', 'fan'] },
+  captain2: { base: 'tick', name: '商会收账船', scale: 2.2, color: '#ffd76a', cycle: ['ring', 'cross', 'volley', 'summon'], cycle2: ['ring', 'cross', 'summon', 'volley', 'fan', 'summon'] },
 };
 
 class CaptainBoss {
@@ -21,6 +21,7 @@ class CaptainBoss {
     this.atkT = 1.6; this.idx = 0; this.gen = null; this.radius = 26 * C.scale + 20;
     this.plates = [-62, 0, 62].map((dy) => ({ dy, hp: hp * 0.06, max: hp * 0.06, alive: true, flash: 0 }));
     this.guard = false;
+    const R = (MAPS[mapOfStage(w.stageId)] || MAPS[1]).races; this.race = R[(stageNOf(w.stageId) - 1) % R.length]; // 这张图第几关的族：颜色
     Sound.sfx('alarm');
   }
   targetable() { return this.alive && !this.dying && this.x < this.w.W - 20; }
@@ -115,15 +116,16 @@ class CaptainBoss {
   hudInfo() {
     const left = this.plates.filter((q) => q.alive).length, adds = this.w.enemies.filter((e) => e.alive && e.bossAdd).length;
     const sub = left ? `打碎正面护甲 ${3 - left}/3（护甲在时核心只吃三成伤害）` : this.guard ? `清掉散兵 · 还剩 ${adds} · 清完护盾消失` : this.phase === 1 ? '核心露出来了 · 集中火力' : '怒气 · 会带散兵出场';
-    return { name: this.C.name, phase: this.phase, phaseName: sub, hp: this.hp, maxHp: this.maxHp, shield: this.guard ? 1 : 0, shieldMax: 1, weak: this.weakT > 0 || (!left && !this.guard), ticks: [50] };
+    return { name: this.w.stage.bossName || this.C.name, def: this.def, phase: this.phase, phaseName: sub, hp: this.hp, maxHp: this.maxHp, shield: this.guard ? 1 : 0, shieldMax: 1, weak: this.weakT > 0 || (!left && !this.guard), ticks: [50] };
   }
   draw(g) {
     if (!this.alive) return;
     const C = this.C, t = this.t;
     g.save(); g.translate(this.x, this.y);
-    glowAt(g, 0, 0, 120 * C.scale / 2, hexA(C.color, 0.8), 0.45 + (this.phase === 2 ? 0.2 : 0));
+    const rc = (RACES[this.race] && RACES[this.race].color) || C.color;
+    glowAt(g, 0, 0, 120 * C.scale / 2, hexA(rc, 0.8), 0.45 + (this.phase === 2 ? 0.2 : 0));
     g.save(); g.scale(C.scale, C.scale);
-    const fake = { r: 22, seed: this.seed, charge: this.gen ? 0.6 : 0, elite: true, t, hitFlash: this.hitFlash, x: this.x, y: this.y };
+    const fake = { r: 22, seed: this.seed, charge: this.gen ? 0.6 : 0, elite: true, t, hitFlash: this.hitFlash, x: this.x, y: this.y, race: this.race, def: this.def, isBossArt: true };
     (EnemyArt[C.base] || EnemyArt.jelly)(g, fake, t + this.seed);
     g.restore();
     if (this.hitFlash > 0) glowAt(g, 0, 0, 70 * C.scale / 2, GLOW.white, this.hitFlash * 0.5);

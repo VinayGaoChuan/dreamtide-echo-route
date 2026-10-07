@@ -7,7 +7,7 @@
 const ADV_T = 7;       // 升级后的优势窗口（5~8 秒）
 const PREVIEW_T = 2.4; // 下一个威胁先预告，真正的压力等它结束
 const PORTRAIT_OF = { crowd: 'jelly', armor1: 'armor', pack: 'armor', cmdr: 'cmdr', chase: 'moth', spawner: 'wreck', boss: 'boss' };
-const REWARD_GOAL = { wind: '穿过风车前的风环', mine: '碰一下矿核，拖到岩壁上', house: '碰一下梦灯屋的铃铛', npc: '碰一下吊舱，护送到修理点', core: '碰一下精英掉下的核心', bridge: '依次穿过三个灯环', giant: '飞到巨鲸的眼睛旁边' };
+const REWARD_GOAL = { wind: '穿过风车前的风环', mine: '碰一下矿核，拖到岩壁上', house: '碰一下信标亭的铃铛', npc: '碰一下吊舱，护送到修理点', core: '碰一下精英掉下的核心', bridge: '依次穿过三个灯环', giant: '飞到巨鲸的眼睛旁边' };
 
 Object.assign(World.prototype, {
   initDirector() {
@@ -32,7 +32,7 @@ Object.assign(World.prototype, {
   beginBeat(i) {
     const B = this.plan[i]; this.beatIdx = i;
     if (this.D) { this.D.swellT = 9; this.D.peakT = 0; } // 每个目标自己一轮压力：平静 → 蓄压（鱼群潮前 5 秒）→ 鱼群潮 + 7 秒高潮
-    this.seg = { tier: i + STAGE_ORDER.indexOf(this.stageId), explosive: false };
+    this.seg = { tier: i + this.stageTier(), explosive: false };
     this.goal = { B, id: B.id, kind: B.kind, title: B.goal, t: 0, n: 0, total: B.n || 0, targets: [], wave: 0, waves: 0, state: 'active', portrait: B.kind === 'surprise' ? B.surprise : PORTRAIT_OF[B.kind] || 'jelly', sub: null };
     this.D.st = 'goal'; this.D.t = 0; this.D.mapAt = B.map ? B.mapAt || 6 : -1;
     if (B.map === 'npc' && this.wf.clue && this.nextTarget()) this.D.mapAt = Math.min(this.D.mapAt, 1); // 小梦兔整理了线索：要救的伙伴更早出现
@@ -110,10 +110,11 @@ Object.assign(World.prototype, {
     const mem = { armor1: '敲碎了第一身厚甲', pack: '拆散了厚甲编队', cmdr: '打倒了带队精英', spawner: '摧毁了残骸刷怪核心', chase: B.event === 'rear' ? '挡住了后方追兵' : '清空了空间裂缝' }[B.kind];
     if (mem) this.remember(mem);
     Sound.sfx('goalDone'); this.highlight();
-    // 每完成一个目标当场入账一份星尘（失败也保留，v0.10 §5）；精英再掉一点梦木
+    // 每完成一个目标当场入账一份赏金（失败也保留，§8.2）；带队精英再掉一把零件（回家折成废料）
     const pay = beatPay(this.stage); for (const q of this.players) if (!q.gone) q.res.earned += pay;
     if (B.kind === 'cmdr') this.dropWood(this.W * 0.7, (this.arena.top + this.arena.bottom) / 2, WOOD_DROP.cmdr);
     this.emit('goalDone', { title: B.goal, idx: this.beatIdx, pay });
+    this.maybeThief();
     if (B.reward) {
       this.D.st = 'reward'; this.D.reward = B.reward; this.D.t = 0;
       if (B.reward !== 'core') this.later(0.6, () => this.spawnMapObject(B.reward, { reward: true }));
@@ -235,7 +236,7 @@ Object.assign(World.prototype, {
     for (const e of this.enemies) { if (!e.alive || e.isBoss) continue; if (!e.swell) alive++; if (e.x < this.W + 60) active++; if (e.x - e.r < this.W) onScreen = true; } // 鱼群潮是给你割的，不算“积压”
     if (D.st === 'goal' && this.goal && this.goal.kind !== 'boss') {
       D.swellT = (D.swellT === undefined ? 12 : D.swellT) - dt;
-      if (D.swellT <= 0) { D.swellT = (16 - Math.min(6, this.beatIdx)) * (this.first ? FIRST_RUN.swellK : 1); if (!this.focusBusy() && active < 24) { this.swell(); D.peakT = 7; } } // 屏幕上已经很满就跳过这一波（同屏上限）；鱼群潮之后 7 秒是高潮
+      if (D.swellT <= 0) { D.swellT = (16 - Math.min(6, this.beatIdx)) * (this.first ? FIRST_RUN.swellK : 1); if (!this.focusBusy() && active < 30) { this.swell(); D.peakT = 7; } } // 屏幕上已经很满就跳过这一波（同屏上限）；鱼群潮之后 7 秒是高潮
     }
     this.directSides(dt, active);
     if (alive > 24) D.backlogT += dt; else D.backlogT = 0;
@@ -248,7 +249,8 @@ Object.assign(World.prototype, {
     if (D.budget >= size || (!onScreen && D.budget >= size * 0.3)) {
       // 装置留下的入口（岩壁裂口 / 风吹开的门）也会放杂兵出来
       const tr = this.traces.crack || this.traces.door, r = srnd();
-      if (tr && r < 0.3 && kind !== 'beacon' && kind !== 'ticks') this.spawnFromTrace(tr, kind === 'vee' || kind === 'swarm' ? 'moth' : 'jelly', 5);
+      if (RACE_FOE_KINDS[kind]) this.spawnRaceFoe(kind);
+      else if (tr && r < 0.3 && kind !== 'beacon' && kind !== 'ticks') this.spawnFromTrace(tr, kind === 'vee' || kind === 'swarm' ? 'moth' : 'jelly', 5);
       else if (this.seg.tier >= 2 && r > 0.8 && (kind === 'boats' || kind === 'line' || kind === 'vee')) this.spawnPushed(kind === 'boats' ? 'boat' : kind === 'vee' ? 'moth' : 'jelly', kind === 'boats' ? 3 : 5);
       else this.spawnFormation(kind);
       this.noteSide('front');
@@ -257,15 +259,20 @@ Object.assign(World.prototype, {
   },
   swell() {
     const W = this.W, top = this.arena.top + 50, bot = this.arena.bottom - 50, picks = Math.max(...this.players.map((q) => (q.gone ? 0 : q.picks.length)));
-    const n = Math.min(30, 12 + picks * 3), h = Math.min(bot - top, 200 + picks * 18), cy = srand(top + h / 2, bot - h / 2), rows = 6;
-    this.addWarn({ kind: 'swell', x: W - 80, y: cy - h / 2, w: 80, h, tWarn: 0.9, silent: true, onFire: () => {
-      for (let i = 0; i < n; i++) {
-        const col = Math.floor(i / rows), row = i % rows;
-        const y = clamp(cy - h / 2 + (row + 0.5) * (h / rows) + srand(-8, 8), top, bot);
-        // 后面的目标里，鱼群后排混几条会开火的星星鱼：割草的同时要留神（出现 0.5 秒后才开火）
-        if (this.beatIdx >= 3 && col >= 3 && row % 2 === 0 && i % 4 === 0) this.addEnemy('star', { x: W + 30 + col * 38, y, path: 'sine', amp: 10, freq: 1.6, phase: srand(TAU), vx: -120, swell: true });
-        else this.addEnemy(i % 3 ? 'jelly' : 'moth', { x: W + 30 + col * 38 + srand(0, 14), y, path: 'sine', amp: 12, freq: 2.2, phase: srand(TAU), vx: -150 - srand(0, 30), fodder: true, swell: true });
-      }
+    // 割草潮 / 跃迁潮（§10.3）：数量跟着这一局拿到的能力涨到铺满屏幕；一整群拾荒无人机先在右半屏亮起跃迁点（预告 1 秒），
+    // 然后从右往左一列列跳进来——成型的构筑一扫一大片，是这类游戏直播和短视频里的那个画面
+    const n = Math.min(64, 16 + picks * 4), h = Math.min(bot - top, 240 + picks * 24), cy = srand(top + h / 2, bot - h / 2), rows = n > 40 ? 8 : 6;
+    const cols = Math.ceil(n / rows), x0 = W * 0.5, cw = (W * 0.46) / cols, pts = [];
+    for (let i = 0; i < n; i++) { const col = Math.floor(i / rows), row = i % rows; pts.push({ col, row, x: x0 + (col + 0.5) * cw + srand(-cw * 0.2, cw * 0.2), y: clamp(cy - h / 2 + (row + 0.5) * (h / rows) + srand(-8, 8), top, bot) }); }
+    let stars = 0;
+    this.addWarn({ kind: 'swell', x: x0, y: cy - h / 2, w: W - x0, h, pts, tWarn: 1.0, silent: true, onFire: () => {
+      for (const P of pts) this.later((cols - 1 - P.col) * 0.03, () => {
+        if (this.state !== 'play') return;
+        // 后面的目标里，混几条会开火的突击艇：割草的同时要留神（出现 0.5 秒后才开火）
+        if (this.beatIdx >= 3 && P.col >= 2 && P.row % 2 === 0 && (P.col + P.row) % 4 === 0 && stars++ < 4) this.addEnemy('star', { x: P.x, y: P.y, path: 'sine', amp: 10, freq: 1.6, phase: srand(TAU), vx: -110, swell: true });
+        else this.addEnemy((P.col + P.row) % 3 ? 'jelly' : 'moth', { x: P.x, y: P.y, path: 'sine', amp: 12, freq: 2.2, phase: srand(TAU), vx: -120 - srand(0, 30), fodder: true, swell: true });
+        if (this.mine()) this.part('ring', P.x, P.y, 0, 0, 0.3, 30, 'rgba(159,227,240,0.85)');
+      });
     } });
     Sound.sfx('wind', { pan: 0.8 }); this.noteSide('front');
   },
@@ -274,6 +281,7 @@ Object.assign(World.prototype, {
     if (tier >= 2) L.push('boats', 'stars');
     if (tier >= 3) L.push('ticks', 'swarm');
     if (tier >= 5) L.push('beacon', 'stars');
+    if (tier >= 1) for (const k of this.raceFoeKinds()) L.push(k); // 这张图的族的招牌敌人（§9.3）
     return L;
   },
 
@@ -289,7 +297,7 @@ Object.assign(World.prototype, {
       else if (id === 'homing') { for (let i = 0; i < 8; i++) this.addEnemy('moth', { x: W + 20 + srand(0, 200), y: srand(top, bot), path: 'sine', vx: -120, amp: 30, freq: 1.5, phase: i }); label = '四散的敌人：子弹会拐弯'; }
       else if (id === 'multi') { for (let i = 0; i < 6; i++) this.addEnemy('jelly', { x: W + 20 + (i % 2) * 30, y: clamp(yy + (i - 2.5) * 30, top, bot), path: 'line', vx: -130 }); label = '一面墙：几路子弹一起扫'; }
       else if (id === 'bomb') { for (let i = 0; i < 10; i++) this.addEnemy('moth', { x: W + 30 + srand(-30, 30), y: clamp(yy + srand(-50, 50), top, bot), path: 'line', vx: -120 }); label = '挤成一团：一炸一片'; }
-      else { this.spawnFormation('swarm'); label = '一群蛾子：试试新支援'; }
+      else { this.spawnFormation('swarm'); label = '一群碎屑虫：试试新支援'; }
     };
     wave(y);
     this.later(1.6, () => { if (this.phase === 'fight') wave(clamp(this.player.y, top + 20, bot - 20)); });
@@ -503,8 +511,8 @@ Object.assign(World.prototype, {
     if (k === 'bridge') return st === 'idle' ? `穿过灯环 ${o.lit.filter(Boolean).length}/3` : st === 'build' ? '断桥接上了' : '选择强化';
     if (k === 'giant') return st === 'idle' ? '飞到巨鲸的眼睛旁边' : st === 'wake' || st === 'gulp' ? '巨鲸醒了 · 把附近的敌人一口吞掉' : '选择强化';
     if (k === 'mine') return st === 'idle' ? '碰一下发光的矿核' : st === 'tow' ? '把矿核拖到发光的岩壁' : '岩壁炸开了 · 选择强化';
-    if (k === 'npc') return st === 'idle' ? '碰一下伙伴的吊舱' : st === 'tow' ? `沿光带护送到修理点 · 耐久 ${o.pod.hp}/3` : st === 'bail' ? '伙伴自己跳伞去修理点了' : '选择支援';
-    if (k === 'house') return st === 'idle' ? '碰一下梦灯屋的铃铛' : '选择主炮改造';
+    if (k === 'npc') return st === 'idle' ? '碰一下救生舱' : st === 'tow' ? `沿光带护送到修理点 · 耐久 ${o.pod.hp}/3` : st === 'bail' ? '幸存者自己跳伞去修理点了' : '选择支援';
+    if (k === 'house') return st === 'idle' ? '碰一下信标亭的铃铛' : '选择主炮改造';
     return REWARD_GOAL[k] || '拿奖励';
   },
   /* ---------- HUD 用的目标信息 ---------- */
@@ -516,7 +524,7 @@ Object.assign(World.prototype, {
     else if (D.st === 'preview') { const nb = this.plan[this.beatIdx + 1]; out.title = nb ? `下一个：${nb.goal}` : ''; out.portrait = nb ? (nb.kind === 'surprise' ? nb.surprise : PORTRAIT_OF[nb.kind]) : G.portrait; out.next = true; out.step = this.beatIdx + 2; }
     else {
       const houseWait = this.mapObjs.some((o) => o.kind === 'house' && o.state === 'idle' && o.x < this.W);
-      if (G.kind === 'crowd') out.prog = { type: 'count', n: Math.min(G.n, G.total), total: G.total, need: this.m.firstSkill === null && houseWait ? (G.n >= G.total ? '还差一步：碰一下梦灯屋的铃铛' : '梦灯屋来了 · 碰一下铃铛') : null };
+      if (G.kind === 'crowd') out.prog = { type: 'count', n: Math.min(G.n, G.total), total: G.total, need: this.m.firstSkill === null && houseWait ? (G.n >= G.total ? '还差一步：碰一下信标亭的铃铛' : '信标亭来了 · 碰一下铃铛') : null };
       else if (G.kind === 'armor1' || G.kind === 'pack') {
         const e = this.enemies.find((q) => q.alive && q.goal && q.type === 'armor');
         out.prog = { type: 'count', n: G.n, total: G.total, crack: e ? (e.broken ? ARMOR.stages : e.crack || 0) : null, broken: e ? !!e.broken : false };

@@ -89,7 +89,7 @@ const treePoints = (meta, rec) => Math.max(0, (meta.shared.level - 1) - treeLit(
 function freshMeta() {
   return {
     v: 3,
-    stardust: typeof HOME !== 'undefined' ? HOME.startStardust : 120, tickets: 0, cosTickets: 0, // v0.10：初始星尘够第一次共享升级
+    stardust: 120, tickets: 0, cosTickets: 0, // 老字段：第 4 版存档里星尘折成信用点（station.js）
     shared: { level: 1 },              // 共享等级：星尘升级，所有飞机一起变强
     ultCap: 1,                         // 大招容量：1-1 / 1-3 首通解锁，账号共享
     progress: { cleared: {}, best: {}, attempts: {}, clears: {}, selected: '1-1', rescued: {} },

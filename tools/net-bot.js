@@ -15,7 +15,7 @@ const LAT = +(FLAG('lat') || 0), SPIKES = !!FLAG('spikes'); // 慢线路模拟�
 const RELOAD = FLAG('reload') ? (([k, t]) => ({ k: +k, at: +t }))(FLAG('reload').split('@')) : null; // --reload=1@60：第 2 个客户端第 60 秒刷新页面
 const DARK = FLAG('dark') ? (([k, r]) => { const [t, d] = r.split('~').map(Number); return { k: +k, at: t, dur: d }; })(FLAG('dark').split('@')) : null;
 const dir = path.join(__dirname, '..', 'js');
-const FILES = ['util', 'data', 'audio', 'input', 'art', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'director', 'surprise', 'boss', 'captain', 'vs', 'home', 'net'];
+const FILES = ['util', 'data', 'gear', 'station', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes', 'vs', 'net'];
 const noop = () => {};
 const fakeCtx = new Proxy({}, { get: (t, k) => (k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop: noop }) : k === 'measureText' ? () => ({ width: 10 }) : k in t ? t[k] : noop), set: (t, k, v) => { t[k] = v; return true; } });
 
@@ -53,13 +53,13 @@ async function main() {
     for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
     ctx.__url = URL_; ctx.__k = k; ctx.__dump = !!FLAG('dump'); ctx.__trace = !!FLAG('trace'); ctx.__build = build; ctx.__stage = STAGE;
     vm.runInContext(`
-      var meta = freshMeta(); Home.ensure(meta); var settings = DEFAULT_SETTINGS(); settings.particles = 'low';
+      var meta = Station.ensure(freshMeta()); var settings = DEFAULT_SETTINGS(); settings.particles = 'low';
       var B = { w: null, L: null, res: null, rescues: [], rtts: [], leads: [], started: false, stallMs: 0, maxWait: 0, prev: 0, slack: [], win: null };
       /* 分段统计：每段里卡住了多少毫秒、最长一次等多久、队友的操作帧到达时离要用还剩多少毫秒（负数 = 来晚了，这一帧要等） */
       function newWin() { B.win = { t: performance.now(), stallMs: 0, maxWait: 0, slack: [], rtt: [], lead: [], tx: __io.tx, rx: __io.rx, txN: __io.txN, rxN: __io.rxN }; }
       Lobby.net = new WsNet(__url, 'dreamtide-' + MP_PROTO + '-' + __build); Lobby.net.onChange(() => Lobby.changed());
       NetTicker.on((now) => Lobby.tick(now)); NetTicker.start();
-      function profile() { return { name: '机器人' + (__k + 1), plane: 'moon', prof: { s: compactStats(planeStats(null, 'moon')), u: 2, c: {}, w: Home.worldFor(meta), g: Home.goal(meta).title } }; }
+      function profile() { return { name: '机器人' + (__k + 1), plane: 'moon', prof: { s: compactStats(planeStats(meta, 'moon')), u: 1, c: {}, w: {}, g: '驾驶员 ' + meta.pilot.lv + ' 级' } }; }
       /* 自动驾驶：和网页测试同一个思路，按本机显示预测的位置去对准（有网络缓冲时不会冲过头） */
       function vsBot(w, i) { // 对抗：清自己航道、先打风塔守卫、洞口开了就进、侧风来了换边、冲突区里对准带子里的对手
         const p = w.players[i], V = w.vs, L = V.lanes[i], mid = (L.top + L.bot) / 2, off = w.viewOff || { x: 0, y: 0 }, px = p.x + off.x, py = p.y + off.y;

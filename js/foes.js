@@ -6,8 +6,10 @@
 
 const ARMOR = { plate: 45, core: 15, stages: 3 };
 const ARMOR_K = { shot: 0.18, explosion: 0.4, zap: 0.3, beam: 0.25, wave: 0.35, ring: 0.35, shatter: 0.35, burst: 0.7, clock: 0.7 };
-Object.assign(ENEMY_HP, { armor: 15, cmdr: 900, wreck: 220, mtooth: 200, mcore: 700, mimic: 800, hmimic: 900 });
-Object.assign(ENEMY_R, { armor: 34, cmdr: 40, wreck: 38, mtooth: 26, mcore: 46, mimic: 46, hmimic: 62 });
+Object.assign(ENEMY_HP, { armor: 15, cmdr: 900, wreck: 220, mtooth: 200, mcore: 700, mimic: 800, hmimic: 900, thief: 200 });
+Object.assign(ENEMY_R, { armor: 34, cmdr: 40, wreck: 38, mtooth: 26, mcore: 46, mimic: 46, hmimic: 62, thief: 34 });
+/* 收账小偷（§9.3）：飞进来 → 吸走你附近的星砂、躲开你的那条高度 → THIEF.run 秒后掉头跑掉；追上打倒吐出两倍星砂和一袋装备 */
+const THIEF = { run: 9, dodge: 150, suck: 210, after: 1, chance: 0.45 };
 const STOP_GAP = 0.5; // 全局顿帧：0.5 秒内最多一次
 
 Object.assign(World.prototype, {
@@ -64,8 +66,9 @@ Object.assign(World.prototype, {
       }
       case 'scatter': e.x += e.vx * dt; e.y += Math.sin(e.t * 5 + e.seed) * 30 * dt + e.vy * dt; if (e.t > (e.fleeAt || 1e9)) { e.vx = -260; } return true;
       case 'wreck': e.x = smooth(e.x, e.tx, 1.2, dt); e.y = e.ty + Math.sin(e.t * 0.9) * 6; return true;
+      case 'thief': this.thiefMove(e, dt, p); return true;
     }
-    return false;
+    return this.moveRaceFoe ? this.moveRaceFoe(e, dt, p) : false; // 七族招牌敌人（racefoes.js）
   },
   foeFire(e, dt, p) {
     if (e.disband || e.sup) return true; // 惊喜敌人的攻击由 surprise.js 管
@@ -73,8 +76,41 @@ Object.assign(World.prototype, {
     if (e.fire === 'slow') { e.fireT -= dt; if (onScreen && e.fireT <= 0) { e.fireT = srand(2.4, 3.2); this.fire('pink', e.x - 20, e.y, this.aimAngle(e.x, e.y), 150); } return true; }
     if (e.type === 'cmdr') { this.cmdrThink(e, dt); return true; }
     if (e.path === 'escort') { e.fireT -= dt; if (onScreen && e.fireT <= 0) { e.fireT = srand(3.2, 4.6); this.fire('pink', e.x - 10, e.y, this.aimAngle(e.x, e.y), 150, { silent: true }); } return true; }
-    if (e.type === 'wreck') return true;
+    if (e.type === 'wreck' || e.type === 'thief') return true;
+    if (typeof RACE_FOE_TYPES !== 'undefined' && RACE_FOE_TYPES[e.type]) return this.fireRaceFoe(e, dt, p);
     return false;
+  },
+  /* 收账小偷：每关最多一只，在第 THIEF.after + 1 个目标完成后的平静段来；本图有星砂商会必来，别的图看运气 */
+  maybeThief() {
+    if (this.mode !== 'run' || this.vs || this.stageId === '1-1' || this.D.thief || this.beatIdx < THIEF.after) return;
+    this.D.thief = true;
+    const M = MAPS[mapOfStage(this.stageId)] || MAPS[1];
+    if (M.races.includes('ledger') || srnd() < THIEF.chance) this.later(2.2, () => this.spawnThief());
+  },
+  spawnThief() {
+    if (this.state !== 'play' || this.boss || this.phase !== 'fight') return null;
+    const mid = (this.arena.top + this.arena.bottom) / 2;
+    const e = this.addEnemy('thief', { x: this.W + 50, y: mid + srand(-90, 90), path: 'thief', race: 'ledger', def: null, tx: this.W * 0.68, stolen: 0, sack: 0 });
+    Sound.sfx('weakOpen', { pan: 0.7 }); this.emit('thief');
+    if (this.cb.onSeenEnemy) this.cb.onSeenEnemy('thief');
+    return e;
+  },
+  thiefMove(e, dt, p) {
+    const top = this.arena.top + 40, bot = this.arena.bottom - 40;
+    if (e.t < THIEF.run) {
+      // 躲开离它最近那架飞机的高度（子弹只往右直飞）：要追，得上下跟着它
+      const away = p.y < (top + bot) / 2 ? bot - 30 : top + 30, ty = Math.abs(p.y - e.y) < THIEF.dodge ? away : e.y + Math.sin(e.t * 2.4 + e.seed) * 40;
+      e.x = smooth(e.x, e.tx + Math.sin(e.t * 1.3) * 60, 2.2, dt); e.y = clamp(smooth(e.y, ty, 1.1, dt), top, bot);
+      for (const k of this.pickups) { // 吸走附近的星砂，袋子越来越鼓
+        if (k.kind !== 'dust' || k.done || k.t < 0.3) continue;
+        const d2 = dist2(k.x, k.y, e.x, e.y); if (d2 > THIEF.suck * THIEF.suck) continue;
+        k.x = smooth(k.x, e.x, 5, dt); k.y = smooth(k.y, e.y, 5, dt);
+        if (d2 < 26 * 26) { k.done = true; e.stolen += k.value; e.sack = Math.min(1, e.sack + 0.04); }
+      }
+    } else {
+      if (!e.fled) { e.fled = true; this.emit('thiefGone'); }
+      e.x += (260 + e.t * 30) * dt; e.y = smooth(e.y, top, 0.6, dt);
+    }
   },
   /* 带队精英：举旗集结（弱点暴露）→ 指一条航道（预警 1 秒）→ 护卫从那条航道开火 */
   cmdrThink(e, dt) {

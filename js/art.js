@@ -321,7 +321,7 @@ EnemyArt.jellyE = (g, e, t) => {
 EnemyArt.tickE = (g, e, t) => { g.save(); g.scale(1.35, 1.35); EnemyArt.tick(g, Object.assign({}, e, { elite: true }), t); g.restore(); };
 EnemyArt.starE = (g, e, t) => { g.save(); g.scale(1.3, 1.3); EnemyArt.star(g, Object.assign({}, e, { elite: true }), t); g.restore(); };
 
-/* ---------- 失控闹钟 (boss) ---------- */
+/* ---------- 失控主钟 (boss) ---------- */
 const CLOCK_COLORS = {
   1: { rimA: '#8f8bff', rimB: '#5b55c9', face: '#ece8ff', mark: '#6b63d6', ribbon: '#8a6cff', accent: '#7ea0ff', eye: PAL.ink },
   2: { rimA: '#ffb07a', rimB: '#e2603e', face: '#fff1e6', mark: '#e0643e', ribbon: '#9b6cff', accent: '#ff6a4a', eye: '#5a2330' },
@@ -448,7 +448,7 @@ function gear(g, x, y, r, teeth, rot, color) {
 
 /* ---------- scenes: 失眠之海 (parallax), 梦灯大厅, 航海图 ---------- */
 /* 每关的场景身份（v0.12）：同一套海面分层，换天色、整体色相、地标和飘浮物。
-   bay 梦灯海湾：紫夜、浮岛城堡、月亮（原样）；river 纸船灯河：青蓝夜河、升起的孔明灯、成串的纸船；
+   bay 梦灯海湾：紫夜、浮岛城堡、月亮（原样）；river 投弹无人机河：青蓝夜河、升起的孔明灯、成串的纸船；
    tower 失眠钟塔：洋红紫夜、远处一排钟塔、月亮换成会走的大钟面 */
 const SEA_THEMES = {
   bay: { sky: ['#110c30', '#271f63', '#40358a', '#2b2470', '#171247'], hue: null, fog: '160,140,240' },
@@ -664,7 +664,7 @@ class SeaScene {
     }
     if (!o.noForeground) this.drawForeground(g, W, H);
   }
-  /* 纸船灯河：孔明灯从海面慢慢升起（暖橙色，比敌弹暗、比背景亮一点，不抢战斗） */
+  /* 投弹无人机河：孔明灯从海面慢慢升起（暖橙色，比敌弹暗、比背景亮一点，不抢战斗） */
   drawSkyLanterns(g, W, t) {
     for (const L of this.skyL) {
       const y = ((L.y - t * L.v) % 600 + 600) % 600 + 40, x = ((L.x - this.scroll * 0.4) % 1640 + 1640) % 1640 - 20 + Math.sin(t * 0.7 + L.p) * 8;
@@ -1008,8 +1008,33 @@ function drawPlane(g, id, x, y, scale, t, o = {}) {
   if (o.alpha !== undefined) g.globalAlpha = o.alpha;
   g.rotate(o.tilt || 0);
   g.lineJoin = 'round'; g.lineCap = 'round';
+  if (o.look) drawShipGear(g, o.look, t, 'back');
   (PlaneArt[id] || PlaneArt.moon)(g, t, o);
+  if (o.look) drawShipGear(g, o.look, t, 'front');
   if (o.hurt) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 34, GLOW.coral, 0.6); g.globalCompositeOperation = 'source-over'; }
+  g.restore();
+}
+/* 装备长在船上（Gear.look）：back 画在船身后面（尾鳍、导弹舱、辅助舱、引擎喷口），front 画在前面（炮口、甲板、雷达） */
+const GEAR_METAL = '#a7adc2', GEAR_DARK = '#4c4a66';
+function gearQ(q) { return (QUALS[q] || QUALS.white).color; }
+function drawShipGear(g, L, t, layer) {
+  g.save(); g.strokeStyle = PAL.ink; g.lineWidth = 1.8; g.lineJoin = 'round';
+  if (layer === 'back') {
+    if (L.set && RACES[L.set]) { const c = RACES[L.set].color; for (const s of [-1, 1]) { g.fillStyle = c; g.beginPath(); g.moveTo(-14, s * 10); g.quadraticCurveTo(-30, s * 30, -40, s * 30); g.quadraticCurveTo(-30, s * 18, -24, s * 6); g.closePath(); g.fill(); g.stroke(); } }
+    if (L.base === 'missile') for (const s of [-1, 1]) { const y = s * 27; g.strokeStyle = GEAR_DARK; g.lineWidth = 3; g.beginPath(); g.moveTo(-2, s * 14); g.lineTo(0, y); g.stroke(); g.strokeStyle = PAL.ink; g.lineWidth = 1.8; g.fillStyle = GEAR_METAL; g.beginPath(); g.roundRect ? g.roundRect(-12, y - 5.5, 30, 11, 5.5) : g.rect(-12, y - 5.5, 30, 11); g.fill(); g.stroke(); g.fillStyle = '#ff7a6a'; for (const dy of [-2.5, 2.5]) { g.beginPath(); g.arc(19, y + dy, 2.6, 0, TAU); g.fill(); } g.fillStyle = gearQ(L.gun); g.fillRect(-8, y - 1.5, 14, 3); }
+    if (L.aux) { g.fillStyle = GEAR_METAL; g.beginPath(); g.ellipse(-12, 17, 10, 5, 0.15, 0, TAU); g.fill(); g.stroke(); g.fillStyle = gearQ(L.aux); g.beginPath(); g.arc(-6, 17, 2.4, 0, TAU); g.fill(); }
+    if (L.engine) { const c = gearQ(L.engine), f = 0.75 + Math.sin(t * 30) * 0.25; g.fillStyle = GEAR_DARK; g.beginPath(); g.roundRect ? g.roundRect(-38, -6, 12, 14, 4) : g.rect(-38, -6, 12, 14); g.fill(); g.stroke(); g.globalCompositeOperation = 'lighter'; drawGlow(g, -44, 1, 16 * f, hexA(c, 0.9), 0.85); g.fillStyle = hexA(c, 0.9); g.beginPath(); g.moveTo(-38, -3); g.lineTo(-52 - 10 * f, 1); g.lineTo(-38, 5); g.closePath(); g.fill(); g.globalCompositeOperation = 'source-over'; }
+  } else {
+    const c = gearQ(L.gun), b = L.base || 'rapid';
+    if (b === 'rapid') for (const y of [7, 13]) { g.fillStyle = GEAR_METAL; g.fillRect(12, y - 2.5, 22, 5); g.strokeRect(12, y - 2.5, 22, 5); g.fillStyle = c; g.fillRect(14, y - 1, 6, 2); }
+    else if (b === 'scatter') { for (const a of [-0.32, 0, 0.32]) { g.save(); g.translate(14, 10); g.rotate(a); g.fillStyle = GEAR_METAL; g.fillRect(0, -2.5, 18, 5); g.strokeRect(0, -2.5, 18, 5); g.restore(); } g.fillStyle = c; g.beginPath(); g.arc(14, 10, 4.5, 0, TAU); g.fill(); g.stroke(); }
+    else if (b === 'beam') { g.fillStyle = GEAR_METAL; g.beginPath(); g.moveTo(8, 6); g.lineTo(46, 8.5); g.lineTo(46, 11.5); g.lineTo(8, 14); g.closePath(); g.fill(); g.stroke(); g.fillStyle = c; for (const x of [18, 28]) g.fillRect(x, 7.5, 3, 5); g.globalCompositeOperation = 'lighter'; drawGlow(g, 47, 10, 9 + Math.sin(t * 8) * 2, hexA(c, 0.95), 0.9); g.globalCompositeOperation = 'source-over'; }
+    else if (b === 'missile') { g.fillStyle = GEAR_METAL; g.fillRect(12, 7, 14, 6); g.strokeRect(12, 7, 14, 6); }
+    if (L.armor) { const ac = gearQ(L.armor); for (const s of [-1, 1]) { g.fillStyle = GEAR_METAL; g.beginPath(); g.arc(-2, 0, 24, s < 0 ? -2.4 : 0.75, s < 0 ? -0.75 : 2.4); g.arc(-2, 0, 18, s < 0 ? -0.8 : 2.35, s < 0 ? -2.35 : 0.8, true); g.closePath(); g.fill(); g.stroke(); g.strokeStyle = ac; g.lineWidth = 1.6; g.beginPath(); g.arc(-2, 0, 21, s < 0 ? -2.2 : 0.95, s < 0 ? -0.95 : 2.2); g.stroke(); g.strokeStyle = PAL.ink; g.lineWidth = 1.8; } }
+    if (L.radar) { const rc = gearQ(L.radar); g.strokeStyle = GEAR_DARK; g.lineWidth = 2; g.beginPath(); g.moveTo(-10, -15); g.lineTo(-12, -24); g.stroke(); g.strokeStyle = PAL.ink; g.lineWidth = 1.6; g.save(); g.translate(-12, -25); g.rotate(Math.sin(t * 1.5) * 0.5 - 0.3); g.fillStyle = GEAR_METAL; g.beginPath(); g.ellipse(0, 0, 7, 3, 0, Math.PI, TAU); g.closePath(); g.fill(); g.stroke(); g.restore(); if (Math.sin(t * 5) > 0) { g.fillStyle = rc; g.beginPath(); g.arc(-12, -27, 2, 0, TAU); g.fill(); } }
+    if (L.chip || L.core) { const cc = gearQ(L.core || L.chip); g.globalCompositeOperation = 'lighter'; drawGlow(g, -4, 9, 7, hexA(cc, 0.8), 0.6 + Math.sin(t * 4) * 0.2); g.globalCompositeOperation = 'source-over'; }
+    if (L.uni) { g.globalCompositeOperation = 'lighter'; for (let i = 0; i < Math.min(3, L.uni); i++) { const a = t * 2.4 + (i * TAU) / Math.min(3, L.uni); drawGlow(g, Math.cos(a) * 34, Math.sin(a) * 24, 6, GLOW.gold, 0.9); } g.globalCompositeOperation = 'source-over'; }
+  }
   g.restore();
 }
 const _avatar = {};
@@ -1062,11 +1087,12 @@ function drawPickup(g, k, t) {
   if (k.kind === 'dust') {
     g.globalCompositeOperation = 'lighter'; drawGlow(g, k.x, k.y, k.big ? 11 : 8, k.big ? GLOW.gold : GLOW.purple, 0.7); g.globalCompositeOperation = 'source-over';
     g.fillStyle = k.big ? '#fff3c8' : '#efe4ff'; BulletArt.star(g, k.x, k.y, 4, k.big ? 5 : 3.5, 1.3); g.fill();
-  } else if (k.kind === 'wood') { // 梦木：一小截发光的木枝
-    g.save(); g.translate(k.x, k.y); g.rotate(Math.sin(t * 3 + k.seed) * 0.5 + 0.6);
-    g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 13, 'rgba(159,242,200,0.8)', 0.7); g.globalCompositeOperation = 'source-over';
-    g.fillStyle = '#c98a4a'; g.strokeStyle = PAL.ink; g.lineWidth = 1.4; g.beginPath(); g.roundRect ? g.roundRect(-9, -3, 18, 6, 3) : g.rect(-9, -3, 18, 6); g.fill(); g.stroke();
-    g.fillStyle = '#9ff2c8'; g.beginPath(); g.ellipse(6, -6, 4, 2.4, -0.6, 0, TAU); g.fill(); g.restore();
+  } else if (k.kind === 'wood') { // 残骸零件（回家折成废料，§8.2）：一颗翻转的螺母 + 一截弯掉的铁片
+    g.save(); g.translate(k.x, k.y); g.rotate(t * 2.2 + k.seed);
+    g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 13, 'rgba(255,190,120,0.75)', 0.6); g.globalCompositeOperation = 'source-over';
+    g.fillStyle = '#9aa0b4'; g.strokeStyle = PAL.ink; g.lineWidth = 1.4; g.beginPath(); for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; g.lineTo(Math.cos(a) * 7, Math.sin(a) * 7); } g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = '#2a2440'; g.beginPath(); g.arc(0, 0, 2.6, 0, TAU); g.fill();
+    g.fillStyle = '#e8925a'; g.beginPath(); g.moveTo(4, -9); g.lineTo(11, -7); g.lineTo(9, -3); g.closePath(); g.fill(); g.stroke(); g.restore();
   } else if (k.kind === 'crystal') drawCrystal(g, k.skill, k.x, k.y, t + k.seed, k.rare, k.fade !== undefined ? k.fade : 1);
   else if (k.kind === 'candy') {
     g.save(); g.translate(k.x, k.y); g.rotate(Math.sin(t * 4 + k.seed) * 0.4);
