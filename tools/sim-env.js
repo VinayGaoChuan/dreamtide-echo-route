@@ -27,6 +27,10 @@ function pilot(w) {
   // 普通玩家也会躲开迎面撞来的敌人（看见之后）
   if (H) for (const e of w.enemies) { if (!e.alive || e.isBoss || age(e) < react) continue; const dx = e.x - p.x, dy = e.y - p.y; if (dx > -10 && dx < 90 && Math.abs(dy) < (e.r || 20) + 24) dodge += dy > 0 ? -1.5 : 1.5; }
   for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && wr.t >= react && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
+  // 落点圈（迫击炮、冰棱、炮击）：看见了就离开那个圈
+  for (const wr of w.warns) if (wr.kind === 'blast' && !wr.fired && wr.t >= react && Math.hypot(p.x - wr.x, p.y - wr.y) < wr.r + 30) dodge += p.y < wr.y ? -2 : 2;
+  // 霜心女王的冰封：飞进她身边那一圈
+  const FR = w.boss && w.boss.freezeRing; if (FR && !FR.done && FR.t >= react) { tx = w.boss.x - (FR.r0 + FR.r1) / 2; ty = w.boss.y; busy = true; }
   // 地图伸手：看到危险色的柱子和横向箭头，就离开那一条高度（像玩家一样）
   for (const L of (w.lurks || [])) if (L.kind === 'hand' && L.st !== 'retract' && !(L.st === 'omen' && L.t < react) && Math.abs(p.y - L.reachY) < 80 && p.x < L.x + 60) dodge += p.y < L.reachY ? -2 : 2; // 手会伸到这一高度往这边抓：上下让开
   // 白线预警（灯塔眼 / Boss 指针）：像玩家一样离开那条线
@@ -60,7 +64,7 @@ function load(dir) {
     navigator: { getGamepads: () => [] }, localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
   };
   ctx.globalThis = ctx; vm.createContext(ctx);
-  for (const f of ['util', 'data', 'gear', 'station', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
+  for (const f of ['util', 'data', 'gear', 'station', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes', 'bigboss']) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
   const R = (code) => vm.runInContext(code, ctx);
   R('var settings = DEFAULT_SETTINGS();\n' + PILOT_SRC);
   return { R, ctx };

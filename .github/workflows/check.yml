@@ -56,5 +56,7 @@ jobs:
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 70 --reload=1@25
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 90 --dark=1@10~20 --reload=1@50
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 90 --reload=1@30 --lat=150 --spikes=1
+      - name: 联机送装备（本地中转 + 两个无头 Chrome：蓝黄绿能送、暗金不能，对方收到、回执清掉待送）
+        run: node tools/mp-gift-test.js
       - name: 打包单文件
         run: python3 build.py dist/dreamtide.html

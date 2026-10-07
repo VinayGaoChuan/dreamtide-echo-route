@@ -10,6 +10,9 @@ Object.assign(ENEMY_HP, { armor: 15, cmdr: 900, wreck: 220, mtooth: 200, mcore: 
 Object.assign(ENEMY_R, { armor: 34, cmdr: 40, wreck: 38, mtooth: 26, mcore: 46, mimic: 46, hmimic: 62, thief: 34 });
 /* 收账小偷（§9.3）：飞进来 → 吸走你附近的星砂、躲开你的那条高度 → THIEF.run 秒后掉头跑掉；追上打倒吐出两倍星砂和一袋装备 */
 const THIEF = { run: 9, dodge: 150, suck: 210, after: 1, chance: 0.45 };
+/* 精英词缀（§9.4，照暗黑的精英怪）：每张图几条（AFFIX_N），名牌在血条上方写词缀；每条让它掉黄以上的权重 +15%（当寻宝率 +15 算） */
+const ELITE_AFFIX = { swift: '迅捷', hard: '坚硬', split: '分裂', guard: '护卫', berserk: '狂暴', chaos: '混沌' };
+const AFFIX_N = { 1: [0, 1], 2: [1, 1], 3: [1, 2], 4: [2, 2], 5: [2, 3] }, AFFIX = { swift: 1.3, hard: 1.6, guardR: 170, guardK: 0.6, chaosEvery: 6 };
 const STOP_GAP = 0.5; // 全局顿帧：0.5 秒内最多一次
 
 Object.assign(World.prototype, {
@@ -79,6 +82,32 @@ Object.assign(World.prototype, {
     if (e.type === 'wreck' || e.type === 'thief') return true;
     if (typeof RACE_FOE_TYPES !== 'undefined' && RACE_FOE_TYPES[e.type]) return this.fireRaceFoe(e, dt, p);
     return false;
+  },
+  rollAffixes(e) {
+    if (this.mode !== 'run' || this.vs || !e.elite || e.splitChild || e.bossAdd || this.stageId === '1-1') return;
+    const m = mapOfStage(this.stageId), [a, b] = AFFIX_N[m] || [0, 1], n = srandi(a, b);
+    const pool = ['swift', 'hard', 'guard', 'berserk']; if (e.type !== 'cmdr') pool.push('split'); if ((MAPS[m] || {}).chaos) pool.push('chaos');
+    e.aff = []; for (let i = 0; i < n && pool.length; i++) e.aff.push(pool.splice(srandi(0, pool.length - 1), 1)[0]);
+    if (!e.aff.length) { e.aff = null; return; }
+    if (e.aff.includes('hard')) { e.hp *= AFFIX.hard; e.maxHp = e.hp; }
+    if (e.aff.includes('swift')) e.spdK = AFFIX.swift;
+    if (e.aff.includes('chaos')) { e.def = 'shield'; e.chaosT = AFFIX.chaosEvery; }
+  },
+  /* 每帧：狂暴（半血以下攻击快一倍）、混沌（护盾和装甲轮换，换之前闪 1 秒） */
+  tickAffixes(e, dt) {
+    const A = e.aff; e.fireK = (e.spdK || 1) * (A.includes('berserk') && e.hp < e.maxHp * 0.5 ? 2 : 1);
+    if (A.includes('chaos')) { e.chaosT -= dt; if (e.chaosT <= 0) { e.chaosT = AFFIX.chaosEvery; e.def = e.def === 'shield' ? 'armor' : 'shield'; e.hitFlash = 1; } }
+  },
+  /* 护卫光环：身边的敌人受到的伤害 −40% */
+  guardK(e) {
+    if (!this.guards || !this.guards.length || e.isBoss) return 1;
+    for (const G of this.guards) if (G !== e && G.alive && dist2(G.x, G.y, e.x, e.y) < AFFIX.guardR * AFFIX.guardR) return AFFIX.guardK;
+    return 1;
+  },
+  /* 分裂：倒下时分成两只半血的小精英（不再分裂、不掉装备） */
+  splitElite(e) {
+    for (const s of [-1, 1]) { const c = this.addEnemy(e.type, { x: e.x, y: clamp(e.y + s * 44, this.arena.top + 40, this.arena.bottom - 40), path: e.path === 'elite' ? 'elite' : e.path, tx: (e.tx || this.W * 0.74) - 30, fireT: 1.2, life: 20, splitChild: true, noLoot: true, race: e.race, small: true });
+      c.hp = c.maxHp = e.maxHp * 0.5; c.aff = e.aff.filter((a) => a !== 'split' && a !== 'hard'); if (!c.aff.length) c.aff = null; else if (c.aff.includes('swift')) c.spdK = AFFIX.swift; }
   },
   /* 收账小偷：每关最多一只，在第 THIEF.after + 1 个目标完成后的平静段来；本图有星砂商会必来，别的图看运气 */
   maybeThief() {

@@ -14,7 +14,7 @@ const STATS_JS = (st) => (CHAINED(st) ? '(() => { const mm = freshMeta(); mm.sha
 const A9 = process.argv[9] || '';
 const DROP = A9 && !A9.includes('~') ? A9.split('@').map(Number) : null; // 例如 1@3000：第 1 号玩家在第 3000 帧掉线（不回来）
 const OUT = A9.includes('~') ? (([k, r]) => { const [f, d] = r.split('~').map(Number); return { k: +k, at: f, ticks: d }; })(A9.split('@')) : null; // 例如 1@2000~900：第 1 号玩家第 2000 帧起彻底断网 900 帧（30 秒）再回来
-const FILES = ['util', 'data', 'gear', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes', 'vs', 'net'];
+const FILES = ['util', 'data', 'gear', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes', 'bigboss', 'vs', 'net'];
 const noop = () => {};
 function makeCtx(k) {
   const fakeCtx = new Proxy({}, { get: (t, key) => {

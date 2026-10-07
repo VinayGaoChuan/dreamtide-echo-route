@@ -104,7 +104,7 @@ Object.assign(World.prototype, {
           if (!q.alive || q.gone || q.away) continue;
           const rr = SIG.pylonW + (q.r || 10); if (q.inv <= 0 && segDist2(q.x, q.y, e.x, e.y, m.x, m.y) < rr * rr) this.hurtPlayer(1, 'laser', q);
         }
-        if (e.t > 16) { e.leaving = true; m.leaving = true; e.x -= 200 * dt; m.x -= 200 * dt; }
+        if (e.t > 16 && !e.bossAdd) { e.leaving = true; m.leaving = true; e.x -= 200 * dt; m.x -= 200 * dt; }
         return true;
       }
       case 'ball': {

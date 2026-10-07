@@ -15,7 +15,7 @@ const LAT = +(FLAG('lat') || 0), SPIKES = !!FLAG('spikes'); // 慢线路模拟�
 const RELOAD = FLAG('reload') ? (([k, t]) => ({ k: +k, at: +t }))(FLAG('reload').split('@')) : null; // --reload=1@60：第 2 个客户端第 60 秒刷新页面
 const DARK = FLAG('dark') ? (([k, r]) => { const [t, d] = r.split('~').map(Number); return { k: +k, at: t, dur: d }; })(FLAG('dark').split('@')) : null;
 const dir = path.join(__dirname, '..', 'js');
-const FILES = ['util', 'data', 'gear', 'station', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes', 'vs', 'net'];
+const FILES = ['util', 'data', 'gear', 'station', 'audio', 'input', 'art', 'spaceart', 'mapart', 'world', 'foes', 'mapfx', 'offers', 'loot', 'director', 'surprise', 'boss', 'priest', 'captain', 'spacefoes', 'racefoes', 'bigboss', 'vs', 'net'];
 const noop = () => {};
 const fakeCtx = new Proxy({}, { get: (t, k) => (k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop: noop }) : k === 'measureText' ? () => ({ width: 10 }) : k in t ? t[k] : noop), set: (t, k, v) => { t[k] = v; return true; } });
 

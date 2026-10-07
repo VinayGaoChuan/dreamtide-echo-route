@@ -564,7 +564,7 @@ class World {
     if (this.seg && this.seg.explosive && !elite) e.explosive = true;
     return e;
   }
-  addEnemy(type, o = {}) { const e = this.makeEnemy(type, o); this.enemies.push(e); if (e.elite || e.type === 'cmdr') this.lootPreRoll(e); return e; }
+  addEnemy(type, o = {}) { const e = this.makeEnemy(type, o); this.enemies.push(e); if (e.elite) this.rollAffixes(e); if (e.elite || e.type === 'cmdr') this.lootPreRoll(e); return e; }
   spawnFormation(kind) {
     const W = this.W, tier = this.seg ? this.seg.tier : 0, top = this.arena.top + 50, bot = this.arena.bottom - 50;
     const y0 = srand(top, bot), sp = 1 + tier * 0.05;
@@ -590,6 +590,7 @@ class World {
   }
   updateEnemies(dt) {
     const frozenWorld = this.timeStop > 0, quiet = this.ritualFocus();
+    this.guards = this.enemies.filter((e) => e.alive && e.aff && e.aff.includes('guard')); // 护卫光环（精英词缀）
     for (const e of this.enemies) {
       const p = this.np > 1 ? this.nearestPlayer(e.x, e.y) : this.player; // 多人：每个敌人盯离自己最近的飞机
       if (!e.alive || e.isBoss) continue;
@@ -599,10 +600,11 @@ class World {
       if (e.frozen > 0) e.frozen -= dt;
       if (e.stun > 0) { e.stun -= dt; continue; }
       if (e.pull) { const a = angTo(e.x, e.y, e.pull.x, e.pull.y); e.x += Math.cos(a) * e.pull.v * dt; e.y += Math.sin(a) * e.pull.v * dt; continue; }
-      const mdt = dt * (e.frozen > 0 ? 0.3 : 1);
+      if (e.aff) this.tickAffixes(e, dt);
+      const mdt = dt * (e.frozen > 0 ? 0.3 : 1) * (e.spdK || 1);
       if (!this.moveFoe(e, mdt, p)) this.moveEnemy(e, mdt, p);
       this._firer = e.chaser ? 'chaser' : e.type; this._firerE = e;
-      if (e.frozen <= 0 && this.mode === 'run' && this.state === 'play' && !e.fodder && !quiet && !this.freshFoe(e) && !this.foeFire(e, dt, p)) this.enemyFire(e, dt, p); // 仪式期间、刚出现 0.5 秒内敌人不发起新攻击
+      if (e.frozen <= 0 && this.mode === 'run' && this.state === 'play' && !e.fodder && !quiet && !this.freshFoe(e) && !this.foeFire(e, dt * (e.fireK || 1), p)) this.enemyFire(e, dt * (e.fireK || 1), p); // 仪式期间、刚出现 0.5 秒内敌人不发起新攻击
       if (e.life && e.t > e.life && !e.leaving) { e.leaving = true; e.vx = -320; if (e.path !== 'line') e.path = 'line'; }
       if (e.x < -80 || e.x > this.W + 400 || e.y < -120 || e.y > LH + 120) { e.alive = false; if (e.x < -80 && !e.fodder && !e.escort && this.mode === 'run') this.m.leaks++; } // 漏过只影响额外评分
     }
@@ -695,7 +697,7 @@ class World {
       if (this.carnival && srnd() < 0.02) this.dropPickup('candy', e.x - 60, e.y + srand(-80, 80));
       return;
     }
-    const sk = this.shieldK(e, o);
+    const sk = this.shieldK(e, o) * this.guardK(e);
     if (sk !== 1) { dmg *= sk; if (sk < 0.5) Sound.sfx('clink', { pan: this.pan(e.x), gap: 90, k: 0 }); }
     if (e.armorHp > 0) { dmg = this.armorDamage(e, dmg, o); if (dmg <= 0) return; } // 厚甲：先敲甲，碎了多出来的伤害才打到核心
     e.hp -= dmg * (e.frozen > 0 ? 1.25 : 1); e.hitFlash = 1;
@@ -723,6 +725,7 @@ class World {
     if (e.elite) { this.hitStop(0.055); this.rumble(0.8, 0.6, 140); } else if (armored) { this.armorTimed(e); this.rumble(0.3, 0.5, 70); }
     if (this.bursting) this.burstKills.push({ x: e.x, y: e.y, key: e.elite || armored });
     if (this.recentKills.length >= 4 && this.chainCd <= 0) { this.chainCd = 0.5; this.fx(e.x, e.y, 2, 90); if (this.chainHiCd <= 0) { this.chainHiCd = 8; this.highlight(); } }
+    if (e.aff && e.aff.includes('split') && !e.splitChild) this.later(0.05, () => { if (this.state === 'play') this.splitElite(e); });
     if (e.type === 'thief') { // 收账小偷（§9.3）：吐出两倍星砂，袋子里的装备扇形喷出来
       this.m.thieves = (this.m.thieves || 0) + 1; this.highlight(); this.hitStop(0.055); this.shake(0.35); this.fx(e.x, e.y, 3, 70, ['#d9b8ff', '#ffe38a', '#ffffff']);
       const n = Math.min(40, 10 + e.stolen * 2);
@@ -1271,8 +1274,8 @@ class World {
     for (const e of this.enemies) if (e.alive) { e.leaving = true; e.vx = -380; e.path = 'line'; }
     this.clearBullets(true);
     this.seg = { type: 'boss', tier: Math.max(3, this.beatIdx + this.stageTier()), t: 0, dur: 0 };
-    this.remember(this.stage.boss === 'clock' ? '闯进了失控主钟的钟面' : `闯过了${this.stage.bossName}的防线`, 1);
-    this.boss = this.stageId === '5-3' ? new ChaosPriestBoss(this) : this.stage.boss === 'clock' ? new ClockBoss(this) : new CaptainBoss(this, this.stage.boss, this.stage.bossHp);
+    this.remember(this.stageId === '1-3' ? '闯进了失控主钟的钟面' : `闯过了${this.stage.bossName}的防线`, 1);
+    this.boss = this.stageId === '5-3' ? new ChaosPriestBoss(this) : BIG_BOSS_OF[this.stageId] ? new BigBoss(this, BIG_BOSS_OF[this.stageId]) : this.stage.boss === 'clock' ? new ClockBoss(this) : new CaptainBoss(this, this.stage.boss, this.stage.bossHp); // 第 2–4 张图的大首领（bigboss.js）
     this.boss.def = this.stage.bossDef === 'chaos' ? 'shield' : this.stage.bossDef || null; this.boss.chaosDef = this.stage.bossDef === 'chaos'; // 首领的防御写在名牌上（§4.3）
     this.eachPlayer((q) => { if (q.alive && q.stock === 0) this.addStock(1); }); // Boss 入口：每架库存为 0 的飞机补到 1
     this.bossIntroT = 2.8;
@@ -1642,10 +1645,16 @@ class World {
     if (e.hitFlash > 0) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, e.r * 1.25, GLOW.white, e.hitFlash > 0.75 ? 0.95 : e.hitFlash * 0.45); g.globalCompositeOperation = 'source-over'; } // 前两帧整只发白，再淡出
     if (e.frozen > 0) { g.fillStyle = 'rgba(200,240,255,0.45)'; g.strokeStyle = 'rgba(232,251,255,0.9)'; g.lineWidth = 2; g.beginPath(); for (let i = 0; i < 6; i++) { const a = (i * TAU) / 6 + 0.3; g.lineTo(Math.cos(a) * (e.r + 6), Math.sin(a) * (e.r + 6)); } g.closePath(); g.fill(); g.stroke(); }
     if (e.stun > 0) { g.strokeStyle = '#bfe9ff'; g.lineWidth = 1.6; for (let i = 0; i < 3; i++) { const a = t * 8 + i * 2; g.beginPath(); g.moveTo(Math.cos(a) * 12, -e.r - 6); g.lineTo(Math.cos(a) * 12 + 4, -e.r - 12); g.stroke(); } }
+    if (e.aff) { // 精英词缀看得见：护卫一圈光环、狂暴发红、混沌换防御前闪
+      if (e.aff.includes('guard')) { g.strokeStyle = `rgba(159,208,255,${0.25 + 0.1 * Math.sin(t * 3)})`; g.lineWidth = 2; g.setLineDash([8, 10]); g.lineDashOffset = -t * 20; g.beginPath(); g.arc(0, 0, AFFIX.guardR, 0, TAU); g.stroke(); g.setLineDash([]); }
+      if (e.aff.includes('berserk') && e.hp < e.maxHp * 0.5) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, e.r * 1.6, 'rgba(255,80,80,0.8)', 0.45 + 0.2 * Math.sin(t * 14)); g.globalCompositeOperation = 'source-over'; }
+      if (e.aff.includes('chaos') && e.chaosT < 1 && Math.sin(t * 24) > 0) { g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 3; g.beginPath(); g.arc(0, 0, e.r + 10, 0, TAU); g.stroke(); }
+    }
     if (e.mark) { g.strokeStyle = `rgba(255,120,90,${0.7 + Math.sin(t * 10) * 0.3})`; g.lineWidth = 2.5; g.beginPath(); g.arc(0, 0, e.r + 8, 0, TAU); g.moveTo(-e.r - 12, 0); g.lineTo(-e.r - 4, 0); g.moveTo(e.r + 12, 0); g.lineTo(e.r + 4, 0); g.stroke(); }
     if (e.clockMark) { g.strokeStyle = '#ffd76a'; g.lineWidth = 2.5; g.beginPath(); g.arc(0, 0, e.r + 10, 0, TAU); g.stroke(); g.beginPath(); g.moveTo(0, 0); g.lineTo(0, -e.r); g.moveTo(0, 0); g.lineTo(e.r * 0.6, 0); g.stroke(); }
     g.restore();
-    if (e.elite || (e.lurk && e.hp < e.maxHp)) { const w = e.elite ? 80 : 56, y = e.part === 'hand' && e.from > 0 ? e.y - 84 : e.y - e.r - 26; g.fillStyle = 'rgba(14,11,40,0.75)'; g.fillRect(e.x - w / 2, y, w, 7); g.fillStyle = '#ff9d8c'; g.fillRect(e.x - w / 2, y, (w * Math.max(0, e.hp)) / e.maxHp, 7); } // 地图伸出来的东西挨了打才显血条：看得出打得碎
+    if (e.elite || (e.lurk && e.hp < e.maxHp)) { const w = e.elite ? 80 : 56, y = e.part === 'hand' && e.from > 0 ? e.y - 84 : e.y - e.r - 26; g.fillStyle = 'rgba(14,11,40,0.75)'; g.fillRect(e.x - w / 2, y, w, 7); g.fillStyle = '#ff9d8c'; g.fillRect(e.x - w / 2, y, (w * Math.max(0, e.hp)) / e.maxHp, 7); // 地图伸出来的东西挨了打才显血条：看得出打得碎
+      if (e.aff) { const txt = e.aff.map((a) => ELITE_AFFIX[a]).join(' · '); g.font = '700 13px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = 'rgba(14,11,40,0.9)'; g.strokeText(txt, e.x, y - 5); g.fillStyle = e.aff.length >= 2 ? '#ffd27a' : '#9fd0ff'; g.fillText(txt, e.x, y - 5); g.textAlign = 'start'; } } // 精英词缀名牌（照暗黑：两条以上金字）
     if (e.armorMax) drawArmorPips(g, e);
     if (e.goal && this.mode === 'run') drawGoalMark(g, e, t);
     // 第一只厚甲怪：一步一步教 —— 对准甲片 → 破甲 → 打核心
@@ -1737,9 +1746,10 @@ class World {
         const ex = w.x + Math.cos(w.a) * w.len, ey = w.y + Math.sin(w.a) * w.len;
         if (!w.fired) { g.strokeStyle = bright ? `rgba(255,255,255,${0.45 + 0.4 * u})` : 'rgba(255,255,255,0.14)'; g.lineWidth = bright ? 2 + u * 2 : 1.2; g.setLineDash(bright ? [14, 8] : []); g.lineDashOffset = -t * 120; g.beginPath(); g.moveTo(w.x, w.y); g.lineTo(ex, ey); g.stroke(); g.setLineDash([]); }
         if (w.fired && w.beamT > 0) { g.globalCompositeOperation = 'lighter'; g.strokeStyle = 'rgba(255,248,220,0.9)'; g.lineWidth = w.w; g.beginPath(); g.moveTo(w.x, w.y); g.lineTo(ex, ey); g.stroke(); g.strokeStyle = 'rgba(255,207,74,0.4)'; g.lineWidth = w.w * 2.4; g.stroke(); g.globalCompositeOperation = 'source-over'; }
-      } else if (w.kind === 'blast' && !w.fired) { // 迫击炮：落点一个越来越实的红圈，炮弹沿抛物线落下来
-        g.fillStyle = `rgba(255,90,60,${0.1 + 0.22 * u})`; g.beginPath(); g.arc(w.x, w.y, w.r, 0, TAU); g.fill();
-        g.strokeStyle = `rgba(255,140,100,${0.5 + 0.45 * u})`; g.lineWidth = 3; g.beginPath(); g.arc(w.x, w.y, w.r, 0, TAU); g.stroke();
+      } else if (w.kind === 'blast' && !w.fired) { // 迫击炮：落点一个越来越实的红圈，炮弹沿抛物线落下来（冰棱：白霜圈）
+        const RC = w.ice ? '200,240,255' : '255,90,60', RS = w.ice ? '230,250,255' : '255,140,100';
+        g.fillStyle = `rgba(${RC},${0.1 + 0.22 * u})`; g.beginPath(); g.arc(w.x, w.y, w.r, 0, TAU); g.fill();
+        g.strokeStyle = `rgba(${RS},${0.5 + 0.45 * u})`; g.lineWidth = 3; g.beginPath(); g.arc(w.x, w.y, w.r, 0, TAU); g.stroke();
         g.lineWidth = 2; g.beginPath(); g.arc(w.x, w.y, w.r * (1 - u), 0, TAU); g.stroke();
         if (w.from) { const sx = lerp(w.from.x, w.x, u), sy = lerp(w.from.y, w.y, u) - Math.sin(u * Math.PI) * 220; g.fillStyle = '#2a2440'; g.strokeStyle = '#ffb35c'; g.lineWidth = 2; g.beginPath(); g.arc(sx, sy, 7, 0, TAU); g.fill(); g.stroke(); }
       } else if (w.kind === 'zone' && w.color === 'orange' && !w.fired) { // 钻头冲锋车：地上一条橙色虚线

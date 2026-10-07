@@ -29,7 +29,7 @@ Object.assign(World.prototype, {
   /* 掉一件（只给本机这架）。src：fodder / elite / boss；o.minQ、o.q、o.kind 用于首杀必掉和保底 */
   lootRoll(src, x, y, o = {}, v) {
     const p = this.me; if (!this.lootOn() || !p || p.gone) return null;
-    const C = this.lootCtx(src === 'boss'), it = Gear.roll(Object.assign({ rnd: p.lootRnd, src, mf: (p.stats && p.stats.mf) || 0 }, C, o));
+    const C = this.lootCtx(src === 'boss'), it = Gear.roll(Object.assign({ rnd: p.lootRnd, src }, C, o, { mf: ((p.stats && p.stats.mf) || 0) + (o.mfAdd || 0) }));
     const k = { item: it, x, y, vx: v ? v.vx : srand0(p.lootRnd, -80, 120), vy: v ? v.vy : srand0(p.lootRnd, -380, -220), t: 0, owner: p.idx, fx: LOOT_FX[it.q] || LOOT_FX.white };
     this.loot.push(k);
     if (p === this.me) {
@@ -44,7 +44,8 @@ Object.assign(World.prototype, {
   lootOnKill(e) {
     if (!this.lootOn() || e.isBoss) return;
     const p = this.me, elite = e.elite || e.type === 'cmdr';
-    const raceO = e.race ? { mapRaces: [e.race] } : {}; // 打倒哪个族的敌人，套装就偏向那一族（§6.7）
+    if (e.noLoot) return; // 分裂出来的小精英不掉
+    const raceO = Object.assign(e.race ? { mapRaces: [e.race] } : {}, e.aff ? { mfAdd: 15 * e.aff.length } : {}); // 打倒哪个族的敌人，套装就偏向那一族（§6.7）；精英每条词缀 +15 寻宝
     if (e.lootPre !== undefined) { if (e.lootPre) this.lootRoll('elite', e.x, e.y, Object.assign({ q: e.lootPre }, raceO)); return; }
     const r = p.lootRnd();
     if (e.type === 'thief') return; // 袋子在 killEnemy 里喷
@@ -54,18 +55,18 @@ Object.assign(World.prototype, {
   },
   /* 一堆东西一起掉：扇形喷开，每件一道光柱，不叠在一起（首领、收账小偷的袋子） */
   lootFan(i, n) { const s = i - (n - 1) / 2; return { vx: s * 240 - 110, vy: -520 + Math.abs(s) * 70 }; }, // 偏向左边（玩家这边），不喷出屏幕右缘
-  /* 收账小偷的袋子（§9.3）：3 件，至少 1 件蓝 */
+  /* 收账小偷的袋子（§9.3）：DROP_RATE.thief 件，至少 1 件蓝 */
   lootThief(e) {
     if (!this.lootOn()) return;
-    for (let i = 0; i < 3; i++) this.later(0.1 + i * 0.16, () => this.lootRoll('elite', e.x, e.y, i === 1 ? { minQ: 'blue', mapRaces: ['ledger'] } : { mapRaces: ['ledger'] }, this.lootFan(i, 3)));
+    const n = DROP_RATE.thief; for (let i = 0; i < n; i++) this.later(0.1 + i * 0.16, () => this.lootRoll('elite', e.x, e.y, i === n - 1 ? { minQ: 'blue', mapRaces: ['ledger'] } : { mapRaces: ['ledger'] }, this.lootFan(i, n)));
   },
   /* 精英出现时先定好掉不掉、掉什么品质（拾荒者之眼看得见） */
   lootPreRoll(e) {
     const p = this.me; if (!this.lootOn() || !p || !(p.stats.flags || {}).foresee) return;
     if (p.lootRnd() >= DROP_RATE.elite) { e.lootPre = null; return; }
-    e.lootPre = Gear.pickW(p.lootRnd, Gear.mfTable(DROP_Q.elite, p.stats.mf || 0));
+    e.lootPre = Gear.pickW(p.lootRnd, Gear.mfTable(DROP_Q.elite, (p.stats.mf || 0) + (e.aff ? 15 * e.aff.length : 0)));
   },
-  /* 首领倒下：2 件（第 3 关 4 件，至少一件黄）；首杀必掉；保底 */
+  /* 首领倒下：2 件（第 3 关 3 件，至少一件黄）；首杀必掉；保底 */
   lootBoss(x, y) {
     if (!this.lootOn()) return;
     const n = stageNOf(this.stageId), m = mapOfStage(this.stageId), C = this.lootCfg, first = !C.firstBoss[this.stageId];
@@ -77,7 +78,7 @@ Object.assign(World.prototype, {
     }
     if (n === 3 && C.uniPity) { drops.push({ q: 'gold' }); C.uniPity = false; }
     if (C.noRare >= PITY.rareRuns && !drops.some((d) => QUALS[d.q].rank >= 2)) { drops.push({ minQ: 'yellow' }); C.noRare = 0; }
-    while (drops.length < (n === 3 ? 4 : 2)) drops.push(n === 3 && drops.length === 0 ? { minQ: 'yellow' } : {}); // 大首领倒下是一堆（§6.7）
+    while (drops.length < (n === 3 ? 3 : 2)) drops.push(n === 3 && drops.length === 0 ? { minQ: 'yellow' } : {}); // 大首领倒下是一堆（§6.7）
     if (n === 3 && !drops.some((d) => d.minQ || (d.q && QUALS[d.q].rank >= 2))) drops[drops.length - 1] = { minQ: 'yellow' };
     C.firstBoss[this.stageId] = true;
     // 战利品喷泉（§6.8）：一件接一件从残骸里扇形喷出来，最好的最后

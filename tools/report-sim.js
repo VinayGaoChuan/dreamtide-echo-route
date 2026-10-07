@@ -109,7 +109,7 @@ function careerRun(seed, maxRuns, human, maxHours) {
     const out = Station.settle(meta, res); meta.firstRunDone = true;
     const bot = careerStation(meta, plane);
     const win = !!res.win, f = F[mm] || (F[mm] = { n: 0, at: null });
-    if (S0.farm) {} else if (win) { f.n = 0; f.at = null; } else { f.n++; f.at = x.reached; }
+    if (S0.farm) f.n++; else if (win) { f.n = 0; f.at = null; } else { f.n++; f.at = x.reached; } // 回刷的那一局也算一次（下一局再回前沿）
     const news = [...out.unlocks.map((u) => 'unlock ' + u), ...(out.mapClear ? ['map ' + out.mapClear] : []), ...(out.lvUp ? ['lv ' + meta.pilot.lv] : []), ...bot.eq.map((q) => 'eq ' + q), ...bot.fac.map((id) => 'fac ' + id)];
     const kq = {}; for (const it of out.kept) kq[it.q] = (kq[it.q] || 0) + 1;
     hours += (x.t + OVER) / 3600;

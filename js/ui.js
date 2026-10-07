@@ -202,10 +202,33 @@ function vsGapHtml(ms) {
 function mpProfile() {
   const m = G.meta, id = m.current;
   Station.ensure(m);
-  return { name: (m.nick || '').trim() || '玩家', plane: id, prof: { s: compactStats(planeStats(m, id)), u: 1, c: { exp: m.cosmetics.exp, trail: m.cosmetics.trail }, w: {}, g: `驾驶员 ${m.pilot.lv} 级` } };
+  return { name: (m.nick || '').trim() || '玩家', plane: id, prof: { s: compactStats(planeStats(m, id)), u: 1, c: { exp: m.cosmetics.exp, trail: m.cosmetics.trail }, w: {}, g: `驾驶员 ${m.pilot.lv} 级`,
+    gifts: m.gear.outbox.map((g) => ({ id: g.id, to: g.to, item: g.item })), acks: m.gear.giftsGot.slice(-10) } }; // 送装备（§13）：待送的东西和收到的回执都在自己的资料里
+}
+/* 送装备：收下队友送给我的（同一份只收一次），看到队友的回执就把我的待送清掉 */
+function mpGiftSync(ms) {
+  const m = G.meta, me = ms.find((x) => x.isMe); if (!me) return false; let changed = false;
+  for (const x of ms) {
+    if (x.isMe || !x.prof) continue;
+    for (const g of x.prof.gifts || []) if (g && g.to === me.peer) { const it = Station.giftReceive(m, g, x.name); if (it) { changed = true; toast(`${x.name} 送你一件：${Gear.name(it)}`, QUALS[it.q].color, null, 3200); Sound.sfx('lootBlue'); } }
+    if (Station.giftResolve(m, x.peer, x.prof.acks || [])) { changed = true; toast(`${x.name} 收到了你送的装备`, '#9ff2c8', null, 2200); }
+  }
+  if (changed) { persist(); Lobby.me(mpProfile()); }
+  return changed;
 }
 /* 邀请链接：?join=房间号，打开后直接进那个房间 */
 function inviteCode() { try { const c = new URLSearchParams(location.search).get('join'); return c && /^[A-Z0-9]{3,8}$/i.test(c) ? c.toUpperCase() : null; } catch (e) { return null; } }
+function giftBtnHtml(x, mode, room) {
+  if (x.isMe || mode === 'vs' || (room && room.started)) return '';
+  const m = G.meta, out = m.gear.outbox.find((g) => g.to === x.peer);
+  if (out) return `<br><small class="mp-gift-out" style="color:${QUALS[out.item.q].color}">送出中 · ${esc(Gear.name(out.item))}</small> <button class="btn small" type="button" data-giftcancel="${esc(out.id)}">取消</button>`;
+  const n = m.gear.stash.filter((it) => Station.giftable(it)).length;
+  return `<br><button class="btn small ${G.giftTo === x.peer ? 'primary' : ''}" type="button" data-gift="${esc(x.peer)}" ${offIf(!n, '仓库里没有能送的：蓝、黄、绿可以送，暗金和改过的不行')}>${icon('i-stash')} 送装备</button>`;
+}
+function giftPickHtml(x) {
+  const m = G.meta, L = m.gear.stash.filter((it) => Station.giftable(it)).sort((a, b) => QUALS[b.q].rank - QUALS[a.q].rank || b.ilvl - a.ilvl).slice(0, 24);
+  return `<div class="panel mp-giftpick"><div class="label">送给 ${esc(x.name)} 一件 <small class="dim-text">蓝、黄、绿可以送；暗金和改造台改过的不行</small></div><div class="cl-items">${L.map((it) => `<button class="cl-it" type="button" data-giftitem="${esc(it.uid)}" style="color:${QUALS[it.q].color}">${esc(Gear.name(it))} <small class="dim-text">Lv${it.req}</small></button>`).join('')}</div></div>`;
+}
 function inviteLink(code) { return `${location.origin}${location.pathname}?join=${code}`; }
 function showMultiplayer(back, joinCode, resumeData) {
   const m = G.meta; if (!m.nick) m.nick = '玩家' + Math.floor(100 + Math.random() * 900);
@@ -251,7 +274,8 @@ function showMultiplayer(back, joinCode, resumeData) {
     // 房主：倒计时到了就开局；倒计时中有人取消准备 / 设置变了就自动取消
     if (host && cd) { if (!allReady) Lobby.me({ cd: null }); else if (now !== null && now >= cd.at) { Lobby.me({ cd: null }); G.mpRound = (G.mpRound || 0) + 1; if (!Lobby.start(stage, delay, mode, stat, lad)) Sound.sfx('denied'); return; } }
     if (cd && !cdTimer) cdTimer = setInterval(paint, 200); else if (!cd && cdTimer) { clearInterval(cdTimer); cdTimer = null; }
-    const k = JSON.stringify([Lobby.code, host, stage, delay, mode, stat, cfg, cdLeft, room && room.members.map((x) => [x.peer, x.name, x.plane, x.playing, x.rdy, x.prof && x.prof.g, x.prof && x.prof.w && x.prof.w.target, x.prof && x.prof.w && x.prof.w.upper, x.prof && x.prof.s && x.prof.s.hearts, x.prof && x.prof.s && x.prof.s.dmgK, x.prof && x.prof.u]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.mode, r.stat, r.players.join(), r.members[0].name])]);
+    if (room && mode !== 'vs') mpGiftSync(ms);
+    const k = JSON.stringify([Lobby.code, host, stage, delay, mode, stat, cfg, cdLeft, G.giftTo || null, m.gear.outbox.map((g) => g.id).join(), room && room.members.map((x) => [x.peer, (x.prof && x.prof.gifts || []).length, x.name, x.plane, x.playing, x.rdy, x.prof && x.prof.g, x.prof && x.prof.w && x.prof.w.target, x.prof && x.prof.w && x.prof.w.upper, x.prof && x.prof.s && x.prof.s.hearts, x.prof && x.prof.s && x.prof.s.dmgK, x.prof && x.prof.u]), room && room.started, !Lobby.code && rooms.map((r) => [r.code, r.members.length, r.started, r.stage, r.mode, r.stat, r.players.join(), r.members[0].name])]);
     if (k === sig) return; sig = k;
     if (!Lobby.code) {
       const myId = net.selfId;
@@ -266,7 +290,8 @@ function showMultiplayer(back, joinCode, resumeData) {
     const dOpts = [[0, '自动'], [3, '短'], [6, '中'], [10, '长']], dNow = delay; // 0 = 按大家的延迟自动定
     const meReady = me.rdy && me.rdy === cfg;
     body.innerHTML = `<h3>房间 <b class="mp-code">${esc(Lobby.code)}</b> <small class="dim-text">${n}/${MP_MAX} 人 · ${mode === 'vs' ? `对抗 · ${stat === 'fair' ? '统一属性' : '真实成长'}` : `合作 · ${esc(MAPS[mapOfStage(host ? stage : (room && room.stage) || stage)].name)}`}</small></h3>
-      <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : isReady(x) ? ' <small class="chip ok">✓ 准备</small>' : ' <small class="chip">未准备</small>'}<br><small class="dim-text">${PLANES[x.plane].name}${mode === 'vs' ? '' : x.prof && x.prof.g ? ` · ${esc(x.prof.g)}` : ''}</small>${mode === 'vs' && stat === 'fair' ? '<br><small class="mp-grow">统一属性：♥5 · 攻 ×1.00 · 大招 1</small>' : growthHtml(x.prof)}</span></div>`).join('')}</div>
+      <div class="mp-members">${ms.map((x, i) => `<div class="mp-mem ${x.isMe ? 'me' : ''}"><i style="background:${PLAYER_COLORS[i % 4]}"></i><canvas width="56" height="56" data-plane="${x.plane}"></canvas><span><b>${esc(x.name)}</b>${x.isMe ? ' <small class="chip">你</small>' : ''}${x.host ? ' <small class="chip gold">房主</small>' : isReady(x) ? ' <small class="chip ok">✓ 准备</small>' : ' <small class="chip">未准备</small>'}<br><small class="dim-text">${PLANES[x.plane].name}${mode === 'vs' ? '' : x.prof && x.prof.g ? ` · ${esc(x.prof.g)}` : ''}</small>${mode === 'vs' && stat === 'fair' ? '<br><small class="mp-grow">统一属性：♥5 · 攻 ×1.00 · 大招 1</small>' : growthHtml(x.prof)}${giftBtnHtml(x, mode, room)}</span></div>`).join('')}</div>
+      ${G.giftTo && ms.some((x) => x.peer === G.giftTo) ? giftPickHtml(ms.find((x) => x.peer === G.giftTo)) : ''}
       ${mode === 'vs' ? (stat === 'fair' ? '<p class="dim-text mp-world">本场统一属性：所有人按 1 级基础属性、大招容量 1，不带局外成长</p>' : vsGapHtml(ms)) : ''}
       ${mpRulesHtml(mode, true)}
       ${host ? `<div class="row wrap"><span class="label">玩法</span><div class="seg" role="group"><button type="button" data-mm="coop" class="${mode === 'coop' ? 'on' : ''}">合作</button><button type="button" data-mm="vs" class="${mode === 'vs' ? 'on' : ''}">对抗</button></div></div>
@@ -279,6 +304,10 @@ function showMultiplayer(back, joinCode, resumeData) {
       <div class="row"><button class="btn coral small" id="mp-leave" type="button">离开房间</button></div>`;
     paintPlaneCanvases(body);
     $('#mp-leave', body).onclick = () => { Sound.sfx('uiBack'); Lobby.leave(); sig = ''; paint(); };
+    // 送装备：点队友的「送装备」→ 从仓库挑一件（蓝黄绿）→ 进待送；对方收到以后自动清掉；对方不在时可以取消拿回
+    $$('[data-gift]', body).forEach((b) => b.onclick = () => { Sound.sfx('ui'); G.giftTo = G.giftTo === b.dataset.gift ? null : b.dataset.gift; sig = ''; paint(); });
+    $$('[data-giftitem]', body).forEach((b) => b.onclick = () => { const to = ms.find((x) => x.peer === G.giftTo); const g = to && Station.giftSend(m, b.dataset.giftitem, to.peer, to.name); if (!g) { Sound.sfx('denied'); return; } Sound.sfx('select'); persist(); G.giftTo = null; Lobby.me(mpProfile()); toast(`送给 ${to.name}：${Gear.name(g.item)} · 对方收到就送到了`, QUALS[g.item.q].color, null, 2600); sig = ''; paint(); });
+    $$('[data-giftcancel]', body).forEach((b) => b.onclick = () => { if (!Station.giftCancel(m, b.dataset.giftcancel)) return; Sound.sfx('uiBack'); persist(); Lobby.me(mpProfile()); toast('取消了，东西回到你的仓库', '#ffe38a'); sig = ''; paint(); });
     const cp = $('#mp-copy', body), li = $('#mp-link', body);
     if (li) li.addEventListener('keydown', (e) => e.stopPropagation());
     if (cp) cp.onclick = () => { const done = () => { Sound.sfx('ui'); toast('邀请链接已复制，发给朋友就行', '#9ff2c8'); }; try { navigator.clipboard.writeText(li.value).then(done, () => { li.select(); toast('按 Ctrl+C 复制', '#ffe38a'); }); } catch (e) { li.select(); toast('按 Ctrl+C 复制', '#ffe38a'); } };
@@ -966,7 +995,7 @@ function drainWorldEvents() {
       case 'thiefGone': toast('它带着钱袋跑了……', '#d9b8ff', null, 1800); break;
       // 地图第一次出手：讲一句怎么看先兆、怎么反制；正在教地图交互时先排队，教完再讲（一次只教一件事）
       case 'lurkTeach': if (G.mapHint) G.lurkQ = e; else { banner(e.name, e.hint, 2.6, hexA(e.color, 0.75), 3); G.lurkOn = { e, until: w.t + 2.6 }; } break;
-      case 'bossLand': { const S = w.stage, B = w.boss, defT = B && B.chaosDef ? '护盾 ↔ 装甲' : B && B.def === 'armor' ? '装甲 · 动能伤害打它更疼' : B && B.def === 'shield' ? '护盾 · 能量伤害打它更疼' : ''; banner(S.bossName, w.stageId === '5-3' ? `第一段 · 布道 · ${defT}` : S.boss === 'clock' ? `第一乐章 · 指针卡住 · ${defT}` : `先打碎正面三块护甲 · ${defT}`, 2, 'rgba(255,90,110,.7)', 4); Sound.setMode('boss1'); break; }
+      case 'bossLand': { const S = w.stage, B = w.boss, defT = B && B.chaosDef ? '护盾 ↔ 装甲' : B && B.def === 'armor' ? '装甲 · 动能伤害打它更疼' : B && B.def === 'shield' ? '护盾 · 能量伤害打它更疼' : ''; banner(S.bossName, w.stageId === '5-3' ? `第一段 · 布道 · ${defT}` : B && B.introSub ? `${B.introSub} · ${defT}` : S.boss === 'clock' ? `第一乐章 · 指针卡住 · ${defT}` : `先打碎正面三块护甲 · ${defT}`, 2, 'rgba(255,90,110,.7)', 4); Sound.setMode('boss1'); break; }
       case 'bossResponse': banner(e.title, e.sub, 1.6, 'rgba(255,215,106,.8)', 3); break;
       case 'phase': banner(e.name, e.captain ? '攻击更密，还带着散兵' : e.n === 2 ? '攻击越来越快，安全区在缩小' : '弹幕会逆行，消失的弹幕会重演', 1.8, null, 3); break;
       case 'flag': banner('', e.text, e.dur || 1, null, 1); break;

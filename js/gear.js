@@ -143,11 +143,11 @@ const UNIQUE_ORDER = Object.keys(UNIQUES);
 /* 掉落（§6.7）：每件先抽位，再抽底子；品质概率按来源 */
 const DROP_Q = {
   fodder: { white: 70, blue: 25, yellow: 4, green: 0.7, gold: 0.3 },
-  elite: { white: 45, blue: 40, yellow: 11, green: 2.8, gold: 1.2 },
-  boss: { white: 20, blue: 45, yellow: 25, green: 7, gold: 3 },
+  elite: { white: 50, blue: 40, yellow: 7, green: 2.2, gold: 0.8 },
+  boss: { white: 25, blue: 50, yellow: 17, green: 5.5, gold: 2.5 },
   gamble: { white: 0, blue: 85, yellow: 13, green: 1.5, gold: 0.5 },
 };
-const DROP_RATE = { fodder: 0.003, elite: 0.5, lurk: 0.15 };
+const DROP_RATE = { fodder: 0.0015, elite: 0.4, lurk: 0.1, thief: 2 }; // 连续玩量过（§19）：打穿一张图 15–20 件
 const PITY = { rareRuns: 3, uniFirst: 5, uniRuns: 12 };
 const MAP_COUNT = 5;
 const ilvlOf = (mapN, stageN, boss) => Math.min(MAX_ILVL, 1 + 6 * (mapN - 1) + 2 * (stageN - 1) + (boss ? 1 : 0));

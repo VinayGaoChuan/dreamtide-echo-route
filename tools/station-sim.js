@@ -70,5 +70,18 @@ const r9 = run(`const R1 = Gear.rng(42), R2 = Gear.rng(42); const a = Gear.make(
   const m = Station.ensure(freshMeta()); m.gear.eq.gun = a; const s1 = JSON.stringify(compactStats(planeStats(m, 'moon'))); m.gear.eq.gun = b; const s2 = JSON.stringify(compactStats(planeStats(m, 'moon'))); return s1 === s2 && JSON.stringify(a.aff) === JSON.stringify(b.aff);`);
 ok(r9, '同一个种子掉出同一件装备，算出同一份飞船属性');
 
+// 11. 送装备（§13）：蓝黄绿能送、暗金和改过的不能；送出先放进待送；对方收到记一次（同一份不收两次）；看到对方的回执才算送完；对方不在时可以取消拿回
+const r10 = run(`const A = Station.ensure(freshMeta()), B = Station.ensure(freshMeta()), R = Gear.rng(77);
+  const blue = Gear.make({ rnd: R, ilvl: 5, q: 'blue' }), gold = Gear.make({ rnd: R, ilvl: 5, q: 'gold', uni: 'oldScav' }), rew = Object.assign(Gear.make({ rnd: R, ilvl: 5, q: 'yellow' }), { bound: true }), y2 = Gear.make({ rnd: R, ilvl: 5, q: 'yellow' });
+  for (const it of [blue, gold, rew, y2]) Station.addItem(A, it, true);
+  const g = Station.giftSend(A, blue.uid, 'peerB', 'B'), noGold = Station.giftSend(A, gold.uid, 'peerB', 'B'), noRew = Station.giftSend(A, rew.uid, 'peerB', 'B');
+  const got1 = !!Station.giftReceive(B, g, 'A'), got2 = !!Station.giftReceive(B, g, 'A'), inB = B.gear.stash.length;
+  const done = Station.giftResolve(A, 'peerB', B.gear.giftsGot);
+  const g2 = Station.giftSend(A, y2.uid, 'peerC', 'C'), back = Station.giftCancel(A, g2.id);
+  return { sent: !!g && !A.gear.stash.some((x) => x.uid === blue.uid), noGold: !noGold, noRew: !noRew, got1, got2, inB, done, out: A.gear.outbox.length, back: back && A.gear.stash.some((x) => x.uid === y2.uid) };`);
+ok(r10.sent && r10.noGold && r10.noRew, '送装备：蓝的能送（离开仓库进待送）；暗金和改过的不能送');
+ok(r10.got1 && !r10.got2 && r10.inB === 1, '对方收到一件；同一份不会收两次');
+ok(r10.done === 1 && r10.out === 0 && r10.back, '看到回执才算送完；对方不在时取消，东西回到自己仓库');
+
 console.log(fails ? `站的规则自测：${fails} 条不对` : '站的规则自测通过');
 process.exitCode = fails ? 1 : 0;

@@ -13,6 +13,7 @@ const Station = {
     m.mats = Object.assign({ scrap: 0, shard: 0, core: 0 }, m.mats || {});
     m.gear = m.gear || { eq: {}, stash: [], inbox: [], auto: { white: false, blue: false } };
     m.gear.eq = m.gear.eq || {}; m.gear.stash = m.gear.stash || []; m.gear.inbox = m.gear.inbox || []; m.gear.auto = Object.assign({ white: false, blue: false }, m.gear.auto || {});
+    m.gear.outbox = m.gear.outbox || []; m.gear.giftsGot = m.gear.giftsGot || []; // 送装备（§13）：送出没确认的、收过的编号
     m.fac = Object.assign({ stash: 1, insure: 1, shop: 1, salvage: 1, cube: 1, black: 1 }, m.fac || {});
     m.unlock = Object.assign({ equip: true, starmap: true }, m.unlock || {});
     m.maps = m.maps || { reached: { '1-1': true }, cleared: {}, firstBoss: {}, sel: 1, start: null, kills: {} };
@@ -58,6 +59,20 @@ const Station = {
   costText(cost) { const n = { c: '信用点', scrap: '废料', shard: '晶片', core: '晶核' }; return Object.keys(cost || {}).map((k) => `${cost[k]} ${n[k]}`).join(' + '); },
   missing(m, cost) { const n = { c: '信用点', scrap: '废料', shard: '晶片', core: '晶核' }, L = []; for (const k in cost || {}) { const have = k === 'c' ? m.credits : m.mats[k] || 0; if (have < cost[k]) L.push(`${n[k]}还差 ${cost[k] - have}`); } return L.join('，'); },
   /* 局里的装备对象带着 safe / stage 标记：存进存档前去掉（复制一份，不改局里那份） */
+  /* ---------- 送装备（§13，联机房间里）：蓝黄绿能送，暗金和改造台改过的不能；先进待送，对方收到的回执回来才算送完 ---------- */
+  giftable(it) { return !!it && !it.lock && !it.bound && !it.uni && (it.q === 'blue' || it.q === 'yellow' || it.q === 'green'); },
+  giftSend(m, uid, to, toName) {
+    const f = this.find(m, uid); if (!f || f.where === 'eq' || !this.giftable(f.it) || m.gear.outbox.some((g) => g.to === to)) return null;
+    this.remove(m, uid); const g = { id: `${uid}-${m.gear.outbox.length}-${Math.floor(Math.random() * 1e6)}`, to, toName: toName || '', item: this.clean(f.it) };
+    m.gear.outbox.push(g); this.flushInbox(m); return g;
+  },
+  giftReceive(m, g, fromName) {
+    if (!g || !g.item || m.gear.giftsGot.includes(g.id) || !this.giftable(g.item) || !GEAR_KINDS[g.item.kind] || !(g.item.ilvl >= 1 && g.item.ilvl <= MAX_ILVL)) return null; // 只收规则允许送的东西
+    m.gear.giftsGot.push(g.id); while (m.gear.giftsGot.length > 40) m.gear.giftsGot.shift();
+    const it = Object.assign(this.clean(g.item), { from: fromName || '' }); this.addItem(m, it, true); return it;
+  },
+  giftResolve(m, to, acks) { const n = m.gear.outbox.length; m.gear.outbox = m.gear.outbox.filter((g) => !(g.to === to && (acks || []).includes(g.id))); return n - m.gear.outbox.length; },
+  giftCancel(m, id) { const i = m.gear.outbox.findIndex((g) => g.id === id); if (i < 0) return false; const g = m.gear.outbox.splice(i, 1)[0]; this.addItem(m, g.item, true); return true; },
   clean(it) { const o = Object.assign({}, it); delete o.safe; delete o.stage; return o; },
   /* 首领倒下、货舱送回家：当场写进存档（之后掉线、刷新、退出都不会丢） */
   shipHome(m, items, shipped) { for (const it of items) { if (shipped.has(it.uid)) continue; shipped.add(it.uid); this.addItem(m, this.clean(it)); } if (items.length) m.station.gearHome = true; },
