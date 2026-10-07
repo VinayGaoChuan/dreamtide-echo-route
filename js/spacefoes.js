@@ -196,3 +196,19 @@ EnemyArt.thief = (g, e, t) => {
   if (on) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, -50, 18, GLOW.gold, 0.7); g.globalCompositeOperation = 'source-over'; g.fillStyle = '#ffe38a'; g.strokeStyle = PAL.ink; g.lineWidth = 3; g.font = 'bold 22px "Baloo 2", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.strokeText('$', 0, -50 + bob); g.fillText('$', 0, -50 + bob); }
   g.restore();
 };
+
+/* 七族的小配件（§9.2）：形状不变，各族挂一样自己的东西——矿业的钻头、商会的金币、霜晶的冰刺、群翼的翅膀、电弧的天线、马戏的派对帽、熔核的铆钉甲 */
+const RACE_ACC = {
+  drill: (g, r, t, P) => { g.save(); g.translate(-r - 2, 2); g.fillStyle = '#9aa0b4'; g.strokeStyle = PAL.ink; g.lineWidth = 1.6; g.beginPath(); g.moveTo(4, -6); g.lineTo(-10, 0); g.lineTo(4, 6); g.closePath(); g.fill(); g.stroke(); g.strokeStyle = '#4c4a66'; g.lineWidth = 1.2; const k = (t * 12) % 4; for (let x = -6 + k; x < 4; x += 4) { g.beginPath(); g.moveTo(x, -4); g.lineTo(x + 2, 4); g.stroke(); } g.restore(); },
+  ledger: (g, r, t, P) => { const x = r * 0.45, y = r * 0.5; g.fillStyle = '#ffd76a'; g.strokeStyle = PAL.ink; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, 6, 0, TAU); g.fill(); g.stroke(); g.fillStyle = '#8a5a1a'; g.font = 'bold 9px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('$', x, y + 0.5); },
+  frost: (g, r, t, P) => { g.fillStyle = 'rgba(230,250,255,0.95)'; g.strokeStyle = '#4a7ab0'; g.lineWidth = 1.3; for (const [dx, h] of [[-6, 9], [0, 13], [6, 9]]) { g.beginPath(); g.moveTo(dx - 3, -r + 3); g.lineTo(dx, -r - h + 3); g.lineTo(dx + 3, -r + 3); g.closePath(); g.fill(); g.stroke(); } },
+  hive: (g, r, t, P) => { const f = Math.sin(t * 30) * 0.3; g.fillStyle = 'rgba(200,255,240,0.55)'; g.strokeStyle = 'rgba(40,120,100,0.8)'; g.lineWidth = 1.2; for (const s of [-1, 1]) { g.save(); g.translate(4, -r + 4); g.rotate(s * (0.5 + f)); g.beginPath(); g.ellipse(s * 4, -6, 5, 9, 0, 0, TAU); g.fill(); g.stroke(); g.restore(); } },
+  arc: (g, r, t, P) => { g.strokeStyle = '#3a3f5a'; g.lineWidth = 2; g.beginPath(); g.moveTo(2, -r + 2); g.lineTo(5, -r - 9); g.stroke(); const on = Math.sin(t * 14) > 0; g.fillStyle = on ? '#e8fdff' : '#3ef0ff'; g.beginPath(); g.arc(5, -r - 11, 3, 0, TAU); g.fill(); if (on) { g.strokeStyle = 'rgba(62,240,255,0.9)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(5, -r - 11); g.lineTo(11, -r - 15); g.lineTo(8, -r - 18); g.stroke(); } },
+  neon: (g, r, t, P) => { g.save(); g.translate(2, -r + 2); g.rotate(-0.25); g.fillStyle = '#ff6fe0'; g.strokeStyle = PAL.ink; g.lineWidth = 1.4; g.beginPath(); g.moveTo(-6, 0); g.lineTo(0, -14); g.lineTo(6, 0); g.closePath(); g.fill(); g.stroke(); g.fillStyle = '#fff3fb'; g.fillRect(-4, -5, 8, 2); g.fillStyle = '#ffe38a'; g.beginPath(); g.arc(0, -15, 2.6, 0, TAU); g.fill(); g.restore(); },
+  forge: (g, r, t, P) => { g.fillStyle = '#7a7f92'; g.strokeStyle = PAL.ink; g.lineWidth = 1.5; g.beginPath(); g.roundRect ? g.roundRect(-r - 3, -7, 8, 14, 3) : g.rect(-r - 3, -7, 8, 14); g.fill(); g.stroke(); g.fillStyle = '#ff9a40'; for (const y of [-3, 3]) { g.beginPath(); g.arc(-r + 1, y, 1.4, 0, TAU); g.fill(); } },
+};
+const RACE_ACC_TYPES = { jelly: 1, moth: 1, boat: 1, tick: 1, star: 1, beacon: 1, jellyE: 1.3, tickE: 1.35, starE: 1.35, armor: 1 };
+function raceAccessory(g, e, t) {
+  const f = RACE_ACC[e.race], k = RACE_ACC_TYPES[e.type]; if (!f || !k) return;
+  g.save(); if (k !== 1) g.scale(k, k); f(g, (e.r || 20) / k * (k !== 1 ? 0.85 : 0.85), t, racePal(e)); g.restore();
+}

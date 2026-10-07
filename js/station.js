@@ -75,7 +75,7 @@ const Station = {
   giftCancel(m, id) { const i = m.gear.outbox.findIndex((g) => g.id === id); if (i < 0) return false; const g = m.gear.outbox.splice(i, 1)[0]; this.addItem(m, g.item, true); return true; },
   clean(it) { const o = Object.assign({}, it); delete o.safe; delete o.stage; return o; },
   /* 首领倒下、货舱送回家：当场写进存档（之后掉线、刷新、退出都不会丢） */
-  shipHome(m, items, shipped) { for (const it of items) { if (shipped.has(it.uid)) continue; shipped.add(it.uid); this.addItem(m, this.clean(it)); } if (items.length) m.station.gearHome = true; },
+  shipHome(m, items, shipped) { for (const it of items) { if (shipped.has(it.uid)) continue; shipped.add(it.uid); this.addItem(m, Object.assign(this.clean(it), { fresh: true })); } if (items.length) m.station.gearHome = true; }, // fresh：带回来还没看过（仓库里一个“新”字）
   /* ---------- 换装 ---------- */
   slotFor(m, it) { if (it.kind !== 'chip') return it.kind; return !m.gear.eq.chip1 ? 'chip1' : !m.gear.eq.chip2 ? 'chip2' : 'chip1'; },
   canEquip(m, it) { return it.req <= m.pilot.lv; },
@@ -191,7 +191,7 @@ const Station = {
     const kept = [...safe, ...keepAlways, ...insured];
     const stored = []; let autoGot = {};
     const shipped = res.shipped || new Set();
-    for (const it0 of kept) { const it = this.clean(it0); if (shipped.has(it.uid)) { stored.push(it); continue; } const r = this.addItem(m, it); if (r && r.auto) for (const k in r.got) autoGot[k] = (autoGot[k] || 0) + r.got[k]; else stored.push(it); }
+    for (const it0 of kept) { const it = Object.assign(this.clean(it0), { fresh: true }); if (shipped.has(it.uid)) { stored.push(it); continue; } const r = this.addItem(m, it); if (r && r.auto) for (const k in r.got) autoGot[k] = (autoGot[k] || 0) + r.got[k]; else stored.push(it); }
     if (kept.length) m.station.gearHome = true;
     // 信用点、材料、经验：全部带回（输了也有，走得越远越多）
     const credK = 1 + ((res.creditK || 0)), bossC = done.reduce((a, id) => a + 60 * (1 + 0.6 * (mapOfStage(id) - 1)) * (m.maps.firstBoss[id] ? 1 : 2), 0);

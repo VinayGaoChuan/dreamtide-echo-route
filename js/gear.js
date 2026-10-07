@@ -147,7 +147,7 @@ const DROP_Q = {
   boss: { white: 25, blue: 50, yellow: 17, green: 5.5, gold: 2.5 },
   gamble: { white: 0, blue: 85, yellow: 13, green: 1.5, gold: 0.5 },
 };
-const DROP_RATE = { fodder: 0.0015, elite: 0.4, lurk: 0.1, thief: 2 }; // 连续玩量过（§19）：打穿一张图 15–20 件
+const DROP_RATE = { fodder: 0.0012, elite: 0.4, lurk: 0.1, thief: 2 }; // 连续玩量过（§19）：打穿一张图 15–20 件
 const PITY = { rareRuns: 3, uniFirst: 5, uniRuns: 12 };
 const MAP_COUNT = 5;
 const ilvlOf = (mapN, stageN, boss) => Math.min(MAX_ILVL, 1 + 6 * (mapN - 1) + 2 * (stageN - 1) + (boss ? 1 : 0));

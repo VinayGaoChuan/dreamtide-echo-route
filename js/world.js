@@ -1444,7 +1444,7 @@ class World {
     if (level === 1) {
       this.part('flash', x, y, 0, 0, 0.18, Math.max(26, r * 1.6), C[0]);
       for (let i = 0; i < (low ? 4 : 9); i++) this.part(i % 2 ? 'shard' : 'petal', x, y, rand(-240, 240), rand(-260, 140), 0.6, rand(4, 7), pick(C));
-      this.part('ring', x, y, 0, 0, 0.25, Math.max(34, r * 1.8), 'rgba(255,255,255,0.8)');
+      this.part('ring', x, y, 0, 0, 0.2, Math.max(30, r * 1.5), 'rgba(255,255,255,0.35)'); // 小怪的爆圈淡一点：怪潮里不要满屏都是圈（评审 r2：分不清哪个圈伤人）
     } else if (level === 2) {
       this.part('flash', x, y, 0, 0, 0.22, r * 0.9, C[0]);
       this.part('ring', x, y, 0, 0, 0.35, r, 'rgba(255,255,255,0.9)');
@@ -1644,6 +1644,7 @@ class World {
     if (k > 0) g.scale(1 - 0.14 * k, 1 + 0.1 * k);
     if (e.type === 'mirror') { g.globalAlpha = 0.8; g.scale(0.3, 0.3); drawClockBoss(g, { x: 0, y: 0, phase: 2, minA: t * 2, hourA: t * 0.3, weakT: 0, mouth: 0, lookA: Math.PI, shield: 0, hitFlash: e.hitFlash }, t + e.seed); g.restore(); return; }
     (EnemyArt[e.type] || EnemyArt.jelly)(g, e, t + e.seed);
+    if (e.race && typeof raceAccessory === 'function') raceAccessory(g, e, t + e.seed); // 各族的小配件（spacefoes.js）
     if (e.hitFlash > 0) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, e.r * 1.25, GLOW.white, e.hitFlash > 0.75 ? 0.95 : e.hitFlash * 0.45); g.globalCompositeOperation = 'source-over'; } // 前两帧整只发白，再淡出
     if (e.frozen > 0) { g.fillStyle = 'rgba(200,240,255,0.45)'; g.strokeStyle = 'rgba(232,251,255,0.9)'; g.lineWidth = 2; g.beginPath(); for (let i = 0; i < 6; i++) { const a = (i * TAU) / 6 + 0.3; g.lineTo(Math.cos(a) * (e.r + 6), Math.sin(a) * (e.r + 6)); } g.closePath(); g.fill(); g.stroke(); }
     if (e.stun > 0) { g.strokeStyle = '#bfe9ff'; g.lineWidth = 1.6; for (let i = 0; i < 3; i++) { const a = t * 8 + i * 2; g.beginPath(); g.moveTo(Math.cos(a) * 12, -e.r - 6); g.lineTo(Math.cos(a) * 12 + 4, -e.r - 12); g.stroke(); } }
@@ -1856,10 +1857,11 @@ class World {
     if (this.state === 'victory' && this.victoryT !== undefined) {
       const s = Ease.outBack(clamp(this.victoryT / 0.6, 0, 1)) * 0.62; // 放在下半屏、小一号：上方是首领的战利品喷泉（§6.8），不能挡住
       g.save(); g.translate(W / 2, LH * 0.62); g.scale(s, s); g.rotate(Math.sin(t * 2) * 0.05);
-      g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 220, GLOW.gold, 0.8); g.globalCompositeOperation = 'source-over';
-      drawIcon(g, 'star', 0, 0, 200, '#ffd76a', '#2d2358');
+      g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 70, 260, GLOW.gold, 0.7); // 不用通用星星（评审 r2）：一圈转动的光芒 + 首领的名字
+      for (let i = 0; i < 14; i++) { const a = (i / 14) * TAU + t * 0.4; g.fillStyle = 'rgba(255,214,140,0.18)'; g.beginPath(); g.moveTo(0, 70); g.lineTo(Math.cos(a - 0.06) * 420, 70 + Math.sin(a - 0.06) * 420); g.lineTo(Math.cos(a + 0.06) * 420, 70 + Math.sin(a + 0.06) * 420); g.closePath(); g.fill(); }
+      g.globalCompositeOperation = 'source-over';
       const vt = this.vs ? '对抗结束' : `击败${this.stage.bossName}！`;
-      g.font = '400 54px "ZCOOL KuaiLe", sans-serif'; g.textAlign = 'center'; g.lineWidth = 8; g.strokeStyle = '#2d2358'; g.strokeText(vt, 0, 150); g.fillStyle = '#fff6c8'; g.fillText(vt, 0, 150);
+      g.font = '400 84px "ZCOOL KuaiLe", sans-serif'; g.textAlign = 'center'; g.lineWidth = 12; g.strokeStyle = '#2d2358'; g.strokeText(vt, 0, 100); g.fillStyle = '#fff6c8'; g.fillText(vt, 0, 100);
       g.restore();
     }
     if (!o.simpleBg && !this.low) {

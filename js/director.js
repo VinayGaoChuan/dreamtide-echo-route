@@ -271,7 +271,7 @@ Object.assign(World.prototype, {
         // 后面的目标里，混几条会开火的突击艇：割草的同时要留神（出现 0.5 秒后才开火）
         if (this.beatIdx >= 3 && P.col >= 2 && P.row % 2 === 0 && (P.col + P.row) % 4 === 0 && stars++ < 4) this.addEnemy('star', { x: P.x, y: P.y, path: 'sine', amp: 10, freq: 1.6, phase: srand(TAU), vx: -110, swell: true });
         else this.addEnemy((P.col + P.row) % 3 ? 'jelly' : 'moth', { x: P.x, y: P.y, path: 'sine', amp: 12, freq: 2.2, phase: srand(TAU), vx: -120 - srand(0, 30), fodder: true, swell: true });
-        if (this.mine()) this.part('ring', P.x, P.y, 0, 0, 0.3, 30, 'rgba(159,227,240,0.85)');
+        if (this.mine()) this.part('flash', P.x, P.y, 0, 0, 0.18, 26, 'rgba(159,227,240,0.6)'); // 跳进来的那一下：一闪，不留圈
       });
     } });
     Sound.sfx('wind', { pan: 0.8 }); this.noteSide('front');

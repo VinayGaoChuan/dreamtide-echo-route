@@ -572,7 +572,7 @@ function showEnd(E) {
       ${deathHtml(r)}${bossDef}
       <div class="end-grid3">
         <div class="panel end-card end-loot"><div class="label">① 战利品 · 带回 ${kept.length} 件</div><div class="loot-list">${loot}</div></div>
-        <div class="panel end-card"><div class="label">② 成长</div>${grow}</div>
+        <div class="panel end-card" style="position:relative"><div class="label">② 成长</div>${grow}${O.mapClear && MAPS[O.mapClear + 1] ? `<div class="end-stamp">地图 ${O.mapClear + 1} 开放</div>` : ''}</div>
         <div class="panel end-card"><div class="label">③ 本局构筑 ${r.stream ? `· <span style="color:var(--lamp2)">${esc(r.stream)}</span>` : ''}</div><div class="row wrap">${buildChips(r)}</div>
           <div class="advice">${planHtml(E.lure.plan)}<small class="dim-text">局内能力每局重新收集：下一局从第一步开始</small></div></div>
       </div>
@@ -913,7 +913,8 @@ function updateHud(force) {
   if (L.offering !== offering) { L.offering = offering; $('#stage').classList.toggle('offering', offering); } // 升级仪式时淡化横幅和轻提示
   const hk = `${h.hp}/${h.maxHp}`;
   // 生命：第一次受伤飞进来，之后一直在（要一直盯着）；没受过伤时回血只亮一下
-  if (L.hp !== hk) { if (L.hp !== undefined) { if (h.hp < h.maxHp) hudPin('hearts', true); else hudFly('hearts', 2); } L.hp = hk; let s = ''; for (let i = 0; i < h.maxHp; i++) s += `<svg class="${i < h.hp ? '' : 'off'}" aria-hidden="true"><use href="#i-heart"/></svg>`; R.hearts.innerHTML = s; R.hearts.setAttribute('aria-label', `生命 ${h.hp}/${h.maxHp}`); }
+  if (L.hp !== hk) { if (L.hp !== undefined) { if (h.hp < h.maxHp) hudPin('hearts', true); else hudFly('hearts', 2); } L.hp = hk; const life = Math.max(0, Math.round(h.hp * 10)), max = Math.round(h.maxHp * 10), pc = max ? Math.round((life / max) * 100) : 0; // 生命是数值（1 心 = 10，§4.2）：一条血条 + 数字，装备加多了也不会排出一长串心
+    R.hearts.innerHTML = `<svg aria-hidden="true"><use href="#i-heart"/></svg><span class="lifebar ${pc <= 30 ? 'low' : ''}"><i style="width:${pc}%"></i></span><b class="num">${life}</b><small>/${max}</small>`; R.hearts.setAttribute('aria-label', `生命 ${life}/${max}`); }
   setText(R.dust, 'dust', String(h.dust));
   setText(R.wood, 'wood', String(Math.floor((h.wood || 0) / 2))); // 和结算同一个折法（station.js settle）
   if (L.hg !== h.homeGoal) { L.hg = h.homeGoal; R.hgoal.hidden = !h.homeGoal; R.hgoal.textContent = h.homeGoal || ''; } // HUD 只追踪家园的当前目标
@@ -1024,7 +1025,7 @@ function drainWorldEvents() {
       case 'streak': if (e.n >= 100 && !(G.streakToastAt > performance.now() - 20000)) { G.streakToastAt = performance.now(); toast(`${e.n} 连杀！金色强化出现`, '#ffd76a', null, 1600); } break; // 连杀常有（鱼群潮）：只提 100 连杀，20 秒内不重复；数字右侧一直显示
       case 'elite': toast(e.elite === 'cmdr' ? '带队精英出现 · 等它举旗再打旗头水晶' : '精英出现 · 击败它能充不少大招', '#ff9d8c', 'n-crown'); Sound.setBoost('tension', 0.3); setTimeout(() => Sound.setBoost('tension', 0), 12000); break;
       case 'boss': Sound.sfx('alarm'); break; // 入场蓄势：警报，名牌等它落地再出
-      case 'raceFoe': banner(e.name, e.hint, 2.4, hexA(e.color, 0.8), 3); break; // 七族招牌敌人第一次出现：一句怎么对付（§9.3）
+      case 'raceFoe': toast(`${e.name} · ${e.hint}`, e.color, null, 3600); break; // 七族招牌敌人第一次出现：一句怎么对付（§9.3）；轻提示，不挡屏幕中间的怪群（评审 r2）
       case 'relay': G.relayPending = true; break; // 混沌祭司倒下：这一局结算前放结局
       case 'thief': toast('收账小偷！追上打倒它 · 钱袋里有装备', '#d9b8ff', null, 2600); break; // §9.3：一关一次的事，不占屏幕中间
       case 'thiefGone': toast('它带着钱袋跑了……', '#d9b8ff', null, 1800); break;

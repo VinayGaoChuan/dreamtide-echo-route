@@ -274,7 +274,12 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .tm-pad .stick b{position:absolute;left:28%;top:28%;width:44%;height:44%;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff,#bfb3ff);animation:tmStick 2.4s ease-in-out infinite}
 @keyframes tmStick{0%,100%{transform:none}20%{transform:translate(45%,0)}45%{transform:translate(0,-45%)}70%{transform:translate(-45%,0)}}
 .hud-tl{position:absolute;top:calc(10px*var(--u));left:calc(16px*var(--u));display:flex;flex-direction:column;gap:calc(6px*var(--u))}
-.hearts{display:flex;gap:3px}
+.hearts{display:flex;gap:6px;align-items:center;font-family:var(--f-display);color:#fff;text-shadow:0 2px 0 #2d2358}
+.hearts .lifebar{position:relative;width:max(120px,calc(190px*var(--u)));height:max(10px,calc(14px*var(--u)));border-radius:8px;background:rgba(20,14,40,.8);box-shadow:inset 0 0 0 2px #2d2358;overflow:hidden}
+.hearts .lifebar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(#ff8a9a,#e8526a);border-radius:8px;transition:width .25s}
+.hearts .lifebar.low i{background:linear-gradient(#ffb36a,#ff5a4a);animation:lowPulse .6s ease-in-out infinite alternate}
+@keyframes lowPulse{to{filter:brightness(1.5)}}
+.hearts b{font-size:var(--fs-m)}.hearts small{font-size:var(--fs-xs);color:#d8cff5}
 .hearts svg{width:max(20px,calc(28px*var(--u)));height:max(20px,calc(28px*var(--u)));fill:var(--coral);filter:drop-shadow(0 2px 0 #2d2358)}
 .hearts svg.off{fill:rgba(255,255,255,.15);filter:none}
 .slots{display:flex;gap:calc(6px*var(--u))}
@@ -322,6 +327,9 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .relay-txt{position:absolute;left:50%;top:80%;transform:translate(-50%,-50%);font-family:var(--f-display);font-size:var(--fs-l);color:#e8dcff;text-shadow:0 0 18px rgba(185,138,255,.6);white-space:nowrap;padding:6px 18px;border-radius:12px;background:rgba(5,3,12,.55)}
 .relay-txt:empty{display:none}
 .relay-txt.end{font-size:var(--fs-xl);color:#ffd27a}.relay-skip{position:absolute;right:24px;bottom:18px}
+.gcell .new{position:absolute;left:2px;top:2px;font-style:normal;font-size:10px;line-height:1;padding:2px 4px;border-radius:6px;background:#ff6a7a;color:#fff;font-weight:700;pointer-events:none}
+.end-stamp{position:absolute;right:-10px;top:-14px;transform:rotate(-8deg);padding:6px 14px;border:3px solid #9ff2c8;border-radius:10px;color:#9ff2c8;font-family:var(--f-display);font-size:var(--fs-m);background:rgba(10,30,24,.85);box-shadow:0 0 18px rgba(159,242,200,.45);animation:stampIn .5s cubic-bezier(.2,1.6,.4,1) .9s both}
+@keyframes stampIn{from{transform:rotate(-8deg) scale(2.4);opacity:0}to{transform:rotate(-8deg) scale(1);opacity:1}}
 .tut-layer{position:fixed;inset:0;z-index:60;pointer-events:none}
 .tut-block{position:fixed;pointer-events:auto;background:transparent}
 .tut-hole{position:fixed;border-radius:14px;box-shadow:0 0 0 200vmax rgba(6,4,18,.68),0 0 0 3px #ffd27a,0 0 22px 6px rgba(255,210,122,.55);pointer-events:none;animation:tutPulse 1.2s ease-in-out infinite}

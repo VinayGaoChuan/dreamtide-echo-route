@@ -68,6 +68,9 @@ class SpaceScene {
     (SPACE_FAR[th.far] || SPACE_FAR.wreck)(f, TW, H, M, mulberry32(seed + 1), lights);
     const mid = makeCanvas(TW, H), m = mid.getContext('2d'), mlights = [];
     (SPACE_MID[th.mid] || SPACE_MID.debris)(m, TW, H, M, mulberry32(seed + 2), mlights);
+    // 剪影带一点这张图的光（评审 / L1：背景是单色剪影）：只给已经画了东西的地方上色，越往上越亮
+    const lit = (cv, y0, y1, c, a) => { const x = cv.getContext('2d'); x.save(); x.globalCompositeOperation = 'source-atop'; const gr = x.createLinearGradient(0, y0, 0, y1); gr.addColorStop(0, hexA(c, a)); gr.addColorStop(1, hexA(c, 0)); x.fillStyle = gr; x.fillRect(0, y0, TW, y1 - y0); x.restore(); };
+    lit(far, 0, H, M.light, 0.2); lit(mid, 360, H, M.rim, 0.32);
     return { neb, far, mid, lights, mlights };
   }
   update(dt) {

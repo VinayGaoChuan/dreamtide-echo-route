@@ -74,28 +74,36 @@ class StationScene {
 
 /* ---------- 装备的小图标：位的剪影 + 品质色的框（套装用族色的边） ---------- */
 function paintGearIcon(c, it, kind) {
+  // 装备的小图标（评审：纯色几何像占位）：金属的部件 + 品质色的饰条和光 + 族色（套装）/ 金边（暗金）；形状按位和底子
   const g = c.getContext('2d'), s = c.width; g.clearRect(0, 0, s, s);
-  const k = it ? it.kind : kind, col = it ? QUALS[it.q].color : 'rgba(180,170,220,0.35)', race = it && it.set ? RACES[SETS[it.set].race].color : null;
-  g.save(); g.scale(s / 64, s / 64);
-  g.fillStyle = it ? 'rgba(20,16,34,0.9)' : 'rgba(20,16,34,0.5)'; g.strokeStyle = race || col; g.lineWidth = it ? 3 : 2;
+  const k = it ? it.kind : kind, col = it ? QUALS[it.q].color : 'rgba(180,170,220,0.35)', race = it && it.set ? RACES[SETS[it.set].race].color : null, uni = it && it.q === 'gold';
+  g.save(); g.scale(s / 64, s / 64); g.lineJoin = 'round'; g.lineCap = 'round';
+  const bg = g.createRadialGradient(32, 26, 4, 32, 32, 40); bg.addColorStop(0, it ? hexA(col.length === 7 ? col : '#e8e8e8', 0.22) : 'rgba(40,32,64,0.4)'); bg.addColorStop(1, it ? 'rgba(16,12,28,0.95)' : 'rgba(20,16,34,0.5)');
+  g.fillStyle = bg; g.strokeStyle = race || col; g.lineWidth = it ? 3 : 2;
   g.beginPath(); g.roundRect ? g.roundRect(3, 3, 58, 58, 10) : g.rect(3, 3, 58, 58); g.fill(); g.stroke();
-  if (it && (it.q === 'gold' || it.q === 'green')) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 32, 32, 34, hexA(col, 0.8), 0.3); g.globalCompositeOperation = 'source-over'; }
-  g.translate(32, 32); g.fillStyle = it ? col : 'rgba(180,170,220,0.4)'; g.strokeStyle = '#120e1e'; g.lineWidth = 2;
+  if (uni) { g.strokeStyle = 'rgba(255,230,160,0.8)'; g.lineWidth = 1; g.beginPath(); g.roundRect ? g.roundRect(7, 7, 50, 50, 7) : g.rect(7, 7, 50, 50); g.stroke(); for (const [x, y] of [[8, 8], [56, 8], [8, 56], [56, 56]]) { g.fillStyle = '#ffd76a'; g.beginPath(); g.arc(x, y, 2.2, 0, TAU); g.fill(); } }
+  if (it && (uni || it.q === 'green')) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 32, 32, 34, hexA(col, 0.8), 0.3); g.globalCompositeOperation = 'source-over'; }
+  g.translate(32, 32);
+  const metal = (y0, y1) => { const m = g.createLinearGradient(0, y0, 0, y1); m.addColorStop(0, it ? '#d4d8e6' : 'rgba(200,190,230,0.45)'); m.addColorStop(0.55, it ? '#8a90a8' : 'rgba(150,140,190,0.4)'); m.addColorStop(1, it ? '#4c4a66' : 'rgba(90,80,130,0.4)'); return m; };
+  const acc = it ? col : 'rgba(180,170,220,0.35)', ink = '#120e1e';
+  const box = (x, y, w, h, r) => { g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, r || 3) : g.rect(x, y, w, h); };
+  g.strokeStyle = ink; g.lineWidth = 2;
   const base = it ? it.base : null;
   switch (k) {
     case 'gun':
-      if (base === 'scatter') { g.fillRect(-18, -6, 16, 12); for (const a of [-0.3, 0, 0.3]) { g.save(); g.rotate(a); g.fillRect(-2, -3, 22, 6); g.restore(); } }
-      else if (base === 'beam') { g.fillRect(-20, -7, 14, 14); g.fillRect(-6, -4, 28, 8); g.fillStyle = '#fff'; g.fillRect(16, -2, 6, 4); }
-      else if (base === 'missile') { g.fillRect(-18, -12, 22, 24); g.fillStyle = '#120e1e'; for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) { g.beginPath(); g.arc(-12 + i * 7, -5 + j * 10, 2.6, 0, TAU); g.fill(); } }
-      else { g.fillRect(-20, -6, 18, 12); g.fillRect(-2, -3, 24, 6); g.fillRect(-14, 6, 6, 8); }
+      if (base === 'scatter') { g.fillStyle = metal(-8, 8); box(-20, -8, 18, 16, 4); g.fill(); g.stroke(); for (const a of [-0.32, 0, 0.32]) { g.save(); g.rotate(a); g.fillStyle = metal(-3, 3); box(-2, -3.5, 24, 7, 2); g.fill(); g.stroke(); g.restore(); } g.fillStyle = acc; g.beginPath(); g.arc(-11, 0, 4, 0, TAU); g.fill(); }
+      else if (base === 'beam') { g.fillStyle = metal(-8, 8); box(-22, -8, 14, 16, 4); g.fill(); g.stroke(); g.fillStyle = metal(-4, 4); g.beginPath(); g.moveTo(-8, -5); g.lineTo(22, -2.5); g.lineTo(22, 2.5); g.lineTo(-8, 5); g.closePath(); g.fill(); g.stroke(); g.fillStyle = acc; g.fillRect(0, -3, 3, 6); g.fillRect(8, -2.5, 3, 5); g.globalCompositeOperation = 'lighter'; drawGlow(g, 23, 0, 9, hexA(it ? col : '#ffffff', 0.9), it ? 0.9 : 0.3); g.globalCompositeOperation = 'source-over'; }
+      else if (base === 'missile') { g.fillStyle = metal(-14, 14); box(-18, -14, 26, 28, 6); g.fill(); g.stroke(); for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { g.fillStyle = ink; g.beginPath(); g.arc(-10 + i * 10, -6 + j * 12, 3.6, 0, TAU); g.fill(); g.fillStyle = '#ff7a6a'; g.beginPath(); g.arc(-10 + i * 10, -6 + j * 12, 2, 0, TAU); g.fill(); } g.fillStyle = acc; g.fillRect(8, -10, 4, 20); }
+      else { g.fillStyle = metal(-7, 7); box(-20, -7, 20, 14, 4); g.fill(); g.stroke(); for (const y of [-4, 4]) { g.fillStyle = metal(y - 2.5, y + 2.5); box(0, y - 2.5, 22, 5, 2); g.fill(); g.stroke(); } g.fillStyle = metal(6, 16); box(-15, 6, 7, 10, 2); g.fill(); g.stroke(); g.fillStyle = acc; g.fillRect(-16, -2, 12, 4); }
       break;
-    case 'aux': g.beginPath(); g.arc(0, 0, 12, 0, TAU); g.fill(); g.stroke(); for (let i = 0; i < 3; i++) { const a = i * 2.1 + 0.5; g.beginPath(); g.arc(Math.cos(a) * 18, Math.sin(a) * 18, 4, 0, TAU); g.fill(); } break;
-    case 'core': g.beginPath(); for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; g.lineTo(Math.cos(a) * 18, Math.sin(a) * 18); } g.closePath(); g.fill(); g.stroke(); g.fillStyle = '#fff'; g.beginPath(); g.arc(0, 0, 6, 0, TAU); g.fill(); break;
-    case 'armor': g.beginPath(); g.moveTo(-16, -16); g.lineTo(16, -16); g.lineTo(14, 8); g.lineTo(0, 18); g.lineTo(-14, 8); g.closePath(); g.fill(); g.stroke(); break;
-    case 'engine': g.fillRect(-16, -10, 20, 20); g.beginPath(); g.moveTo(4, -10); g.lineTo(18, -14); g.lineTo(18, 14); g.lineTo(4, 10); g.closePath(); g.fill(); g.stroke(); break;
-    case 'radar': g.beginPath(); g.ellipse(0, -2, 18, 8, -0.5, 0, Math.PI); g.closePath(); g.fill(); g.stroke(); g.fillRect(-2, 0, 4, 16); break;
-    default: g.fillRect(-14, -14, 28, 28); g.strokeRect(-14, -14, 28, 28); g.fillStyle = '#120e1e'; for (let i = -1; i <= 1; i++) { g.fillRect(-20, i * 8 - 1.5, 6, 3); g.fillRect(14, i * 8 - 1.5, 6, 3); }
+    case 'aux': g.fillStyle = metal(-12, 12); g.beginPath(); g.ellipse(0, 0, 18, 11, 0, 0, TAU); g.fill(); g.stroke(); g.fillStyle = acc; g.beginPath(); g.arc(6, 0, 4, 0, TAU); g.fill(); g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(0, -2, 13, 6, 0, Math.PI * 1.1, Math.PI * 1.8); g.stroke(); break;
+    case 'core': { g.fillStyle = metal(-18, 18); g.beginPath(); for (let i = 0; i < 6; i++) { const a = i / 6 * TAU + Math.PI / 6; g.lineTo(Math.cos(a) * 19, Math.sin(a) * 19); } g.closePath(); g.fill(); g.stroke(); g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 14, hexA(it ? col : '#ffffff', 0.9), it ? 0.9 : 0.3); g.globalCompositeOperation = 'source-over'; g.fillStyle = it ? '#fff' : 'rgba(255,255,255,0.4)'; g.beginPath(); g.arc(0, 0, 5, 0, TAU); g.fill(); if (base === 'coreTwin') { g.beginPath(); g.arc(-8, 0, 3, 0, TAU); g.arc(8, 0, 3, 0, TAU); g.fill(); } break; }
+    case 'armor': g.fillStyle = metal(-18, 18); g.beginPath(); g.moveTo(-17, -16); g.lineTo(17, -16); g.lineTo(15, 7); g.lineTo(0, 19); g.lineTo(-15, 7); g.closePath(); g.fill(); g.stroke(); g.strokeStyle = acc; g.lineWidth = 3; g.beginPath(); g.moveTo(-10, -9); g.lineTo(10, -9); g.stroke(); g.fillStyle = '#4c4a66'; for (const [x, y] of [[-12, -12], [12, -12], [-10, 4], [10, 4]]) { g.beginPath(); g.arc(x, y, 1.8, 0, TAU); g.fill(); } break;
+    case 'engine': g.fillStyle = metal(-11, 11); box(-18, -11, 20, 22, 4); g.fill(); g.stroke(); g.fillStyle = metal(-14, 14); g.beginPath(); g.moveTo(2, -9); g.lineTo(16, -14); g.lineTo(16, 14); g.lineTo(2, 9); g.closePath(); g.fill(); g.stroke(); g.globalCompositeOperation = 'lighter'; drawGlow(g, 22, 0, 12, hexA(it ? col : '#ffffff', 0.9), it ? 0.8 : 0.3); g.globalCompositeOperation = 'source-over'; g.fillStyle = acc; g.fillRect(-14, -2, 12, 4); break;
+    case 'radar': g.fillStyle = metal(-12, 4); g.save(); g.rotate(-0.45); g.beginPath(); g.ellipse(0, -4, 18, 9, 0, Math.PI, TAU); g.closePath(); g.fill(); g.stroke(); g.restore(); g.strokeStyle = '#4c4a66'; g.lineWidth = 3; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 16); g.stroke(); g.strokeStyle = ink; g.lineWidth = 2; g.fillStyle = acc; g.beginPath(); g.arc(-4, -10, 3, 0, TAU); g.fill(); break;
+    default: g.fillStyle = metal(-14, 14); box(-14, -14, 28, 28, 4); g.fill(); g.stroke(); g.fillStyle = '#4c4a66'; for (let i = -1; i <= 1; i++) { g.fillRect(-21, i * 8 - 1.5, 7, 3); g.fillRect(14, i * 8 - 1.5, 7, 3); } g.strokeStyle = acc; g.lineWidth = 2; g.beginPath(); g.moveTo(-8, -6); g.lineTo(0, -6); g.lineTo(0, 6); g.lineTo(8, 6); g.stroke();
   }
+  if (race) { g.fillStyle = race; g.beginPath(); g.moveTo(-26, 26); g.lineTo(-12, 26); g.lineTo(-26, 12); g.closePath(); g.fill(); } // 套装：左下角一角族色
   g.restore();
 }
 function paintGearIcons(root) { $$('canvas[data-gear]', root).forEach((c) => { const id = c.dataset.gear, it = id ? (Station.find(G.meta, id) || {}).it || (G.st.reveal && G.st.reveal.uid === id ? G.st.reveal : null) || (G.st.extra && G.st.extra[id]) : null; paintGearIcon(c, it, c.dataset.kind); }); }
@@ -271,7 +279,7 @@ function equipHtml(id) {
   // 仓库：点一个位只列这个位；按“比身上的好多少”排序，更好的角上一个绿箭头
   const pool = [...m.gear.stash, ...m.gear.inbox].filter((it) => S.filter === 'all' || it.kind === S.filter);
   const scored = pool.map((it) => ({ it, c: Station.compare(m, it, m.current) })).sort((a, b) => (S.filter === 'all' ? QUALS[b.it.q].rank - QUALS[a.it.q].rank || b.c.total - a.c.total : b.c.total - a.c.total));
-  const cells = scored.map(({ it, c }) => `<button class="gcell ${S.sel === it.uid ? 'sel' : ''} ${it.junk ? 'junk' : ''} ${it.req > m.pilot.lv ? 'req' : ''}" type="button" data-item="${it.uid}" title="${esc(Gear.name(it))}"><canvas width="56" height="56" data-gear="${it.uid}"></canvas>${c.total > 1.03 && it.req <= m.pilot.lv ? '<i class="better">▲</i>' : ''}${it.lock ? '<i class="lk">锁</i>' : ''}</button>`).join('');
+  const cells = scored.map(({ it, c }) => `<button class="gcell ${S.sel === it.uid ? 'sel' : ''} ${it.junk ? 'junk' : ''} ${it.req > m.pilot.lv ? 'req' : ''}" type="button" data-item="${it.uid}" title="${esc(Gear.name(it))}"><canvas width="56" height="56" data-gear="${it.uid}"></canvas>${c.total > 1.03 && it.req <= m.pilot.lv ? '<i class="better">▲</i>' : ''}${it.lock ? '<i class="lk">锁</i>' : ''}${it.fresh ? '<i class="new">新</i>' : ''}</button>`).join('');
   const filters = KIND_FILTERS.map(([k, n]) => `<button class="chip ${S.filter === k ? 'gold' : ''}" type="button" data-filter="${k}">${n}</button>`).join('');
   let detail = '<div class="dim-text eq-hint">点一件装备看说明；点上面的位，只看这个位的</div>';
   if (sel) {
@@ -334,7 +342,7 @@ function bindStationPanel(panel, id) {
   $$('[data-facup]', panel).forEach((b) => b.onclick = () => { if (Station.facUp(m, b.dataset.facup)) { Sound.sfx('levelup'); save(); banner(`${FACILITIES[b.dataset.facup].name} ${m.fac[b.dataset.facup]} 级`, FACILITIES[b.dataset.facup].line, 1.6); G.stationScene.flash[b.dataset.facup] = G.stationScene.t; re(); } });
   $$('[data-slot]', panel).forEach((b) => b.onclick = () => { Sound.sfx('ui'); const k = SLOT_KIND[b.dataset.slot], it = m.gear.eq[b.dataset.slot]; if (S.filter === k && (!it || S.sel === it.uid)) { pulse(b); toast(it ? `${GEAR_KINDS[k].name}：${Gear.name(it)}` : `${GEAR_KINDS[k].name}还空着：仓库里没有这个位的装备就去打精英和首领`, it ? QUALS[it.q].color : '#ffe38a'); return; } if (S.filter === k && it) S.sel = it.uid; S.filter = k; re(); }); // 已经选中的再点：原地闪一下，说出它是什么
   $$('[data-filter]', panel).forEach((b) => b.onclick = () => { Sound.sfx('ui'); if (S.filter === b.dataset.filter) { pulse(b); return; } S.filter = b.dataset.filter; re(); });
-  $$('[data-item]', panel).forEach((b) => b.onclick = () => { Sound.sfx('ui'); if (S.sel === b.dataset.item) { pulse(b); return; } S.sel = b.dataset.item; re(); });
+  $$('[data-item]', panel).forEach((b) => b.onclick = () => { Sound.sfx('ui'); const f = Station.find(m, b.dataset.item); if (f && f.it.fresh) { f.it.fresh = false; save(); } if (S.sel === b.dataset.item) { pulse(b); return; } S.sel = b.dataset.item; re(); });
   $$('[data-equip]', panel).forEach((b) => b.onclick = () => { const r = Station.equip(m, b.dataset.equip); if (r) { Sound.sfx('slotLand', { ui: true }); save(); const it = m.gear.eq[r.slot]; toast(`换上 ${Gear.name(it)}`, QUALS[it.q].color); S.sel = it.uid; if (S.tut && S.tut.step === 3) S.tut.step = 4; re(); } });
   $$('[data-unequip]', panel).forEach((b) => b.onclick = () => { if (Station.unequip(m, b.dataset.unequip)) { Sound.sfx('uiBack'); save(); S.sel = null; re(); } else toast('仓库满了：先卖掉或拆掉一些', '#ffb2a8'); });
   $$('[data-sell]', panel).forEach((b) => b.onclick = () => { const c = Station.sell(m, b.dataset.sell); if (c) { Sound.sfx('coin'); toast(`卖掉了 · 信用点 +${c}`, '#ffd27a'); save(); S.sel = null; re(); } });

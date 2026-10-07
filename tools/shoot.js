@@ -81,9 +81,9 @@ const PLAN = [
   // 4-1 熔核前线：成型的追踪雷链扫一整屏的割草潮
   { name: 'swell', start: '4-1', build: true, setup: "__S.until('!w.focusBusy() && w.phase === \\'fight\\' && w.D && w.D.st === \\'goal\\' && w.D.t > 1 && !(w.lurks || []).length', 40); G.world.swell()", until: "w.enemies.filter((e) => e.alive && e.swell && e.x < w.W - 10).length >= 30 || (!w.warns.some((x) => x.kind === 'swell') && !w.enemies.some((e) => e.alive && e.swell) && !w.focusBusy() && (w.swell(), false))", max: 40, clean: true, freeze: true, wait: 60 },
   { name: 'burst', setup: 'G.world.pilotNoBurst = false; G.world.me.stock = Math.max(1, G.world.me.stock); G.world.setInput(0, { burst: true })', until: 'w.bursting && w.bursting.t > 0.5', max: 6 },
-  // 1-3 锈带残骸场的大首领（失控主钟）倒下：4 件战利品一件接一件扇形喷开（首杀：一件本图族的套装 + 至少一件黄）
+  // 1-3 锈带残骸场的大首领（失控主钟）倒下：3 件战利品一件接一件扇形喷开（首杀：一件本图族的套装 + 至少一件黄）
   { name: 'fountain', start: '1-3', build: true, setup: "const w = G.world; w.pilotNoBurst = true; w.testNoWipe = true; w.lootCfg.firstBoss = {}; w.beginBeat(w.plan.length - 1); __S.until('w.boss && w.bossIntroT <= 0 && w.boss.t > 3', 120); const b = w.boss; if (b) { b.phase = 3; b.nextPhase = 3; b.transT = 0; b.shield = 0; b.hp = 25; }",
-    until: 'w.loot && w.loot.length >= 4 && w.loot[w.loot.length - 1].t > 0.35', max: 40, hold: true, clean: true, wait: 60 },
+    until: 'w.loot && w.loot.length >= 3 && w.loot[w.loot.length - 1].t > 0.5', max: 40, hold: true, clean: true, wait: 60 },
   { name: 'cargo', until: '!!w.cargoPod', max: 20, freeze: true, wait: 450 }, // 货运舱的动画按画面时间走：停住世界，画面照常把它画出去
   // 5-3 寂静圣所：混沌祭司
   { name: 'priest', start: '5-3', build: true, setup: "G.world.testNoWipe = true; G.world.beginBeat(G.world.plan.length - 1)", until: 'w.boss && w.bossIntroT <= 0 && w.boss.fightT > 4 && w.bullets.count() > 18', max: 160 },
