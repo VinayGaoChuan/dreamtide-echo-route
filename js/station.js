@@ -169,7 +169,7 @@ const Station = {
     return add;
   },
   /* ---------- 地图 ---------- */
-  mapOpen(m, mm) { return mm === 1 || !!m.maps.cleared[mm - 1]; },
+  mapOpen(m, mm) { if (DEMO.on && mm > DEMO.maps) return false; return mm === 1 || !!m.maps.cleared[mm - 1]; },
   startStages(m, mm) { return MAPS[mm].stages.filter((id) => stageNOf(id) === 1 || (m.unlock.waypoint && m.maps.reached[id])); },
   /* 路标：从第 n 关开始补发的选择次数（模拟按中位定） */
   catchUp(stageId) { return [0, 0, 6, 12][stageNOf(stageId)] || 0; },
@@ -221,7 +221,7 @@ const Station = {
     const bf = res.bossFight; if (res.win || res.abandoned || !bf || m.maps.cleared[mm]) return null;
     const L = m.pity.loss[bf.stage] = Object.assign({ n: 0, crates: 0 }, m.pity.loss[bf.stage] || {}); // 每个首领各记各的：箱子给反复倒在同一个首领面前的人
     L.n++; L.def = STAGES[bf.stage] ? STAGES[bf.stage].bossDef : null; L.at = m.pity.runs;
-    const every = bf.stage === ALL_STAGES[ALL_STAGES.length - 1] ? LOSS_PITY.everyFinal : LOSS_PITY.every;
+    const every = bf.stage === (DEMO.on ? `${DEMO.maps}-3` : ALL_STAGES[ALL_STAGES.length - 1]) ? LOSS_PITY.everyFinal : LOSS_PITY.every; // 最后一个首领（试玩版是第 1 张图的关底）
     let crate = null;
     if (L.n >= every) { L.n = 0; crate = { map: mm, stage: bf.stage, def: L.def, q: LOSS_PITY.q[Math.min(L.crates, LOSS_PITY.q.length - 1)], opts: null }; L.crates++; m.pity.crates.push(crate); }
     return { map: mm, n: L.n, every, crate: crate ? crate.q : null, nextQ: LOSS_PITY.q[Math.min(L.crates, LOSS_PITY.q.length - 1)] };

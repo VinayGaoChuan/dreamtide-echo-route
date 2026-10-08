@@ -2,7 +2,7 @@
 // Chrome：macOS 默认 /Applications/Google Chrome.app，Windows 默认 Program Files 下的 chrome.exe，Linux 找 google-chrome / chromium；
 // 也可以用参数或 CHROME 环境变量指定。
 const fs = require('fs'), path = require('path'), http = require('http'), os = require('os'), { spawn } = require('child_process');
-const ROOT = path.join(__dirname, '..');
+const ROOT = process.env.GAME_ROOT ? path.resolve(process.env.GAME_ROOT) : path.join(__dirname, '..'); // GAME_ROOT：测打包用的文件夹（改写成多语言的版本）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function chromePath(given) {
@@ -47,7 +47,7 @@ async function openGame({ W, H, chrome }) {
     await page.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
     await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     await page.send('Page.enable'); await page.send('Runtime.enable');
-    await page.send('Page.navigate', { url: `http://127.0.0.1:${port}/index.html` });
+    await page.send('Page.navigate', { url: `http://127.0.0.1:${port}/index.html${process.env.GAME_QUERY || ''}` }); // GAME_QUERY：例如 ?lang=en（看某种语言）
     const ev = async (expr) => { const r = await page.send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception ? r.exceptionDetails.exception.description : r.exceptionDetails.text); return r.result.value; };
     for (let i = 0; i < 80; i++) { await sleep(250); try { if (await ev("typeof G !== 'undefined' && !!G.meta && document.readyState === 'complete'")) break; } catch (e) { /* 还在加载 */ } }
     return { page, ev, close };

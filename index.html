@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>拾荒之翼</title>
+<title>余烬：迷航</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- 字体不挡页面：先用系统字体显示，谷歌字体能加载就换上（国内打不开谷歌时不会白屏） -->
@@ -28,6 +28,8 @@
 [hidden]{display:none!important}
 html,body{height:100%;margin:0;background:var(--deep);overflow:hidden}
 body{color:var(--text);font-family:var(--f-body);font-weight:500;-webkit-font-smoothing:antialiased;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+/* 阿拉伯语：版面不翻转（横版飞行向右），每段文字按自己的内容定方向，标点和数字落在正确的一侧 */
+html[lang=ar] body,html[lang=ar] body *{unicode-bidi:plaintext}
 #app{position:relative;width:100%;height:100%;overflow:hidden;background:radial-gradient(120% 90% at 50% 40%,#231c5c 0%,#140f36 60%,#0c0a24 100%)}
 #cv{position:absolute;display:block}
 #stage{position:absolute;overflow:hidden;pointer-events:none}
@@ -67,7 +69,7 @@ svg.ic{width:1.1em;height:1.1em;fill:currentColor;flex:none;vertical-align:-.16e
 .btn[aria-disabled="true"],.job[aria-disabled="true"]{opacity:.45;filter:saturate(.5);cursor:not-allowed}
 .pulse{animation:pulseTap .5s ease-out}
 @keyframes pulseTap{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,215,106,.7)}35%{transform:scale(1.04);box-shadow:0 0 0 8px rgba(255,215,106,.25)}100%{transform:scale(1);box-shadow:0 0 0 14px rgba(255,215,106,0)}}
-.icon-btn{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:max(56px,calc(78px*var(--u)));min-height:max(56px,calc(78px*var(--u)));border-radius:calc(22px*var(--u));background:rgba(30,24,80,.72);border:2px solid var(--edge);font-size:var(--fs-xs);color:var(--dim);transition:transform .12s,border-color .2s,color .2s;position:relative}
+.icon-btn{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:max(56px,calc(78px*var(--u)));padding:0 calc(6px*var(--u));white-space:nowrap;min-height:max(56px,calc(78px*var(--u)));border-radius:calc(22px*var(--u));background:rgba(30,24,80,.72);border:2px solid var(--edge);font-size:var(--fs-xs);color:var(--dim);transition:transform .12s,border-color .2s,color .2s;position:relative}
 .icon-btn svg{width:max(22px,calc(30px*var(--u)));height:max(22px,calc(30px*var(--u)));fill:var(--info)}
 .icon-btn:hover{border-color:rgba(255,201,74,.6);color:var(--text)}
 .icon-btn:hover svg{fill:var(--lamp)}
@@ -98,6 +100,9 @@ svg.ic{width:1.1em;height:1.1em;fill:currentColor;flex:none;vertical-align:-.16e
 .title-block{display:flex;flex-direction:column;align-items:center;gap:calc(10px*var(--u));max-width:min(92%,calc(640px*var(--u)))}
 .title-main{font-family:var(--f-display);font-weight:400;font-size:max(56px,calc(150px*var(--u)));line-height:.95;color:var(--paper);margin:0;text-shadow:0 0 calc(30px*var(--u)) rgba(255,201,74,.55),0 calc(6px*var(--u)) 0 #3a2c72}
 .title-main em{font-style:normal;color:var(--lamp2)}
+#set-lang{font:inherit;font-size:var(--fs-s);background:rgba(8,6,18,.75);color:var(--paper);border:1px solid var(--edge);border-radius:10px;padding:.3em .7em;max-width:60%}
+.title-main.long{font-size:max(46px,calc(112px*var(--u)));letter-spacing:.02em}.title-main.long em{display:block}
+.demo-end{gap:calc(18px*var(--u))}.demo-maps{display:flex;gap:calc(14px*var(--u))}.demo-map{display:flex;flex-direction:column;align-items:center;justify-content:center;width:calc(120px*var(--u));height:calc(120px*var(--u));border-radius:16px;border:2px solid var(--mc);background:rgba(8,6,18,.7);color:var(--mc);font-family:var(--f-display);font-size:var(--fs-l)}.demo-map span{font-size:var(--fs-s);opacity:.7}
 .title-sub{font-family:var(--f-display);font-size:max(20px,calc(44px*var(--u)));color:#d9ccff;letter-spacing:.3em;margin:0 0 0 .3em;text-shadow:0 0 16px rgba(181,140,255,.6)}
 .title-tag{font-size:var(--fs-m);color:var(--paper);background:rgba(30,24,80,.55);border:1px solid var(--edge);padding:.45em 1.1em;border-radius:999px;margin-top:calc(12px*var(--u))}
 .title-start{margin-top:calc(22px*var(--u));font-family:var(--f-display);font-size:var(--fs-l);color:var(--lamp2);animation:breathe 2.2s ease-in-out infinite}
@@ -397,7 +402,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .capn b{display:grid;place-items:center;width:2em;height:2em;border-radius:50%;border:2px solid rgba(255,255,255,.3);font-family:var(--f-num);color:var(--dim)}
 .capn.on b{border-color:var(--lamp);color:#2d2358;background:linear-gradient(180deg,#fff0b0,#ffc94a);box-shadow:0 0 10px rgba(255,201,74,.7)}
 .capn small{font-size:var(--fs-xs);color:var(--dim)}
-.slot .sl{position:absolute;top:-1.35em;left:50%;transform:translateX(-50%);font-size:max(9px,calc(11px*var(--u)));font-weight:700;color:var(--dim);white-space:nowrap}
+.slot .sl{position:absolute;top:-1.35em;left:50%;transform:translateX(-50%);font-size:max(9px,calc(11px*var(--u)));font-weight:700;color:var(--dim);white-space:nowrap;max-width:calc(100% + 6px);overflow:hidden;text-overflow:ellipsis}
 .slots{margin-top:calc(22px*var(--u))}
 .modrow{display:flex;gap:6px;margin-top:6px;font-size:max(10px,calc(12px*var(--u)));font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.7)}
 .modrow:empty{display:none}
@@ -589,7 +594,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 
 /* ---------- 站（stationui.js） ---------- */
 .st-top{display:flex;align-items:center;gap:calc(10px*var(--u));flex-wrap:wrap;position:relative;z-index:2}
-.st-top .icon-btn{width:max(52px,calc(68px*var(--u)));min-height:max(52px,calc(68px*var(--u)))}
+.st-top .icon-btn{min-width:max(52px,calc(68px*var(--u)));min-height:max(52px,calc(68px*var(--u)))}
 .pilot-badge{display:flex;flex-direction:column;gap:4px;min-width:calc(150px*var(--u));padding:.35em .9em;border-radius:14px;background:rgba(20,16,44,.78);border:1.5px solid rgba(255,210,122,.45)}
 .pilot-badge b{font-family:var(--f-display);font-weight:400;font-size:var(--fs-m);color:#ffe7b0}
 .pilot-badge.big{min-width:0;width:100%}
@@ -604,6 +609,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .crate-opt.rec{box-shadow:0 0 0 2px var(--qc),0 0 14px var(--qc)}
 .crate-opt:hover,.crate-opt:focus-visible{background:rgba(40,30,70,.9)}
 .st-launch .mission{font-family:var(--f-display);font-size:var(--fs-m);color:#ffe7b0}
+.st-launch .row .btn.big{flex:1 1 0;min-width:0;padding:0 calc(14px*var(--u));white-space:nowrap}
 .stage-node{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;padding:.35em .8em;border-radius:12px;background:rgba(255,255,255,.05);border:1.5px solid var(--edge);font-size:var(--fs-xs);color:var(--dim)}
 .stage-node b{font-family:var(--f-num);font-weight:800;color:var(--paper)}
 .stage-node.sel{border-color:var(--lamp);box-shadow:0 0 12px rgba(255,201,74,.35);color:var(--paper)}
@@ -731,7 +737,7 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 </svg>
 
 <div id="app">
-  <canvas id="cv" aria-label="梦潮回声航线 游戏画面"></canvas>
+  <canvas id="cv" aria-label="余烬：迷航 游戏画面" data-t-aria></canvas>
   <div id="stage">
     <div id="hud" hidden></div>
     <div id="screens"></div>
@@ -739,9 +745,10 @@ table.metrics td.num{text-align:right;white-space:nowrap}
     <div id="toast" role="status" aria-live="polite"></div>
     <div id="mpwait" role="status" hidden></div>
   </div>
-  <div id="narrow" hidden><b>梦潮是横版游戏</b><span>把窗口拉宽一些（建议 16:9），游戏会自动暂停等你</span></div>
+  <div id="narrow" hidden><b data-t>余烬：迷航是横版游戏</b><span data-t>把窗口拉宽一些（建议 16:9），游戏会自动暂停等你</span></div>
 </div>
 
+<script src="js/i18n.js" charset="utf-8"></script>
 <script src="js/util.js" charset="utf-8"></script>
 <script src="js/data.js" charset="utf-8"></script>
 <script src="js/gear.js" charset="utf-8"></script>
@@ -766,6 +773,9 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 <script src="js/bigboss.js" charset="utf-8"></script>
 <script src="js/vs.js" charset="utf-8"></script>
 <script src="js/net.js" charset="utf-8"></script>
+<script src="js/steamnet.js" charset="utf-8"></script>
 <script src="js/ui.js" charset="utf-8"></script>
 <script src="js/stationui.js" charset="utf-8"></script>
+<script src="js/bot.js" charset="utf-8"></script>
+<script src="js/kitshim.js" charset="utf-8"></script>
 <script src="js/main.js" charset="utf-8"></script>

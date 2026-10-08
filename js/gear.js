@@ -154,7 +154,7 @@ const DROP_Q = {
 const DROP_RATE = { fodder: 0.0012, elite: 0.4, lurk: 0.1, thief: 2 }; // 连续玩量过（§19）：打穿一张图 15–20 件
 const PITY = { rareRuns: 3, uniFirst: 5, uniRuns: 12 };
 /* 败北补给（§11）：在还没打通的地图上倒在同一个首领面前，每 every 次站里送一箱，箱子里每个位各一件、自己挑；一箱比一箱好 */
-const LOSS_PITY = { every: 3, everyFinal: 2, q: ['yellow', 'green', 'gold'] }; // 最后的混沌祭司每 2 次一箱
+const LOSS_PITY = { every: 3, everyFinal: 2, q: ['yellow', 'green', 'gold'] }; // 最后的缄默主教每 2 次一箱
 const MAP_COUNT = 5;
 const ilvlOf = (mapN, stageN, boss) => Math.min(MAX_ILVL, 1 + 6 * (mapN - 1) + 2 * (stageN - 1) + (boss ? 1 : 0));
 
@@ -325,8 +325,8 @@ const Gear = {
     if (it.q === 'yellow' && it.rare) return RARE_WORDS.a[it.rare[0] % RARE_WORDS.a.length] + ' ' + RARE_WORDS[it.kind][it.rare[1] % RARE_WORDS[it.kind].length];
     if (it.q === 'blue') {
       const pre = it.aff.find((a) => AFFIXES[a.k].pre), suf = it.aff.find((a) => AFFIXES[a.k].suf);
-      const pn = pre ? (pre.k === 'plus' ? PLUS_NAME(pre.sk) + '专精的' : AFFIXES[pre.k].pre) : '';
-      return pn + this.baseName(it) + (suf ? AFFIXES[suf.k].suf : '');
+      const pn = pre ? (pre.k === 'plus' ? `${PLUS_NAME(pre.sk)}专精的` : AFFIXES[pre.k].pre) : '';
+      return affixName(pn, this.baseName(it), suf ? AFFIXES[suf.k].suf : ''); // 暗黑式的名字（前缀 + 底子 + 后缀）：用空格分词的语言中间加空格，形容词后置的语言换顺序
     }
     return this.baseName(it);
   },

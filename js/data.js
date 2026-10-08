@@ -196,6 +196,8 @@ const MAPS = {
   5: { id: 5, name: '寂静圣所', en: 'Silent Sanctum', races: ['drill', 'ledger', 'frost', 'hive', 'arc', 'neon', 'forge'], chaos: true, mission: '找到切断所有信号的人。', home: '中继天线：听见地球的杂音', homeId: 'relay', stages: ['5-1', '5-2', '5-3'], hpK: 12, bossDef: ['shield', 'armor', 'chaos'], color: '#b98aff' },
 };
 const MAP_ORDER = [1, 2, 3, 4, 5];
+/* 试玩版（docs/design.md §21）：build.py --demo 打出来的网页带 window.DREAMTIDE_DEMO；只开前 maps 张图，第一次打通最后一张时放试玩结束画面 */
+const DEMO = { on: typeof window !== 'undefined' && !!window.DREAMTIDE_DEMO, maps: 1 };
 const mapOfStage = (id) => +(String(id || '1-1').split('-')[0]) || 1;
 const stageNOf = (id) => +(String(id || '1-1').split('-')[1]) || 1;
 /* 关：一关 3–4 分钟，三关连成一局。theme = 场景（spaceart.js），lurk = 会出手的地图用哪一套（mapfx.js） */
@@ -210,16 +212,16 @@ const STAGE_DEFS = [
   ['1-3', '停摆钟楼站', '失控主钟', ['starE', 'tickE', 'jellyE'], '后方追兵和空间裂缝一起出现，最后是这张图的大首领：失控主钟。'],
   ['2-1', '冰环外缘', '冰棱巡逻舰', ['jellyE', 'starE'], '霜晶族的冰墙板会挡子弹：绕过去，或者集中打碎它。'],
   ['2-2', '蜂巢冰洞', '群翼母巢', ['tickE', 'starE'], '群翼族的工蜂打碎会分成三只：清群的构筑更好打。'],
-  ['2-3', '霜心王座', '霜心女王', ['starE', 'tickE', 'jellyE'], '冰墙和工蜂一起来，最后是霜心女王。'],
+  ['2-3', '霜巢王座', '霜巢女王', ['starE', 'tickE', 'jellyE'], '冰墙和工蜂一起来，最后是霜巢女王。'],
   ['3-1', '广告牌大道', '保安队长', ['tickE', 'jellyE'], '电弧公司的电塔两两拉电：打掉一座电就断。'],
   ['3-2', '马戏穹顶', '马戏团长', ['starE', 'tickE'], '霓虹马戏的弹跳球撞到上下边缘就弹回来，越弹越快。'],
-  ['3-3', '董事会塔', '电弧董事', ['starE', 'tickE', 'jellyE'], '电塔和弹跳球一起来，最后是电弧董事。'],
+  ['3-3', '董事会塔', '弧光董事会', ['starE', 'tickE', 'jellyE'], '电塔和弹跳球一起来，最后是弧光董事会。'],
   ['4-1', '焦土平原', '熔核步兵长', ['jellyE', 'tickE'], '熔核军团的迫击炮往你的位置抛炮弹：离开红圈。'],
   ['4-2', '炮兵阵地', '攻城炮车', ['tickE', 'starE'], '迫击炮和钻头车一起来。'],
-  ['4-3', '熔炉要塞', '熔核将军', ['starE', 'tickE', 'jellyE'], '全是熔核军团的编队，最后是熔核将军。'],
+  ['4-3', '熔炉要塞', '熔炉元帅', ['starE', 'tickE', 'jellyE'], '全是熔核军团的编队，最后是熔炉元帅。'],
   ['5-1', '无声回廊', '执事', ['jellyE', 'starE'], '七族的信徒都在这里，精英带着混沌词缀：防御在护盾和装甲之间换。'],
   ['5-2', '唱诗大厅', '唱诗班', ['tickE', 'starE'], '静默带扫过的地方，飞机打不出子弹：先离开那条带子。'],
-  ['5-3', '祭坛', '混沌祭司', ['starE', 'tickE', 'jellyE'], '找到切断所有信号的人。'],
+  ['5-3', '祭坛', '缄默主教', ['starE', 'tickE', 'jellyE'], '找到切断所有信号的人。'],
 ];
 const STAGES = {};
 for (const [id, name, bossName, elites, intro] of STAGE_DEFS) {
@@ -256,7 +258,7 @@ const BUILD_PATHS = [
    Boss / 队长打了 rage.at 秒还没倒就失控：攻击一路加快（rage.ramp 秒加满 rage.max），提前 rage.warn 秒预告。
    失控 wipe 秒后超载（先在血条上倒数，提前 5 秒喊）：全屏冲击、全队倒下——首领战有确定的期限，构筑强度按它算。
    只有成型的火力能在失控前打完；没成型的局要靠操作硬扛失控段 */
-const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 5.1, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: Object.fromEntries(ALL_STAGES.map((id) => [id, [1.3, 8, 19][stageNOf(id) - 1] * MAPS[mapOfStage(id)].hpK * (stageNOf(id) === 2 && mapOfStage(id) >= 4 ? 0.65 : id === '5-3' ? 0.6 : id === '4-3' ? 0.8 : 1)])), regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: Object.fromEntries(ALL_STAGES.map((id) => [id, [40, 70, 55][stageNOf(id) - 1]])), warn: 5, ramp: 15, max: 4, wipe: 35 } }; // 首领厚度按地图乘 MAPS.hpK（§10.4）；第 4、5 张图的第 2 关首领 × 0.65、熔核将军 × 0.8、混沌祭司 × 0.65（连续玩：它们是墙）；只有第 1 张图的第一个首领不考构筑
+const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 5.1, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: Object.fromEntries(ALL_STAGES.map((id) => [id, [1.3, 8, 19][stageNOf(id) - 1] * MAPS[mapOfStage(id)].hpK * (stageNOf(id) === 2 && mapOfStage(id) >= 4 ? 0.65 : id === '5-3' ? 0.6 : id === '4-3' ? 0.8 : 1)])), regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: Object.fromEntries(ALL_STAGES.map((id) => [id, [40, 70, 55][stageNOf(id) - 1]])), warn: 5, ramp: 15, max: 4, wipe: 35 } }; // 首领厚度按地图乘 MAPS.hpK（§10.4）；第 4、5 张图的第 2 关首领 × 0.65、熔炉元帅 × 0.8、缄默主教 × 0.6（连续玩：它们是墙）；只有第 1 张图的第一个首领不考构筑
 /* 第一局（§3.6，上手 = 上钩）：第一个完整仪式保底史诗，第一个联动只要两件 1 级（头几分钟一次构筑小爆发），鱼群潮更勤；
    第一个首领（free 里的关）在基础难度下不自愈、不失控：几乎人人打得过 */
 const FIRST_RUN = { rareTier: 1, needLv: 1, swellK: 0.75, hearts: 2 }; // rareTier：第一局第一个完整仪式保底史诗（一档一档认识品质）；hearts：多两颗心
@@ -386,7 +388,7 @@ const STAGE_CLUES = {
   '1-3': ['钟楼站背后的星空，好像和外环那道裂缝连在一起。', '回声说：钟楼的主钟停在地球失联的那一刻。'],
   '2-1': ['冰环里冻着一艘没见过的船。'], '2-2': ['蜂巢最深处有一间空着的育婴室。'], '2-3': ['女王的王座下面，有人刻了一串坐标。'],
   '3-1': ['有块广告牌一直在放同一句话：别抬头。'], '3-2': ['马戏团的票根上，印着下一场演出的地点。'], '3-3': ['董事会的会议记录里，有一页被撕掉了。'],
-  '4-1': ['焦土上有一行车辙，往圣所的方向去了。'], '4-2': ['一门炮的炮管上，有人用粉笔写了“回家”。'], '4-3': ['将军的熔炉里，烧着一叠祷文。'],
+  '4-1': ['焦土上有一行车辙，往圣所的方向去了。'], '4-2': ['一门炮的炮管上，有人用粉笔写了“回家”。'], '4-3': ['元帅的熔炉里，烧着一叠祷文。'],
   '5-1': ['回廊尽头传来很轻的歌声。'], '5-2': ['唱诗班里有一个声音在走调。'], '5-3': ['……还有人吗？'],
 };
 const STAR_COST = [30, 60, 100, 150, 220, 300];

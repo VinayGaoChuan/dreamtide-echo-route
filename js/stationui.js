@@ -226,6 +226,7 @@ function showStation() {
   if (S.panel) bindStationPanel($('#st-panel', el), S.panel);
   if (G.stationArrive) { const A = G.stationArrive; G.stationArrive = null; G.stationScene.startArrival(A); stationArrivalToasts(A); }
   if (S.tut) requestAnimationFrame(() => stationTutor(el));
+  if (Lobby.net && Lobby.net.kind === 'steam' && Lobby.net.pendingInvite && !Lobby.code) steamInviteJoin(Lobby.net.pendingInvite); // 打一局时收到的 Steam 邀请：回站就进
 }
 /* 第一次回家的强制引导（§8.4）：只亮一样东西、一句话，别的压暗点不了；做完那一步才往下走。
    1 带回了几件 → 2 点那把蓝色主炮看比较 → 3 按「换上」→ 4 看船上的炮换了样子 → 5 出击 */
@@ -362,13 +363,13 @@ function hangarHtml() {
 function codexHtml() {
   const m = G.meta, C = m.codexGear;
   const sets = RACE_ORDER.map((r) => { const S = SETS[r], R = RACES[r], got = C.sets[r] || {}; return `<div class="cx-set"><b style="color:${R.color}">${R.name} · ${S.name}</b><span class="dim-text">${R.path} · ${R.def === 'shield' ? '护盾' : '装甲'}</span><div class="row wrap">${Object.keys(S.pieces).map((k) => `<span class="chip ${got[k] ? 'gold' : ''}">${GEAR_KINDS[k].name}${got[k] ? ' ✓' : ''}</span>`).join('')}</div></div>`; }).join('');
-  const unis = UNIQUE_ORDER.map((u) => { const U = UNIQUES[u], got = C.uniques[u], src = U.only === 'priest' ? '混沌祭司' : STAGES[`${U.boss}-3`].bossName; return `<div class="cx-uni ${got ? 'got' : ''}"><b style="color:${got ? QUALS.gold.color : 'var(--mute)'}">${got ? esc(U.name) : '？？？'}</b><small>${GEAR_KINDS[U.kind].name} · 物品等级 ${U.min}+ · ${esc(src)}偏爱</small>${got ? `<small class="dim-text">${esc(U.line)}</small>` : ''}</div>`; }).join('');
+  const unis = UNIQUE_ORDER.map((u) => { const U = UNIQUES[u], got = C.uniques[u], src = U.only === 'priest' ? '缄默主教' : STAGES[`${U.boss}-3`].bossName; return `<div class="cx-uni ${got ? 'got' : ''}"><b style="color:${got ? QUALS.gold.color : 'var(--mute)'}">${got ? esc(U.name) : '？？？'}</b><small>${GEAR_KINDS[U.kind].name} · 物品等级 ${U.min}+ · ${esc(src)}偏爱</small>${got ? `<small class="dim-text">${esc(U.line)}</small>` : ''}</div>`; }).join('');
   return `<div class="label">套装</div><div class="cx-sets">${sets}</div><div class="label">暗金（${Object.keys(C.uniques).length}/${UNIQUE_ORDER.length}）</div><div class="cx-unis">${unis}</div>`;
 }
 function starmapHtml() {
   const m = G.meta;
   return `<div class="maps">${MAP_ORDER.map((mm) => { const M = MAPS[mm], open = Station.mapOpen(m, mm), sel = (m.maps.sel || 1) === mm;
-    return `<button class="map-card ${sel ? 'sel' : ''} ${open ? '' : 'locked'}" type="button" data-map="${mm}" style="--mc:${M.color}" ${offIf(!open, `打通地图 ${mm - 1} 后开放`)}><b>${mm} · ${open ? esc(M.name) : '？？？'}</b>${open ? `<small>“${esc(M.mission)}”</small><small>${M.races.slice(0, M.chaos ? 0 : 2).map((r) => RACES[r].name).join(' · ')}${M.chaos ? '七族信徒' : ''} · 首领 ${M.stages.map((id) => STAGES[id].bossName).join(' / ')}</small><small>物品等级 ${ilvlOf(mm, 1)}–${ilvlOf(mm, 3, true)}${m.maps.cleared[mm] ? ' · 已打通 · ' + esc(M.home) : ''}</small>` : '<small>还没打通上一张图</small>'}</button>`; }).join('')}</div>`;
+    return `<button class="map-card ${sel ? 'sel' : ''} ${open ? '' : 'locked'}" type="button" data-map="${mm}" style="--mc:${M.color}" ${offIf(!open, DEMO.on && mm > DEMO.maps ? '正式版开放' : `打通地图 ${mm - 1} 后开放`)}><b>${mm} · ${open ? esc(M.name) : '？？？'}</b>${open ? `<small>“${esc(M.mission)}”</small><small>${M.races.slice(0, M.chaos ? 0 : 2).map((r) => RACES[r].name).join(' · ')}${M.chaos ? '七族信徒' : ''} · 首领 ${M.stages.map((id) => STAGES[id].bossName).join(' / ')}</small><small>物品等级 ${ilvlOf(mm, 1)}–${ilvlOf(mm, 3, true)}${m.maps.cleared[mm] ? ` · 已打通 · ${esc(M.home)}` : ''}</small>` : '<small>还没打通上一张图</small>'}</button>`; }).join('')}</div>`;
 }
 /* ---------- 面板的按钮 ---------- */
 function bindStationPanel(panel, id) {

@@ -1,0 +1,108 @@
+// 打包配置。改完保存，再双击「一键打包」即可。
+// 以 // 开头的行是说明，不影响运行。
+{
+  // 游戏名：窗口标题、报告里显示
+  "gameName": "余烬：迷航 试玩版",
+
+  // 程序文件名：只用英文字母和数字。Steam 后台「启动选项」里填的就是它
+  "executableName": "EmbersLostVoyageDemo",
+
+  // 版本号：每次发版前加一点，例如 0.1.0 → 0.1.1
+  "version": "0.1.0",
+
+  // 开发者/公司名（写进 exe 的属性里，可留空）
+  "company": "",
+
+  // 要打哪些平台："windows" 是 Steam 主力；"mac" 用来在这台 Mac 上自动试跑；"android" 是安卓包
+  "platforms": ["windows", "mac"],
+
+  // 窗口：默认全屏；F11 或 Alt+Enter 切换
+  "window": { "fullscreen": true, "width": 1600, "height": 900 },
+
+  // 图标：填一张 PNG 的路径（建议 512×512 以上）。留空 = 自动用游戏包里自带的缩略图
+  "icon": "icon/icon.png",
+
+  // 保留哪些系统界面语言（右键菜单、系统对话框用的文字）。只留中英文能省约 45 MB
+  "keepLocales": ["en-US", "zh-CN", "zh-TW"],
+
+  // 代码混淆：true = 打乱游戏代码，别人拆包也很难看懂和改
+  "obfuscate": true,
+
+  // 日志宏：true = 打「测试版」，给测试者用。会记录详细运行日志（控制台输出、帧率、内存、存档同步），
+  // 画面左下角显示版本号；按 Ctrl+Shift+L（Mac 为 Cmd+Shift+L）或点版本号，把日志导出到桌面发给你。
+  // false = 正式版，只记录报错和崩溃（同样可以按快捷键导出）。
+  "debugLog": true,
+
+  // 机器人试玩：打包后让脚本机器人在电脑版里自己点按钮、点画面、按键玩一段时间，检查有没有报错、卡死、崩溃
+  "bot": {
+    "enabled": true,
+    // 玩多少秒
+    "seconds": 60,
+    // 随机种子：同一个种子每次操作顺序相同，方便复现问题
+    "seed": 1,
+    // 优先点带这些字的按钮（推进游戏）
+    "prefer": ["点击任意处开始", "出击", "再来一局", "换上", "拿奖励", "开始", "继续", "确定", "下一", "出发", "进入", "前进", "选择", "购买", "领取", "跳过", "结算", "返回", "好的", "知道了", "launch", "play again", "equip", "start", "next", "ok", "continue", "play"],
+    // 绝不点带这些字的按钮（避免清空存档、退出）
+    "avoid": ["重置", "删除", "清空", "清除", "退出", "结束本局", "离开房间", "reset", "delete", "clear", "quit", "exit", "end this run", "leave room"]
+  },
+
+  // 自动试跑：打包后在本机启动游戏、模拟点击、截图、测帧率、检查存档
+  "smokeTest": true,
+  "smoke": { "bootSeconds": 5, "clicks": 2, "stepSeconds": 4, "timeoutSeconds": 90 },
+
+  // 两个客户端联机测试（金牌制作人套件做的联机游戏）：试跑之后在这台电脑上同时开两个游戏，用本机假 Steam 连起来，
+  // 测邀请进房、从好友列表进房、一起开局、两边是否同步、卡顿、中途有人掉线。seconds 一局玩多少秒，leaveAt 第几秒
+  // 让一方掉线，latencyMs / jitterMs 模拟的网络延迟和抖动（毫秒）。真 Steam 那一段用测试版的联机自检（看使用说明）。
+  "duo": { "enabled": true, "seconds": 40, "leaveAt": 25, "latencyMs": 80, "jitterMs": 25, "lobbyDelayMs": 300 },
+
+  // Electron 下载镜像：国内网络下载慢时填 "https://npmmirror.com/mirrors/electron/"
+  "electronMirror": "",
+
+  "android": {
+    // 包名：全球唯一，上架后不能再改。只用小写字母、数字和点。留空 = 自动用 com.<公司>.<程序名小写>
+    "packageId": "",
+
+    // 屏幕方向："landscape" 横屏 / "portrait" 竖屏
+    "orientation": "landscape",
+
+    // 打哪些包："apk" = 直接安装、国内应用商店；"aab" = Google Play
+    "outputs": ["apk", "aab"],
+
+    // 自动试跑：把 APK 装进去启动、点击、截图、查日志
+    "smokeTest": true,
+
+    // 在哪试跑："emulator" 官方模拟器（需要约 7.5 GB 空闲磁盘）/ "usb" 数据线连接的安卓手机（需打开 USB 调试）
+    "smokeDevice": "emulator",
+
+    // 试跑后是否让模拟器继续开着（方便你自己上手玩）
+    "keepEmulator": false
+  },
+
+  "steam": {
+    // 拿到 App ID 后填这里。0 = 还没有：不接 Steam，按单机运行，跳过正版校验和上传
+    // 480 = Valve 公开的测试应用（Spacewar）：还没有自己的 App ID 时，用它在 Steam 上试联机房间和联机消息（要把下面 requireSteam 改成 false；这种包不能上传）
+    "appId": 480,
+
+    // 试玩版填正式版的 App ID：游戏里的「加入愿望单」用 Steam 覆盖层打开正式版的商店页。正式版留 0（打开自己的）
+    "storeAppId": 0,
+
+    // 正版校验：true = 不是从 Steam 启动、或没买这款游戏，就拒绝运行
+    "requireSteam": false,
+
+    // 自动上传到 Steam（需要 steamcmd 和下面的 depot 编号）
+    "upload": false,
+
+    // 上传用的 Steam 账号名（建议在 Steamworks 后台单独建一个只有上传权限的账号）
+    // 第一次上传时，密码和手机令牌由你在弹出的终端里自己输入，之后会记住
+    "buildAccount": "",
+
+    // 各平台的 depot 编号（Steamworks 后台 → SteamPipe → Depots 里能看到）
+    "depots": { "windows": 0, "mac": 0 },
+
+    // 上传后自动设为这个测试分支的当前版本；推给所有玩家要你在后台手动点（不能填 default）
+    "branch": "beta",
+
+    // steamcmd 程序路径。留空 = 自动在系统和 tools/steamcmd/ 里找
+    "steamcmdPath": ""
+  }
+}

@@ -1,5 +1,5 @@
 'use strict';
-/* 混沌祭司（临时名，docs/design.md §9.5）：基础版终局首领，第 5 张图第 3 关。接口和失控主钟一样（update / draw / hit / hudInfo …）。
+/* 缄默主教（The Hushed Bishop，docs/design.md §9.5；代码里还叫 priest）：基础版终局首领，第 5 张图第 3 关。接口和失控主钟一样（update / draw / hit / hudInfo …）。
    1 布道：两侧召来两个族的信徒，信徒在时他有护盾罩；颂词环（慢弹环，两道缺口缓缓转）——先拆掩护再打他。
    2 静默：横向的静默带先闪 1.2 秒杂讯，然后 3 秒里带子里的飞机打不出子弹（不伤人）；低语弹瞄你；照搬你这一局的联动打回来一次。
    3 失序：防御每 8 秒在护盾和装甲之间换（换之前闪 1 秒）；静默带和颂词环一起来；剩四分之一血时转出一道慢慢旋转的布道光，缺口看得见。 */
@@ -39,10 +39,11 @@ class ChaosPriestBoss {
     if (w.timeStop > 0) return;
     if (this.weakT > 0) this.weakT -= dt;
     if (w.state !== 'play' || w.bossIntroT > 0) return;
-    this.fightT += dt; this.phaseT += dt;
+    if (!this.guard) this.fightT += dt; // 结界在的时候打不动他：失控倒计时也停（不然一半时间耗在信徒身上，2026-10-08 量过结界占了 30–60%）
+    this.phaseT += dt;
     if (this.transT > 0) { this.transT -= dt; if (this.transT <= 0) this.beginPhase(); return; }
     const adds = w.enemies.filter((e) => e.alive && e.bossAdd).length;
-    if (this.guard && adds === 0) { this.guard = false; Sound.sfx('weakOpen'); w.emit('flag', { text: '信徒散了 · 祭司的结界没了', color: 'white', dur: 1.4 }); }
+    if (this.guard && adds === 0) { this.guard = false; Sound.sfx('weakOpen'); w.emit('flag', { text: '信徒散了 · 主教的结界没了', color: 'white', dur: 1.4 }); }
     if (this.phase === 3) { // 防御在护盾和装甲之间换（先闪 1 秒）
       this.defT -= dt;
       if (this.defT <= 1 && !this.defWarn) { this.defWarn = 1; w.emit('flag', { text: this.def === 'shield' ? '外壳要变成装甲了' : '外壳要变成护盾了', color: 'white', dur: 1 }); Sound.sfx('warn'); }
@@ -60,9 +61,10 @@ class ChaosPriestBoss {
   jammed(p) { for (const b of this.bands) if (b.t > b.warn && p.y > b.y0 && p.y < b.y1) return true; return false; }
   /* ---------- 招式 ---------- */
   *atk_acolytes() {
+    if (this.w.enemies.some((e) => e.alive && e.bossAdd)) { yield* this.atk_hymn(); return; } // 上一批信徒还在：不再叫新的（会越叠越多）
     const w = this.w, M = MAPS[5], picks = [M.races[(this.cycleIdx * 3) % M.races.length], M.races[(this.cycleIdx * 3 + 2) % M.races.length]];
-    w.emit('flag', { text: '祭司召来了信徒 · 先打信徒，结界才会散', color: 'white', dur: 1.6 });
-    for (let i = 0; i < 2; i++) { const ty = i ? w.arena.bottom - 110 : w.arena.top + 110; w.addEnemy(i ? 'tickE' : 'starE', { x: w.W + 60, y: ty, path: 'mirror', tx: w.W * 0.6, ty, fireT: 2 + i, bossAdd: true, race: picks[i], hp: 260 * w.foeHpK(), life: 60 }); }
+    w.emit('flag', { text: '主教召来了信徒 · 先打信徒，结界才会散', color: 'white', dur: 1.6 });
+    for (let i = 0; i < 2; i++) { const ty = i ? w.arena.bottom - 110 : w.arena.top + 110; w.addEnemy(i ? 'tickE' : 'starE', { x: w.W + 60, y: ty, path: 'mirror', tx: w.W * 0.6, ty, fireT: 2 + i, bossAdd: true, race: picks[i], hp: 160 * w.foeHpK(), life: 60 }); } // 信徒是“先拆掩护”的机制，不是血量墙：260 → 160
     this.guard = true; yield 1.2;
   }
   *atk_hymn() { // 颂词环：慢弹环，两道缺口，一环比一环转一点
@@ -80,12 +82,12 @@ class ChaosPriestBoss {
   }
   *atk_mirror() { // 照搬你这一局的联动打回来一次
     const w = this.w, p = w.pickTarget(), lk = p && [...p.links][0];
-    if (!this.mirrored && lk) { this.mirrored = true; w.emit('flag', { text: `祭司照搬了你的「${SYNERGIES[lk].name}」`, color: 'gold', dur: 1.6 }); }
+    if (!this.mirrored && lk) { this.mirrored = true; w.emit('flag', { text: `主教照搬了你的「${SYNERGIES[lk].name}」`, color: 'gold', dur: 1.6 }); }
     const a0 = w.aimAngle(this.x, this.y);
     for (let k = 0; k < 2; k++) { for (let i = -3; i <= 3; i++) w.fire(i % 2 ? 'blue' : 'gold', this.x - 50, this.y, a0 + i * 0.14, 180 + k * 30, { silent: i !== 0 }); yield 0.5; }
     yield 0.8;
   }
-  *atk_kneel() { this.weakT = 2.4; this.w.emit('flag', { text: '祭司在祷告 · 面具露出来了', color: 'white', dur: 1.4 }); Sound.sfx('weakOpen'); yield 2.5; }
+  *atk_kneel() { this.weakT = 2.4; this.w.emit('flag', { text: '主教在祷告 · 面具露出来了', color: 'white', dur: 1.4 }); Sound.sfx('weakOpen'); yield 2.5; }
   *atk_beam() { // 终段：一道慢慢旋转的布道光，从上往下扫过左半边，缺口看得见
     const w = this.w, warn = 1.4 + w.diff.warnBonus, len = Math.max(560, this.x - 60);
     w.emit('flag', { text: '布道光 · 找它的缺口', color: 'gold', dur: 1.4 });
@@ -139,7 +141,7 @@ class ChaosPriestBoss {
     if (Math.random() < 0.6) w.part(pick(['shard', 'dot']), this.x + rand(-110, 110), this.y + rand(-120, 120), rand(-260, 260), rand(-300, 100), 1.2, rand(4, 9), pick(['#d6b8ff', '#ffd76a', '#ffffff']));
     if (this.dying <= 0) { this.alive = false; w.shake(0.6); Sound.sfx('win'); w.emit('relay', {}); w.onBossDead(); }
   }
-  hudInfo() { return { name: this.w.stage.bossName || '混沌祭司', def: this.def, phase: this.transT > 0 ? this.nextPhase : this.phase, phaseName: PRIEST_PHASES[this.transT > 0 ? this.nextPhase : this.phase].name, hp: this.hp, maxHp: this.maxHp, shield: this.guard ? 1 : 0, shieldMax: 1, weak: this.weakT > 0 }; }
+  hudInfo() { return { name: this.w.stage.bossName || '缄默主教', def: this.def, phase: this.transT > 0 ? this.nextPhase : this.phase, phaseName: PRIEST_PHASES[this.transT > 0 ? this.nextPhase : this.phase].name, hp: this.hp, maxHp: this.maxHp, shield: this.guard ? 1 : 0, shieldMax: 1, weak: this.weakT > 0 }; }
   draw(g) {
     if (!this.alive) return;
     const w = this.w, t = this.t;

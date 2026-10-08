@@ -468,8 +468,8 @@ async function careerReport() {
   if (c1.length && q(c1, 0.25) < C.clearP25) W.push(`四分之一的人 ${hr(q(c1, 0.25))} 就打通了第 1 张图（目标不早于 ${C.clearP25} 小时）`);
   for (const n of MAP_ORDER.slice(1)) { const d = out.map((P, k) => (clearH[n][k] != null && clearH[n - 1][k] != null ? clearH[n][k] - clearH[n - 1][k] : null)), r = C.maps && C.maps[n]; if (r && d.some((v) => v != null) && !inR(q(d, 0.5), r)) W.push(`第 ${n} 张图比上一张多用 ${hr(q(d, 0.5))}（目标 ${r.join('–')} 小时）`); }
   const fin = clearH[MAP_ORDER.length].filter((v) => v != null);
-  if (C.finalMedian && fin.length < out.length * 0.5) W.push(`只有 ${pc(fin.length, out.length)}% 的人打倒了混沌祭司（目标中位 ${C.finalMedian.join('–')} 小时）`);
-  else if (C.finalMedian && !inR(q(clearH[MAP_ORDER.length], 0.5), C.finalMedian)) W.push(`打倒混沌祭司中位 ${hr(q(clearH[MAP_ORDER.length], 0.5))}（目标 ${C.finalMedian.join('–')} 小时）`);
+  if (C.finalMedian && fin.length < out.length * 0.5) W.push(`只有 ${pc(fin.length, out.length)}% 的人打倒了缄默主教（目标中位 ${C.finalMedian.join('–')} 小时）`);
+  else if (C.finalMedian && !inR(q(clearH[MAP_ORDER.length], 0.5), C.finalMedian)) W.push(`打倒缄默主教中位 ${hr(q(clearH[MAP_ORDER.length], 0.5))}（目标 ${C.finalMedian.join('–')} 小时）`);
   // 每个首领：第一次输给它以后多少局打过；打倒那一场的强度（DE28）
   const bossIds = ALL_STAGES_N, stuck = [], stuckTop = [], lowWins = {};
   for (const id of bossIds) {

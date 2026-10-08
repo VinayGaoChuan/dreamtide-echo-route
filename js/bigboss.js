@@ -1,5 +1,5 @@
 'use strict';
-/* 第 2–4 张图的大首领（docs/design.md §9.5）：霜心女王（2-3）、电弧董事（3-3）、熔核将军（4-3）。接口和失控主钟、混沌祭司一样
+/* 第 2–4 张图的大首领（docs/design.md §9.5）：霜巢女王（2-3）、弧光董事会（3-3）、熔炉元帅（4-3）。接口和失控主钟、缄默主教一样
    （update / draw / hit / hudInfo …）。生命 1000，650 / 300 换阶段；每阶段换一种躲法，攻击从本图族的招牌敌人长出来，最后比开头更激烈。
    规则全用这一局的随机数，联机各端一样。 */
 const BIG_BOSS_OF = { '2-3': 'queen', '3-3': 'board', '4-3': 'general' };
@@ -58,10 +58,10 @@ class BigBoss {
   fan(n, spread, spd, type) { const a0 = this.w.aimAngle(this.x, this.y); for (let i = 0; i < n; i++) this.w.fire(type || 'blue', this.x - 60, this.y, a0 + (i - (n - 1) / 2) * spread, spd, { silent: i > 0 }); }
   ringShot(n, spd, gapW, type) { const gap = srandi(0, n - 1), off = srand(TAU); for (let i = 0; i < n; i++) { if ((i - gap + n) % n < gapW) continue; this.w.fire(type || 'pink', this.x, this.y, off + (i / n) * TAU, spd, { silent: i > 0 }); } }
   *atk_weak() { // 喘口气：弱点露出来 2.4 秒（每阶段至少一次）
-    this.weakT = 2.4; const txt = { queen: '女王在喘气 · 冠冕露出来了', board: '董事在重启 · 胸口的接口亮了', general: '将军在装弹 · 熔炉门开了' }[this.kind];
+    this.weakT = 2.4; const txt = { queen: '女王在喘气 · 冠冕露出来了', board: '董事在重启 · 胸口的接口亮了', general: '元帅在装弹 · 熔炉门开了' }[this.kind];
     this.w.emit('flag', { text: txt, color: 'white', dur: 1.4 }); Sound.sfx('weakOpen'); yield 2.5;
   }
-  /* ---------- 霜心女王 ---------- */
+  /* ---------- 霜巢女王 ---------- */
   *atk_wall() { this.w.emit('flag', { text: '冰墙推过来了 · 从缝里过', color: 'white', dur: 1.2 }); this.w.spawnRaceFoe('icewall'); yield 2.2; }
   *atk_shards() { for (let k = 0; k < 3; k++) { this.fan(5, 0.16, 190 + k * 20, 'blue'); yield 0.45; } yield 0.6; }
   *atk_crown() { for (let k = 0; k < 3; k++) { this.ringShot(20, 120, 3, k % 2 ? 'blue' : 'pink'); yield 0.8; } yield 0.5; }
@@ -85,7 +85,7 @@ class BigBoss {
     }
     if (F.t > F.warn + 0.6) this.freezeRing = null;
   }
-  /* ---------- 电弧董事 ---------- */
+  /* ---------- 弧光董事会 ---------- */
   *atk_pylons() { // 四座供电塔：上下两对，塔在时董事有护盾
     const w = this.w; if (w.enemies.some((e) => e.alive && e.bossAdd)) { yield 0.2; return; } // 上一组还没拆完：不叠第二组
     w.emit('flag', { text: '供电塔 · 打掉任一座，那一道电就断', color: 'white', dur: 1.4 });
@@ -109,7 +109,7 @@ class BigBoss {
     this.portIdx = -1; yield 0.4;
   }
   *atk_ring() { for (let k = 0; k < 3; k++) { this.ringShot(22, 140, 3, k % 2 ? 'blue' : 'gold'); yield 0.6; } yield 0.6; }
-  /* ---------- 熔核将军 ---------- */
+  /* ---------- 熔炉元帅 ---------- */
   *atk_barrage() { // 炮击：一片落点围着你亮起来
     const w = this.w, q = w.pickTarget(), n = this.phase === 1 ? 5 : 7;
     w.emit('flag', { text: '炮击 · 离开红圈', color: 'white', dur: 1.0 });
@@ -181,7 +181,7 @@ class BigBoss {
 
 /* ================================================== 画法（胖乎乎、族色、弱点亮起来看得见） ================================================== */
 function bossGlow(g, r, c, a) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, r, hexA(c, 0.7), a); g.globalCompositeOperation = 'source-over'; }
-/* 霜心女王：一颗圆滚滚的冰晶身体，头顶冰晶冠冕，两侧一圈冰片披风；弱点 = 冠冕中间的蓝宝石 */
+/* 霜巢女王：一颗圆滚滚的冰晶身体，头顶冰晶冠冕，两侧一圈冰片披风；弱点 = 冠冕中间的蓝宝石 */
 function drawQueen(g, b, t) {
   const weak = b.weakT > 0, fl = b.hitFlash || 0;
   g.save(); g.translate(b.x, b.y); g.lineJoin = 'round';
@@ -201,7 +201,7 @@ function drawQueen(g, b, t) {
   if (b.def === 'shield' || b.guard) { g.strokeStyle = 'rgba(120,210,255,0.5)'; g.lineWidth = 3; g.beginPath(); for (let i = 0; i <= 6; i++) { const a = (i / 6) * TAU + 0.52; g.lineTo(Math.cos(a) * 128, Math.sin(a) * 128); } g.stroke(); }
   g.restore();
 }
-/* 电弧董事：一台胖胖的显示器脑袋机器人，系着电青色领带，背后两根天线冒电；弱点 = 胸口亮起的接口 */
+/* 弧光董事会：一台胖胖的显示器脑袋机器人，系着电青色领带，背后两根天线冒电；弱点 = 胸口亮起的接口 */
 function drawBoard(g, b, t) {
   const fl = b.hitFlash || 0;
   g.save(); g.translate(b.x, b.y); g.lineJoin = 'round';
@@ -219,7 +219,7 @@ function drawBoard(g, b, t) {
   if (b.guard) { g.strokeStyle = `rgba(62,240,255,${0.5 + Math.sin(t * 8) * 0.2})`; g.lineWidth = 5; g.beginPath(); g.ellipse(0, 0, 140, 170, 0, 0, TAU); g.stroke(); }
   g.restore();
 }
-/* 熔核将军：一座矮胖的熔炉坦克，肚子上一扇炉门（门开 = 弱点，里面是发光的核心），一门粗炮，头顶小军帽 */
+/* 熔炉元帅：一座矮胖的熔炉坦克，肚子上一扇炉门（门开 = 弱点，里面是发光的核心），一门粗炮，头顶小军帽 */
 function drawGeneral(g, b, t) {
   const fl = b.hitFlash || 0, door = b.door || 0;
   g.save(); g.translate(b.x, b.y); g.lineJoin = 'round';

@@ -490,7 +490,7 @@ Object.assign(World.prototype, {
           if (!P.fired) for (let i = 0; i < 3; i++) { const yy = P.y0 + (i - 1) * 26; g.fillStyle = `rgba(20,10,40,${0.5 * a})`; g.beginPath(); g.ellipse(18 + Math.sin(t * 10 + i) * 4, yy, 16, 9, 0, 0, TAU); g.fill(); } // 引擎影子
           g.save(); g.globalAlpha = a * 0.8; g.strokeStyle = '#ffb2a8'; g.lineWidth = 3; g.setLineDash([10, 10]); g.lineDashOffset = -t * 90;
           const p = this.player; g.beginPath(); g.moveTo(0, P.y0); g.quadraticCurveTo(p.x + 40, P.cy, W * 0.72, (this.arena.top + this.arena.bottom) / 2); g.stroke(); g.setLineDash([]); g.restore();
-          if (!P.fired) drawStepPill(g, 120, P.below ? this.arena.bottom - 40 : this.arena.top + 40, '后方追兵 · 会从' + (P.below ? '下方' : '上方') + '绕到前面', '#ffb2a8', a);
+          if (!P.fired) drawStepPill(g, 120, P.below ? this.arena.bottom - 40 : this.arena.top + 40, (P.below ? '后方追兵 · 会从下方绕到前面' : '后方追兵 · 会从上方绕到前面'), '#ffb2a8', a);
           break;
         }
         case 'rift': drawRift(g, P.x, P.y, P.t, P.warn, P.open, P.closeT || 0, t); break;

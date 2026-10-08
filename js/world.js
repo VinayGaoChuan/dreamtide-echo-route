@@ -340,7 +340,7 @@ class World {
     p.fireT -= dt;
     const rate = (p.gunB ? p.gunB.rate : this.P.rate) * ((p.stats && p.stats.rateK) || 1) * (p.candy > 0 ? 1.5 : 1) * (this.streak.n >= 30 ? 1.1 : 1);
     if (this.ritual && this.ritual.st !== 'resume') p.fireT = Math.max(p.fireT, 0.05); // 仪式期间自动射击暂停
-    else if (this.boss && this.boss.jammed && this.boss.jammed(p)) p.fireT = Math.max(p.fireT, 0.05); // 混沌祭司的静默带：打不出子弹
+    else if (this.boss && this.boss.jammed && this.boss.jammed(p)) p.fireT = Math.max(p.fireT, 0.05); // 缄默主教的静默带：打不出子弹
     else if (p.fireT <= 0) { p.fireT += 1 / rate; if (p.fireT < -0.1) p.fireT = 0; this.fireMain(); }
     if (p.inv <= 0 && !(this.bfx && this.bfx.id === 'cloud' && this.bursting && this.bursting.owner === p.idx) && this.mode === 'run') {
       for (const e of this.enemies) {

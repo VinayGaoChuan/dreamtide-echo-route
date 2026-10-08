@@ -358,6 +358,8 @@ const Lobby = {
   linger: null, lastFlush: 0, unsent: false, sessionAt: 0, connectedNow: null,
   async connect() {
     if (this.net) return this.net;
+    const steam = typeof window !== 'undefined' && window.kitBridge && window.kitBridge.steam; // 打包版：只能走 Steam（程序不能连外网）
+    if (steam) { this.net = new SteamNet(steam); this.net.onChange(() => this.changed()); NetTicker.on((now) => this.tick(now)); NetTicker.start(); return this.net; }
     const ws = mpServerUrl(); // 优先自己的联机服务器
     let room = null;
     if (!ws) try { if (window.claude && typeof window.claude.use === 'function') room = await window.claude.use('room'); } catch (e) { room = null; }
@@ -385,9 +387,9 @@ const Lobby = {
     return [...rooms.values()].filter((r) => r.host);
   },
   me(patch) { if (!this.net) return; this.net.presence({ mp: Object.assign({}, this.myMp(), patch) }); this.saveRoom(); },
-  create(profile) { this.code = Math.random().toString(36).slice(2, 6).toUpperCase(); this.isHost = true; this.me(Object.assign({ code: this.code, host: true, start: null }, profile)); this.net.presence({ ls: null, quit: null }); },
+  create(profile) { this.code = Math.random().toString(36).slice(2, 6).toUpperCase(); this.isHost = true; this.me(Object.assign({ code: this.code, host: true, start: null }, profile)); this.net.presence({ ls: null, quit: null }); if (this.net.kind === 'steam') this.net.createLobby().then(() => this.changed(), (e) => console.error('[联机] 建 Steam 房间失败', e)); },
   join(code, profile) { this.code = code; this.isHost = false; this.me(Object.assign({ code, host: false, start: null, rdy: null }, profile)); this.net.presence({ ls: null, quit: null }); },
-  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null, ls: null, quit: 1 }); this.code = null; this.isHost = false; this.gameId = null; this.saveRoom(); }, // quit：明确说“我退出了”（刚连上还没发房间信息的新连接不会被当成退出）
+  leave() { this.session = null; this.linger = null; if (this.net) this.net.presence({ mp: null, ls: null, quit: 1 }); this.code = null; this.isHost = false; this.gameId = null; this.saveRoom(); if (this.net && this.net.kind === 'steam') { const n = this.net; setTimeout(() => { if (!this.code) n.leaveLobby(); }, 300); } }, // Steam：先把“我退出了”发出去，再离开大厅 // quit：明确说“我退出了”（刚连上还没发房间信息的新连接不会被当成退出）
   /* 刷新回到原对局：本标签页记住房间号、自己的在场状态（房主还带着开局单）和正在打的局号 */
   saveRoom() { ssSet(SS_ROOM, this.code ? JSON.stringify({ code: this.code, isHost: this.isHost, mp: this.myMp(), gameId: this.session ? this.gameId : null, at: Date.now() }) : null); },
   savedRoom() { try { const d = JSON.parse(ssGet(SS_ROOM) || 'null'); return d && d.code && Date.now() - d.at < 20 * 60000 ? d : null; } catch (e) { return null; } },
@@ -422,7 +424,7 @@ const Lobby = {
   },
   /* 自动缓冲：操作从一人经服务器到另一人 ≈ 两人往返延迟的一半之和 + 服务器 / 客户端合并发送的时间；取最慢的两个人 */
   autoDelay(ms) {
-    if (this.net.kind === 'room') return 5;
+    if (this.net.kind === 'room') return 5; // Steam 和自己的服务器一样按延迟算
     const r = (ms || this.members()).map((m) => (m.isMe ? this.net.rtt : m.rtt) || 0).sort((a, b) => b - a);
     return clamp(Math.ceil((((r[0] || 0) + (r[1] || 0)) / 2 + 70) / (1000 / LOCKSTEP.hz)) + 1, 3, 12);
   },
@@ -442,7 +444,7 @@ const Lobby = {
     // 操作帧的预算：4 KiB 减去在场状态里其他字段（房主还带着开局单）
     const other = JSON.stringify({ mp: this.myMp() }).length;
     this.peerRtt = []; this.lead = null; this.leadAt = 0;
-    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, (this.net.kind === 'ws' ? 7000 : 3800) - Math.ceil(other * 1.5) - 220), rejoin, // 自己的服务器每份在场状态上限 8 KiB（中文名按 3 字节留余量）
+    this.session = new LockstepSession({ selfIndex: idx, n: st.roster.length, delay: st.delay, isHost: this.isHost, budget: Math.max(600, (this.net.kind === 'ws' || this.net.kind === 'steam' ? 7000 : 3800) - Math.ceil(other * 1.5) - 220), rejoin, // 自己的服务器每份在场状态上限 8 KiB（中文名按 3 字节留余量）
       send: (msg) => this.net.presence({ ls: Object.assign({ g: st.id, rt: this.myRtt() }, msg) }) }); // 操作帧单独一个字段：服务器只转发变化，资料不重发
     if (rejoin) this.session.replaying = true; // 新建的世界从开局按操作记录追上（静音、不放事件）
     this.saveRoom();
@@ -462,7 +464,8 @@ const Lobby = {
       if (mine || early) connected[j] = true;
       if (mine && this.seenLs.get(j) !== ls) { this.seenLs.set(j, ls); S.receive(j, ls); if (typeof ls.rt === 'number') this.peerRtt[j] = ls.rt; }
     }
-    S.isHost = S.hostIndex(connected) === S.me; // 房主走了（或断线中），名单里下一位在线的接手
+    const wasHost = S.isHost; S.isHost = S.hostIndex(connected) === S.me; // 房主走了（或断线中），名单里下一位在线的接手
+    if (!wasHost && S.isHost && S.me !== 0 && !S.hostLeftSaid && typeof window !== 'undefined' && window.K) { S.hostLeftSaid = true; window.K.emit('host-left'); } // 名单第一位是开局的房主
     if (!this.net.syncedAt || performance.now() - this.net.syncedAt > 3000) S.hostCheckDrops(connected, quit); // 刚（重新）连上的几秒不判别人掉线：等名单和操作帧都到齐
     this.connectedNow = connected; S.linkUp = connected;
   },
@@ -479,7 +482,7 @@ const Lobby = {
      变慢马上加长，变快每 2 秒才缩短一帧，避免来回抖；只改操作发出的早晚，不改操作内容，所以不影响同步。 */
   leadFrames(now) {
     const S = this.session; if (!S) return 0;
-    if (!this.net || this.net.kind !== 'ws') return S.delay;
+    if (!this.net || (this.net.kind !== 'ws' && this.net.kind !== 'steam')) return S.delay;
     let other = 0; for (let j = 0; j < S.n; j++) if (j !== S.me && S.drops[j] === undefined && this.connectedNow && this.connectedNow[j]) other = Math.max(other, this.peerRtt[j] || 0);
     const want = clamp(Math.ceil(((this.myRtt() + other) / 2 + 70) / (1000 / LOCKSTEP.hz)) + 1, 3, 20);
     if (this.lead === null || want > this.lead) this.lead = Math.max(want, this.lead === null ? S.delay : this.lead);

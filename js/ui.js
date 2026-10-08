@@ -111,12 +111,12 @@ function moveFocus(scr, dir) {
 /* ================================================== TITLE ================================================== */
 function showTitle() {
   Sound.setMode('title'); G.bg = 'title'; G.sea.setTheme('title');
-  const first = !G.meta.seenTitle;
+  const first = !G.meta.seenTitle, zhTitle = /^zh/.test(I18N.lang); // 中文显示「余烬：迷航」；其他语言显示英文名（商店上也是）
   const el = showScreen('title', `
     <div class="corner-tr"><button class="icon-btn" id="t-mp" type="button">${icon('i-team')}<span>联机</span></button><button class="icon-btn" id="t-sound" type="button" aria-label="声音开关">${icon(G.meta.settings.muted ? 'i-mute' : 'i-sound')}<span>${G.meta.settings.muted ? '静音' : '声音'}</span></button></div>
     <div class="title-block">
-      <h1 class="title-main">拾荒<em>之翼</em></h1>
-      <p class="title-sub">LOOTWING</p>
+      <h1 class="title-main ${zhTitle ? '' : 'long'}">${zhTitle ? '余烬<em>：迷航</em>' : 'EMBERS<em>LOST VOYAGE</em>'}</h1>
+      <p class="title-sub">${[zhTitle ? 'EMBERS: LOST VOYAGE' : '', DEMO.on ? 'DEMO' : ''].filter(Boolean).join(' · ')}</p>
       <p class="title-tag">${first ? '地球失联第七年。开着捡来的船，从他们的地盘上抢东西。' : '回声：欢迎回站。'}</p>
       <p class="title-start">点击任意处开始</p>
     </div>
@@ -230,6 +230,21 @@ function giftPickHtml(x) {
   return `<div class="panel mp-giftpick"><div class="label">送给 ${esc(x.name)} 一件 <small class="dim-text">蓝、黄、绿可以送；暗金和改造台改过的不行</small></div><div class="cl-items">${L.map((it) => `<button class="cl-it" type="button" data-giftitem="${esc(it.uid)}" style="color:${QUALS[it.q].color}">${esc(Gear.name(it))} <small class="dim-text">Lv${it.req}</small></button>`).join('')}</div></div>`;
 }
 /* 结局（§9.5）：中继天线接上，“回声”第一次听到地球的杂音——“……还有人吗？”，然后是“未完”。点一下或按键继续（3 秒以后） */
+/* 试玩版结束（§21）：第一次打通第 1 张图。后面四张图是锁着的剪影；按继续回到结算，之后还能接着刷这张图 */
+function showDemoEnd(next) {
+  const cards = MAP_ORDER.filter((mm) => mm > DEMO.maps).map((mm) => `<div class="demo-map" style="--mc:${MAPS[mm].color}"><b>${mm}</b><span>？？？</span></div>`).join('');
+  const el = showScreen('demo-end', `<div class="center-col demo-end">
+      <div class="h-display" style="font-size:var(--fs-xl);color:var(--lamp2)">试玩版就到这里</div>
+      <div class="demo-maps">${cards}</div>
+      <div class="dim-text">正式版：还有 ${MAP_ORDER.length - DEMO.maps} 张地图、${(MAP_ORDER.length - DEMO.maps) * 3} 个首领，最后是缄默主教</div>
+      <div class="row wrap" style="justify-content:center">${wishBtnHtml()}<button class="btn primary big" id="demo-go" type="button" autofocus>${icon('i-play')} 继续</button></div></div>`, { bg: 'station', label: '试玩结束' });
+  Sound.sfx('cargoShip');
+  $('#demo-go', el).onclick = () => { Sound.sfx('select'); next(); };
+  bindWish(el);
+}
+/* 试玩版的“加入愿望单”（§21，试玩结尾和输了的结算）：打包外壳配了正式版的商店页才显示，用 Steam 覆盖层打开 */
+function wishBtnHtml() { try { return DEMO.on && window.__wgpNative && window.__wgpNative.hasStore() ? `<button class="btn big cyan" id="wish" type="button">${icon('i-heart')} 加入愿望单</button>` : ''; } catch (e) { return ''; } }
+function bindWish(el) { const b = $('#wish', el); if (b) b.onclick = () => { Sound.sfx('select'); try { window.__wgpNative.openStore(); } catch (e) { /* 外壳打不开就不响应 */ } }; }
 function showRelayEnding(next) {
   const el = showScreen('ending', `<canvas class="relay-c" id="relay-c"></canvas><div class="relay-txt" id="relay-txt"></div><div class="relay-skip dim-text" id="relay-skip" hidden>点一下继续</div>`, { bg: 'station', cls: 'relay', label: '结局' });
   const c = $('#relay-c', el), g = c.getContext('2d'), txt = $('#relay-txt', el), t0 = performance.now(); let done = false;
@@ -297,6 +312,7 @@ function showMultiplayer(back, joinCode, resumeData) {
     if (Lobby.code && !Lobby.isHost && !room && net.connected() && !Lobby.resumeWait) { G.hostGoneAt = G.hostGoneAt || performance.now(); if (performance.now() - G.hostGoneAt > 8000) { G.hostGoneAt = 0; Lobby.leave(); toast('房主离开了，房间已解散', '#ffb2a8'); } else { setTimeout(paint, 1000); } } else G.hostGoneAt = 0;
     const stale = net.stale && net.stale(), nb = $('#mp-reload', el); if (nb) nb.hidden = !stale;
     $('#mp-net', el).textContent = stale ? '游戏有新版本了：刷新页面才能和大家联机' : net.kind === 'ws' ? (net.connected() ? `已连上联机服务器${net.rtt !== null ? ` · 延迟 ${net.rtt} 毫秒` : ''}` : '正在连接联机服务器…')
+      : net.kind === 'steam' ? (net.lobbyId() ? `Steam 房间${net.rtt !== null ? ` · 延迟 ${net.rtt} 毫秒` : ''}` : 'Steam 联机：建好房间后邀请好友，或从好友列表加入')
       : net.kind === 'room' ? '通过 Claude 房间连接：打开同一个游戏链接的人都能看到你的房间。' : '本机测试模式：在这个浏览器里再开一个窗口打开游戏，就能互相看到。';
     if (room && !Lobby.isHost) { if (room.mode) mode = room.mode; if (room.stat) stat = room.stat; } // 跟着房主选的玩法
     const host = Lobby.isHost, me = Lobby.myMp();
@@ -313,7 +329,7 @@ function showMultiplayer(back, joinCode, resumeData) {
     if (!Lobby.code) {
       const myId = net.selfId;
       body.innerHTML = `<h3>房间</h3>
-        <div class="row wrap"><button class="btn primary" id="mp-create" type="button" autofocus>${icon('i-play')} 创建房间</button><span class="dim-text">建好后把同一个链接发给朋友</span></div>
+        <div class="row wrap"><button class="btn primary" id="mp-create" type="button" autofocus>${icon('i-play')} 创建房间</button><span class="dim-text">${net.kind === 'steam' ? '建好后邀请 Steam 好友' : '建好后把同一个链接发给朋友'}</span></div>
         <div class="mp-list">${rooms.length ? rooms.map((r) => { const mine = r.started && r.players.includes(myId); return `<div class="mp-room"><b class="mp-code">${esc(r.code)}</b><span>${esc(r.members[0].name)} 的房间 · ${r.mode === 'vs' ? `对抗 · ${r.stat === 'fair' ? '统一属性' : '真实成长'}` : '合作'} · ${r.members.length}/${MP_MAX} 人${r.started ? ' · 进行中' : r.stage && r.mode !== 'vs' ? ` · ${esc(r.stage)}` : ''}</span>${mine ? `<button class="btn small primary" data-back="${esc(r.code)}" type="button">回到对局</button>` : `<button class="btn small" data-join="${esc(r.code)}" type="button" ${r.started || r.members.length >= MP_MAX ? 'disabled' : ''}>${r.started ? '进行中' : '加入'}</button>`}</div>`; }).join('') : '<p class="dim-text">现在没有可加入的房间。</p>'}</div>`;
       $('#mp-create', body).onclick = () => { Sound.sfx('select'); G.mpRound = 0; Lobby.create(mpProfile()); sig = ''; paint(); };
       $$('[data-join]', body).forEach((b) => b.onclick = () => { Sound.sfx('select'); Lobby.join(b.dataset.join, mpProfile()); sig = ''; paint(); });
@@ -334,9 +350,10 @@ function showMultiplayer(back, joinCode, resumeData) {
         : room && room.started ? `<p class="dim-text">这一局已经开始了，等下一局。</p>`
         : `<div class="row wrap">${cd ? `<b class="mp-cd">${cdLeft} 秒后开始</b><span class="dim-text">现在取消准备也来得及</span>` : ''}<button class="btn ${meReady ? 'coral' : 'primary'}" id="mp-ready" type="button">${meReady ? '取消准备' : '✓ 准备'}</button><span class="dim-text">${meReady ? '等房主开始…' : '看完上面的规则，点准备，房主才能开始'}</span></div>`}
       ${host && /^https?:$/.test(location.protocol) ? `<div class="row wrap"><span class="label">邀请链接</span><input class="mp-link" id="mp-link" readonly value="${esc(inviteLink(Lobby.code))}"><button class="btn small cyan" id="mp-copy" type="button">复制</button></div>` : ''}
-      <div class="row"><button class="btn coral small" id="mp-leave" type="button">离开房间</button></div>`;
+      <div class="row">${net.kind === 'steam' ? `<button class="btn small cyan" id="mp-invite" type="button">${icon('i-team')} 邀请好友</button>` : ''}<button class="btn coral small" id="mp-leave" type="button">离开房间</button></div>`;
     paintPlaneCanvases(body);
     $('#mp-leave', body).onclick = () => { Sound.sfx('uiBack'); Lobby.leave(); sig = ''; paint(); };
+    const ib = $('#mp-invite', body); if (ib) ib.onclick = () => { Sound.sfx('ui'); net.invite(); toast('在 Steam 的窗口里选好友', '#9ff2c8'); };
     // 送装备：点队友的「送装备」→ 从仓库挑一件（蓝黄绿）→ 进待送；对方收到以后自动清掉；对方不在时可以取消拿回
     $$('[data-gift]', body).forEach((b) => b.onclick = () => { Sound.sfx('ui'); G.giftTo = G.giftTo === b.dataset.gift ? null : b.dataset.gift; sig = ''; paint(); });
     $$('[data-giftitem]', body).forEach((b) => b.onclick = () => { const to = ms.find((x) => x.peer === G.giftTo); const g = to && Station.giftSend(m, b.dataset.giftitem, to.peer, to.name); if (!g) { Sound.sfx('denied'); return; } Sound.sfx('select'); persist(); G.giftTo = null; Lobby.me(mpProfile()); toast(`送给 ${to.name}：${Gear.name(g.item)} · 对方收到就送到了`, QUALS[g.item.q].color, null, 2600); sig = ''; paint(); });
@@ -359,7 +376,8 @@ function showMultiplayer(back, joinCode, resumeData) {
       const t0 = performance.now(); $('#mp-net', el).textContent = `正在进入房间 ${joinCode}…`;
       const tryJoin = () => {
         if (Lobby.code || G.screen !== 'mp') return;
-        const r = Lobby.openRooms().find((x) => x.code === joinCode);
+        const r = joinCode === '*' ? Lobby.openRooms()[0] : Lobby.openRooms().find((x) => x.code === joinCode); // *：Steam 邀请进的大厅里只有一个房间
+        if (r && joinCode === '*') joinCode = r.code;
         if (r && !r.started && r.members.length < MP_MAX) { Lobby.join(joinCode, mpProfile()); sig = ''; paint(); return; }
         if (performance.now() - t0 > 8000) { toast(r ? (r.started ? '这个房间已经开局了' : '这个房间满了') : `房间 ${joinCode} 不在了`, '#ffb2a8'); return; }
         setTimeout(tryJoin, 300);
@@ -367,6 +385,13 @@ function showMultiplayer(back, joinCode, resumeData) {
       tryJoin();
     }
   }).catch(() => { $('#mp-body', el).innerHTML = '<p class="dim-text">连接失败，请刷新页面重试。</p>'; });
+}
+/* Steam 好友邀请 / 从好友列表加入：进好友的大厅，再进他的房间（打一局中途收到的，先记着，回站后再进） */
+function steamInviteJoin(id) {
+  const net = Lobby.net; if (!net || net.kind !== 'steam' || !id) return;
+  if (G.world && !G.world.done && G.world.mode === 'run') { net.pendingInvite = id; toast('收到好友的联机邀请：打完这一局再进', '#ffe38a', null, 3000); return; }
+  if (Lobby.code) Lobby.leave();
+  net.joinLobby(id).then(() => { G.meta.seenTitle = true; showMultiplayer(showHub, '*'); }, (e) => { console.error('[联机] 进好友的房间失败', e); toast('没能进入好友的房间', '#ffb2a8'); });
 }
 function startMpRun(st) {
   const idx = Lobby.beginSession(st); if (idx < 0) return false;
@@ -459,7 +484,8 @@ function onRunEnd(res) {
   G.stationArrive = { credits: out.credits, kept: out.kept.length, unlocks: out.unlocks, items: out.kept.map((it) => ({ q: it.q, name: Gear.name(it) })) }; // 回家开货舱（§14）
   if (first && out.kept.length) m.station.tut.equip = 1; // 第一次带着装备回家：站里强制引导换装（§8.4）
   const relay = G.relayPending && out.mapClear === 5; G.relayPending = false;
-  if (relay) showRelayEnding(() => showEnd(G.lastRes)); else showEnd(G.lastRes); // 第一次打倒混沌祭司：先放结局（§9.5）
+  if (DEMO.on && out.mapClear === DEMO.maps) showDemoEnd(() => showEnd(G.lastRes)); // 试玩版：第一次打通就到这里（§21）
+  else if (relay) showRelayEnding(() => showEnd(G.lastRes)); else showEnd(G.lastRes); // 第一次打倒缄默主教：先放结局（§9.5）
 }
 /* 对抗分数拆解：各项合计正好等于总分（vs.js 的分数账本） */
 const VS_PART_NAMES = [['kill', '击破'], ['tower', '风塔'], ['sent', '送干扰'], ['held', '防守'], ['ko', '压制'], ['loss', '被击毁']];
@@ -577,11 +603,12 @@ function showEnd(E) {
           <div class="advice">${planHtml(E.lure.plan)}<small class="dim-text">局内能力每局重新收集：下一局从第一步开始</small></div></div>
       </div>
       <div class="statrow">${[['击破', st.kills], ['最高连杀', st.maxStreak], ['升级选择', st.crystals], ['联动', st.syns], ['大招', st.bursts]].map(([k, v]) => `<div class="stat-pill"><span class="num" data-count="${v}">${v}</span><span>${k}</span></div>`).join('')}</div>
-      <div class="row wrap" style="justify-content:center"><button class="btn primary" id="end-hub" type="button" autofocus>${icon('i-hangar')} 回站</button><button class="btn" id="end-again" type="button">${icon('i-play')} ${r.mp ? '回到联机房间' : '再来一局'}</button></div>
+      <div class="row wrap" style="justify-content:center"><button class="btn primary" id="end-hub" type="button" autofocus>${icon('i-hangar')} 回站</button><button class="btn" id="end-again" type="button">${icon('i-play')} ${r.mp ? '回到联机房间' : '再来一局'}</button>${r.win ? '' : wishBtnHtml().replace('btn big cyan', 'btn cyan')}</div>
     </div>`, { bg: 'world', cls: 'dim', label: r.win ? '通关结算' : '失败结算' });
   $$('canvas[data-gearobj]', el).forEach((c) => paintGearIcon(c, G.st.extra[c.dataset.gearobj]));
   $('#end-hub', el).onclick = () => { Sound.sfx('uiBack'); if (m.station.tut && m.station.tut.equip === 1) { G.st.panel = 'equip'; G.st.tut = { step: 1 }; } showHub(); };
   $('#end-again', el).onclick = () => { Sound.sfx('select'); if (r.mp) showMultiplayer(showHub); else startRun(stationStart()); };
+  bindWish(el);
   countUp(el);
   // 最好的那件最后出场：金、绿各一声
   const best = kept[0]; if (best && QUALS[best.q].rank >= 3) setTimeout(() => Sound.sfx(best.q === 'gold' ? 'lootGold' : 'lootGreen'), 600);
@@ -647,7 +674,7 @@ function showRecords(back) {
   const last = runs[runs.length - 1];
   const avg = (k) => { const v = runs.map((r) => r[k]).filter((x) => x !== null && x !== undefined); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const val = { firstKill: [last && last.firstKill, avg('firstKill')], firstSkill: [last && last.firstSkill, avg('firstSkill')], choiceTime: [last && last.choiceTime, avg('choiceTime')], firstBurst: [last && last.firstBurst, avg('firstBurst')], changes: [last && last.changes, avg('changes')], highlights: [last && last.highlights, avg('highlights')], avgKill: [last && last.avgKill, avg('avgKill')], gap: [last && last.gap, avg('gap')], restart: [m.telemetry.lastRestart, null], second: [c.first_run_ended ? Math.round(((c.second_run_started || 0) / c.first_run_ended) * 100) : null, null], interacts: [last && last.interacts, avg('interacts')], interactTime: [last && last.interactTime, avg('interactTime')], stockIdle: [last && last.stockIdle, avg('stockIdle')], noGoal: [last && last.noGoal, avg('noGoal')], armorFirst: [last && last.armorFirst, avg('armorFirst')], armorAfter: [last && last.armorAfter, avg('armorAfter')] };
-  const PG = m.progress, stageRows = STAGE_ORDER.map((id) => { const rs = runs.filter((r) => r.stage === id), ch = rs.map((r) => r.choiceTime).filter((x) => x !== null && x !== undefined), ia = rs.map((r) => r.interacts || 0); return `<tr><td>${id} ${STAGES[id].name}</td><td class="num">${PG.attempts[id] || 0}</td><td class="num">${PG.clears[id] || 0}</td><td class="num">${PG.best[id] ? fmtTime(PG.best[id]) : '—'}</td><td class="num">${ch.length ? (ch.reduce((a, b) => a + b, 0) / ch.length).toFixed(1) + ' 秒' : '—'}</td><td class="num">${ia.length ? (ia.reduce((a, b) => a + b, 0) / ia.length).toFixed(1) : '—'}</td></tr>`; }).join('');
+  const PG = m.progress, stageRows = STAGE_ORDER.map((id) => { const rs = runs.filter((r) => r.stage === id), ch = rs.map((r) => r.choiceTime).filter((x) => x !== null && x !== undefined), ia = rs.map((r) => r.interacts || 0); return `<tr><td>${id} ${STAGES[id].name}</td><td class="num">${PG.attempts[id] || 0}</td><td class="num">${PG.clears[id] || 0}</td><td class="num">${PG.best[id] ? fmtTime(PG.best[id]) : '—'}</td><td class="num">${ch.length ? `${(ch.reduce((a, b) => a + b, 0) / ch.length).toFixed(1)} 秒` : '—'}</td><td class="num">${ia.length ? (ia.reduce((a, b) => a + b, 0) / ia.length).toFixed(1) : '—'}</td></tr>`; }).join('');
   const fmt = (v, u) => (v === null || v === undefined ? '—' : (Math.round(v * 10) / 10) + (u === '%' ? '%' : u === '秒' ? ' 秒' : ' 次'));
   const judge = (v, T) => (v === null || v === undefined ? '' : (T.cmp === 'le' ? v <= T.target : v >= T.target) ? 'ok' : 'bad');
   const el = showScreen('records', `${backBtn()}
@@ -671,7 +698,7 @@ function showRecords(back) {
   if (dl) {
     btn.hidden = false;
     btn.onclick = async () => {
-      const data = JSON.stringify({ game: '梦潮：回声航线', version: 'v0.8', exportedAt: new Date().toISOString(), records: m.records, stats: m.stats, shared: m.shared, progress: m.progress, telemetry: m.telemetry }, null, 2);
+      const data = JSON.stringify({ game: 'Embers: Lost Voyage', version: 'v0.8', exportedAt: new Date().toISOString(), records: m.records, stats: m.stats, shared: m.shared, progress: m.progress, telemetry: m.telemetry }, null, 2);
       try { await dl.save({ filename: 'dreamtide-playtest.json', data }); toast('已导出'); }
       catch (e) { const code = e && e.code; if (code === 'declined') toast('已取消导出'); else if (code === 'rate_limited') toast('稍等一下再试'); else { btn.hidden = true; toast('这里暂时不能导出文件'); } }
     };
@@ -688,6 +715,7 @@ function showSettings(back) {
   const el = showScreen('settings', `${backBtn()}
     <div class="screen-title"><h2>设置</h2><p>操作只有两个：拖动飞机、按爆发键</p></div>
     <div class="set-wrap">
+      ${I18N.available ? `<div class="panel set-sec"><h3>语言 · Language</h3><div class="opt"><span>${LANG_LIST.find((l) => l[0] === I18N.lang)[1]}</span><select id="set-lang" aria-label="Language">${LANG_LIST.map(([v, n]) => `<option value="${v}" ${v === I18N.lang ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div>` : ''}
       <div class="panel set-sec"><h3>操作</h3>
         <div class="opt"><span>拖动灵敏度<small>鼠标拖动的距离 × 这个倍率</small></span><input type="range" id="set-drag" min="0.6" max="1.8" step="0.1" value="${s.dragSens}" aria-label="拖动灵敏度"></div>
         ${tog('bigButtons', '放大爆发按钮')}
@@ -717,6 +745,7 @@ function showSettings(back) {
   $$('[data-segn]', el).forEach((b) => b.onclick = () => { if (b.classList.contains('on')) { Sound.sfx('ui'); pulse(b); return; } const k = b.dataset.segn; s[k] = +b.dataset.v; if (k === 'flash') s.reduceFlash = s.flash < 0.5; Sound.sfx('ui'); save(); if (k === 'rumble' && s.rumble > 0) { Input.rumble(0.6 * s.rumble, 0.6 * s.rumble, 120); Input.flushRumble(1); } showSettings(back); });
   $$('[data-tog]', el).forEach((b) => b.onclick = () => { const k = b.dataset.tog; s[k] = !s[k]; b.classList.toggle('on', s[k]); b.setAttribute('aria-checked', s[k]); Sound.sfx('ui'); save(); });
   $('#set-drag', el).oninput = (e) => { s.dragSens = +e.target.value; save(); };
+  const sl = $('#set-lang', el); if (sl) { sl.addEventListener('keydown', (e) => e.stopPropagation()); sl.onchange = () => { Sound.sfx('select'); persist(); setLang(sl.value); }; } // 换语言：存好再重新载入（表在载入时查好）
   $('#set-music', el).oninput = (e) => { s.music = +e.target.value; save(); };
   $('#set-sfx', el).oninput = (e) => { s.sfx = +e.target.value; save(); Sound.sfx('ui', { gap: 120 }); };
   $$('[data-bind]', el).forEach((b) => b.onclick = () => { b.classList.add('wait'); b.textContent = '按下新键…'; Input.startRebind(b.dataset.bind, (bs) => { s.binds = JSON.parse(JSON.stringify(bs)); save(); showSettings(back); }); });
@@ -1039,7 +1068,7 @@ function drainWorldEvents() {
       case 'elite': toast(e.elite === 'cmdr' ? '带队精英出现 · 等它举旗再打旗头水晶' : '精英出现 · 击败它能充不少大招', '#ff9d8c', 'n-crown'); Sound.setBoost('tension', 0.3); setTimeout(() => Sound.setBoost('tension', 0), 12000); break;
       case 'boss': Sound.sfx('alarm'); break; // 入场蓄势：警报，名牌等它落地再出
       case 'raceFoe': toast(`${e.name} · ${e.hint}`, e.color, null, 3600); break; // 七族招牌敌人第一次出现：一句怎么对付（§9.3）；轻提示，不挡屏幕中间的怪群（评审 r2）
-      case 'relay': G.relayPending = true; break; // 混沌祭司倒下：这一局结算前放结局
+      case 'relay': G.relayPending = true; break; // 缄默主教倒下：这一局结算前放结局
       case 'thief': toast('收账小偷！追上打倒它 · 钱袋里有装备', '#d9b8ff', null, 2600); break; // §9.3：一关一次的事，不占屏幕中间
       case 'thiefGone': toast('它带着钱袋跑了……', '#d9b8ff', null, 1800); break;
       // 地图第一次出手：讲一句怎么看先兆、怎么反制；正在教地图交互时先排队，教完再讲（一次只教一件事）

@@ -47,6 +47,8 @@
   if (invite && !(resumeRoom && resumeRoom.code === invite)) { G.meta.seenTitle = true; showMultiplayer(showHub, invite); } // 朋友点邀请链接：直接进那个房间
   else if (resumeRoom) { G.meta.seenTitle = true; showMultiplayer(showHub, null, resumeRoom); } // 刷新页面：回到刚才的联机房间（那一局还在打就回到原对局）
   else if (G.meta.seenTitle && G.meta.firstRunDone) showHub(); else showTitle();
+  if (window.K) K.on('host-left', () => toast('房主离开了：你接手了这一局，接着打', '#ffe38a', null, 3500));
+  if (window.kitBridge && window.kitBridge.steam) Lobby.connect().then((net) => { net.onInvite = (id) => steamInviteJoin(id); if (net.pendingInvite) steamInviteJoin(net.pendingInvite); }); // 打包版：好友邀请、从好友列表加入（游戏被邀请启动时马上进房）
 
   /* ---------- 菜单背景 ---------- */
   let grain = null, vig = null, vigW = 0;
@@ -101,9 +103,9 @@
 
   /* ---------- 商店主图：用游戏自己的画法拼一张关键美术（920×430 主图从 16:9 画面中间裁出来，上下各留约 60 像素） ----------
      左上：标题；左边：拾荒飞船拖着光轨冲出去，三道光枪打进一群族无人机；中间：精英炸开，金光柱从天上砸下来（暗金掉落）；
-     右上：日食里混沌祭司的剪影；地上还有蓝、绿两道掉落的光柱。G.keyEn = 英文（商店页用） */
+     右上：日食里缄默主教的剪影；地上还有蓝、绿两道掉落的光柱。G.keyEn = 英文（商店页用） */
   function drawKeyArt(W, t) {
-    const en = !!G.keyEn, sp = G.keySpace || (G.keySpace = new SpaceScene());
+    const en = !!G.keyEn || !/^zh/.test(I18N.lang), sp = G.keySpace || (G.keySpace = new SpaceScene()); // 中文、繁中用中文名，别的语言用英文名（和标题画面一样）
     sp.setTheme('5-3'); sp.dim = 0; sp.t = 6; sp.scroll = 900; sp.draw(ctx, W, LH);
     // 祭司：日食前一个巨大的剪影，只有面具和信号环发光
     ctx.save(); ctx.globalAlpha = 0.85; ctx.translate(W * 0.8, LH * 0.44); ctx.scale(1.3, 1.3); ctx.translate(-W * 0.8, -LH * 0.44); drawPriest(ctx, { x: W * 0.8, y: LH * 0.44, phase: 1, rings: [0, 1, 2].map((i) => ({ a: t * 0.3 + i * 2.1, r: 120 + i * 26 })), swing: t, hitFlash: 0, weakT: 1 }, t); ctx.restore();
@@ -138,14 +140,14 @@
     ctx.save(); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.lineJoin = 'round';
     const lx = W * 0.05, ly = LH * 0.27;
     if (en) {
-      ctx.font = '800 128px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 16; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('LOOTWING', lx, ly);
+      ctx.font = '800 128px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 16; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('EMBERS', lx, ly);
       const tg = ctx.createLinearGradient(0, ly - 100, 0, ly); tg.addColorStop(0, '#fff3c8'); tg.addColorStop(0.55, '#ffd76a'); tg.addColorStop(1, '#d9883a');
-      ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = tg; ctx.fillText('LOOTWING', lx, ly); ctx.shadowBlur = 0;
-      ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('SHOOT  ·  LOOT  ·  SALVAGE', lx + 8, ly + 44); ctx.fillStyle = '#bfe9ff'; ctx.fillText('SHOOT  ·  LOOT  ·  SALVAGE', lx + 8, ly + 44);
+      ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = tg; ctx.fillText('EMBERS', lx, ly); ctx.shadowBlur = 0;
+      ctx.font = '800 44px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 8; ctx.strokeText('LOST VOYAGE', lx + 8, ly + 52); ctx.fillStyle = '#bfe9ff'; ctx.fillText('LOST VOYAGE', lx + 8, ly + 52);
     } else {
-      ctx.font = '400 140px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineWidth = 10; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('拾荒之翼', lx, ly);
-      ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = '#ffd76a'; ctx.fillText('拾荒之翼', lx, ly); ctx.shadowBlur = 0;
-      ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('LOOTWING', lx + 8, ly + 44); ctx.fillStyle = '#bfe9ff'; ctx.fillText('LOOTWING', lx + 8, ly + 44);
+      ctx.font = '400 140px "ZCOOL KuaiLe", "Noto Sans SC", sans-serif'; ctx.lineWidth = 10; ctx.strokeStyle = '#1a0e2c'; ctx.strokeText('余烬：迷航', lx, ly);
+      ctx.shadowColor = 'rgba(255,190,90,0.8)'; ctx.shadowBlur = 30; ctx.fillStyle = '#ffd76a'; ctx.fillText('余烬：迷航', lx, ly); ctx.shadowBlur = 0;
+      ctx.font = '800 30px "Baloo 2", "Noto Sans SC", sans-serif'; ctx.lineWidth = 6; ctx.strokeText('EMBERS: LOST VOYAGE', lx + 8, ly + 44); ctx.fillStyle = '#bfe9ff'; ctx.fillText('EMBERS: LOST VOYAGE', lx + 8, ly + 44);
     }
     ctx.restore();
   }
@@ -168,6 +170,7 @@
     const active = Input.gameActive && !G.paused && !document.hidden;
     MpDriver.tick(w, L, S, now, () => {
       const qx = clamp(Math.round(L.dx), -31, 31), qy = clamp(Math.round(L.dy), -31, 31); L.dx -= qx; L.dy -= qy;
+      if (G.bot && performance.now() < G.bot.until) return gameBot(w, S.me); // K.test.run：游戏自带的机器人在玩（联机测试 / 联机自检）
       return active ? { mx: Input.out.mx, my: Input.out.my, focus: Input.out.focus, burst: Input.consume('burst'), dx: qx, dy: qy } : NEUTRAL_INPUT;
     });
     if (S.desync && !L.desyncShown) { L.desyncShown = true; console.warn('[联机] 状态不一致', S.desync); toast('联机画面和队友对不上了：这局结果可能不同，结束后请重开', '#ffb2a8', null, 5000); }
@@ -203,7 +206,8 @@
         if (Input.gameActive) { const s = G.meta.settings.dragSens / G.scale; ddx = d.dx * s; ddy = d.dy * s; }
         acc += dt; let n = 0;
         // 单人：每一步把本机操作交给 World（多人走 net.js 的帧同步，不经过这里）
-        while (acc >= STEP && n < 12) { w.setInput(w.meIdx, { mx: Input.out.mx, my: Input.out.my, focus: Input.out.focus, burst: Input.consume('burst'), dx: ddx, dy: ddy }); ddx = ddy = 0; w.step(STEP); acc -= STEP; n++; }
+        const bot = G.bot && performance.now() < G.bot.until; // K.test.run：游戏自带的机器人在玩
+        while (acc >= STEP && n < 12) { w.setInput(w.meIdx, bot ? gameBot(w, w.meIdx) : { mx: Input.out.mx, my: Input.out.my, focus: Input.out.focus, burst: Input.consume('burst'), dx: ddx, dy: ddy }); ddx = ddy = 0; w.step(STEP); acc -= STEP; n++; }
         if (n >= 12) acc = 0;
         drainWorldEvents();
         Input.flushRumble(G.meta.settings.rumble === undefined ? 1 : G.meta.settings.rumble);
