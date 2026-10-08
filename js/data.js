@@ -193,7 +193,7 @@ const MAPS = {
   2: { id: 2, name: '霜晶环带', en: 'Frost Ring', races: ['frost', 'hive'], mission: '从冰环里拖回一台温室核心。', home: '温室穹顶：站里第一次有绿色', homeId: 'dome', stages: ['2-1', '2-2', '2-3'], hpK: 2.2, bossDef: ['shield', 'armor', 'shield'], color: '#bfe9ff' },
   3: { id: 3, name: '霓虹电弧城', en: 'Neon Arc City', races: ['arc', 'neon'], mission: '从公司的地盘里偷出一张船坞许可证。', home: '大船坞：机库扩建，飞船停成一排', homeId: 'dock', stages: ['3-1', '3-2', '3-3'], hpK: 4, bossDef: ['shield', 'shield', 'shield'], color: '#ff6fe0' },
   4: { id: 4, name: '熔核前线', en: 'Molten Front', races: ['forge', 'drill'], mission: '在炮火下抢回一门防御炮。', home: '防御炮台：站外有了自己的炮', homeId: 'turret', stages: ['4-1', '4-2', '4-3'], hpK: 6.5, bossDef: ['armor', 'armor', 'armor'], color: '#ff7a3a' },
-  5: { id: 5, name: '寂静圣所', en: 'Silent Sanctum', races: ['drill', 'ledger', 'frost', 'hive', 'arc', 'neon', 'forge'], chaos: true, mission: '找到切断所有信号的人。', home: '中继天线：听见地球的杂音', homeId: 'relay', stages: ['5-1', '5-2', '5-3'], hpK: 9, bossDef: ['shield', 'armor', 'chaos'], color: '#b98aff' },
+  5: { id: 5, name: '寂静圣所', en: 'Silent Sanctum', races: ['drill', 'ledger', 'frost', 'hive', 'arc', 'neon', 'forge'], chaos: true, mission: '找到切断所有信号的人。', home: '中继天线：听见地球的杂音', homeId: 'relay', stages: ['5-1', '5-2', '5-3'], hpK: 8, bossDef: ['shield', 'armor', 'chaos'], color: '#b98aff' },
 };
 const MAP_ORDER = [1, 2, 3, 4, 5];
 const mapOfStage = (id) => +(String(id || '1-1').split('-')[0]) || 1;
