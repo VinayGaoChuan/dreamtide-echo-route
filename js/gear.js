@@ -19,7 +19,11 @@ const QUALS = {
 };
 const QUAL_ORDER = ['white', 'blue', 'yellow', 'green', 'gold'];
 /* 底子三档（暗黑 2 的普通 / 扩展 / 精英）：物品等级到了才掉高档 */
-const GRADES = [{ name: '普通', ilvl: 1, k: 1, req: 1 }, { name: '加强', ilvl: 10, k: 1.6, req: 9 }, { name: '精英', ilvl: 20, k: 2.4, req: 19 }];
+const GRADES = [{ name: '普通', ilvl: 1, k: 1, req: 1 }, { name: '加强', ilvl: 10, k: 1.6, req: 9 }, { name: '精英', ilvl: 20, k: 2.4, req: 13 }];
+/* 需要的驾驶员等级跟着驾驶员的成长走，不和物品等级一比一（§6.3）：连续玩里走到第 2–5 张图时驾驶员中位 7 / 10 / 13 / 15 级、打倒祭司时 17 级；
+   一比一的时候第 4、5 张图掉的几乎都穿不上，装备评分几十局不动 */
+const REQ_CURVE = [[1, 1], [7, 8], [13, 12], [19, 15], [25, 17], [30, 19]];
+const reqLvOf = (ilvl) => { for (let i = 1; i < REQ_CURVE.length; i++) { const [a, ra] = REQ_CURVE[i - 1], [b, rb] = REQ_CURVE[i]; if (ilvl <= b) return Math.round(ra + ((rb - ra) * (Math.max(ilvl, a) - a)) / (b - a)); } return REQ_CURVE[REQ_CURVE.length - 1][1]; };
 const UNI_GRADE_K = [1, 1.5, 2.1]; // 套装、暗金的固定词条随底子档次成长
 /* 词条档位：物品等级到了才开 */
 const TIER_ILVL = [1, 6, 12, 18, 24, 28];
@@ -149,6 +153,8 @@ const DROP_Q = {
 };
 const DROP_RATE = { fodder: 0.0012, elite: 0.4, lurk: 0.1, thief: 2 }; // 连续玩量过（§19）：打穿一张图 15–20 件
 const PITY = { rareRuns: 3, uniFirst: 5, uniRuns: 12 };
+/* 败北补给（§11）：在还没打通的地图上倒在同一个首领面前，每 every 次站里送一箱，箱子里每个位各一件、自己挑；一箱比一箱好 */
+const LOSS_PITY = { every: 3, everyFinal: 2, q: ['yellow', 'green', 'gold'] }; // 最后的混沌祭司每 2 次一箱
 const MAP_COUNT = 5;
 const ilvlOf = (mapN, stageN, boss) => Math.min(MAX_ILVL, 1 + 6 * (mapN - 1) + 2 * (stageN - 1) + (boss ? 1 : 0));
 
@@ -226,12 +232,14 @@ const Gear = {
     if (uni) { const U = UNIQUES[uni]; kind = U.kind; base = U.base || base; }
     if (set) { const P = SETS[set].pieces[kind]; if (P && P.base) base = P.base; }
     if (!kind) kind = this.pickW(rnd, Object.fromEntries(GEAR_KIND_ORDER.map((k) => [k, GEAR_KINDS[k].w])));
+    if (!base && kind === 'gun' && (o.counter === 'shield' || o.counter === 'armor') && rnd() < 0.5) { const L = GUN_BASE_ORDER.filter((b) => GUN_BASES[b].dtype === (o.counter === 'shield' ? 'energy' : 'kinetic')); base = L[Math.floor(rnd() * L.length)]; } // 主炮底子也偏向克制它的伤害
     if (!base) { const L = this.baseList(kind); base = L[Math.floor(rnd() * L.length)]; }
     const grade = o.grade !== undefined ? o.grade : this.gradeOf(ilvl);
     const it = { uid: this.newUid(rnd), kind, base, grade, q, ilvl, imp: this.rollImp(kind, base, grade, rnd), aff: [], set, uni, bound: false, junk: false, lock: false, roll: Math.floor(rnd() * 1e9) };
     if (q === 'blue') this.rollMagic(it, rnd);
     else if (q === 'yellow') this.rollRare(it, rnd);
     if (q === 'yellow') it.rare = [Math.floor(rnd() * RARE_WORDS.a.length), Math.floor(rnd() * RARE_WORDS[kind].length)];
+    if (o.counter && (q === 'blue' || q === 'yellow') && (o.counterAll || rnd() < 0.6)) this.addCounter(it, o.counter, rnd); // 输给这张图的首领以后，掉落偏向克制它的词条
     it.req = this.reqOf(it);
     return it;
   },
@@ -271,6 +279,15 @@ const Gear = {
       it.aff.push(a); if (pre) np++; else ns++;
     }
   },
+  /* 克制词条：护盾 → 对护盾，装甲 → 对装甲，轮换（祭司）→ 两条里缺的那条；位放不下就顶掉一条后缀 */
+  addCounter(it, def, rnd) {
+    const want = (def === 'shield' ? ['vsShield'] : def === 'armor' ? ['vsArmor'] : ['vsShield', 'vsArmor']).filter((k) => AFFIXES[k].at.includes(it.kind) && !it.aff.some((a) => a.k === k));
+    if (!want.length) return;
+    const k = want[Math.floor(rnd() * want.length)], maxT = it.q === 'yellow' ? Math.max(0, this.maxTier(it.ilvl) - 1) : this.maxTier(it.ilvl), a = this.rollAffix(k, it.kind, maxT, rnd); if (!a) return;
+    const sufs = it.aff.filter((x) => !AFFIXES[x.k].pre), full = it.q === 'blue' ? sufs.length >= 1 : sufs.length >= 3 || it.aff.length >= 6;
+    if (full) { const out = sufs.filter((x) => x.k !== 'vsShield' && x.k !== 'vsArmor'); if (!out.length) return; it.aff.splice(it.aff.indexOf(out[Math.floor(rnd() * out.length)]), 1); }
+    it.aff.push(a);
+  },
   pickUnique(rnd, ilvl, kind, bossMap, priest) {
     const pool = {}; for (const id of UNIQUE_ORDER) { const U = UNIQUES[id]; if (U.min > ilvl || (kind && U.kind !== kind) || (U.only === 'priest' && !priest)) continue; pool[id] = bossMap && U.boss === bossMap ? 4 : 1; if (U.only === 'priest' && priest) pool[id] = 6; }
     if (!Object.keys(pool).length) return null;
@@ -287,10 +304,10 @@ const Gear = {
     return opts[Math.floor(rnd() * opts.length)];
   },
   reqOf(it) {
-    if (it.uni) return Math.max(GRADES[it.grade].req, UNIQUES[it.uni].min);
+    if (it.uni) return Math.max(GRADES[it.grade].req, reqLvOf(UNIQUES[it.uni].min));
     if (it.set) return GRADES[it.grade].req + 2;
     const add = { white: 0, blue: 1, yellow: 3 }[it.q] || 0;
-    return clamp(Math.max(GRADES[it.grade].req, it.ilvl - 3 + add), 1, PILOT.max);
+    return clamp(Math.max(GRADES[it.grade].req, reqLvOf(it.ilvl) - 3 + add), 1, PILOT.max);
   },
   /* 掉落一件：品质（寻宝率）→ 位 → 底子 → 词条 */
   roll(o) {

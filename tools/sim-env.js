@@ -29,6 +29,8 @@ function pilot(w) {
   for (const wr of w.warns) if (wr.kind === 'zone' && !wr.fired && wr.t >= react && p.y > wr.y - 20 && p.y < wr.y + wr.h + 20 && p.x > wr.x - 20 && p.x < wr.x + wr.w + 20) dodge += p.y < wr.y + wr.h / 2 ? -2 : 2;
   // 落点圈（迫击炮、冰棱、炮击）：看见了就离开那个圈
   for (const wr of w.warns) if (wr.kind === 'blast' && !wr.fired && wr.t >= react && Math.hypot(p.x - wr.x, p.y - wr.y) < wr.r + 30) dodge += p.y < wr.y ? -2 : 2;
+  // 混沌祭司的静默带：看见杂讯就离开那一条（待在里面打不出子弹），往空得多的那边走
+  if (w.boss && w.boss.bands) for (const b of w.boss.bands) if (b.t >= react && b.t < b.warn + b.dur && p.y > b.y0 - 24 && p.y < b.y1 + 24) dodge += b.y0 - w.arena.top > w.arena.bottom - b.y1 ? -3 : 3;
   // 霜心女王的冰封：飞进她身边那一圈
   const FR = w.boss && w.boss.freezeRing; if (FR && !FR.done && FR.t >= react) { tx = w.boss.x - (FR.r0 + FR.r1) / 2; ty = w.boss.y; busy = true; }
   // 地图伸手：看到危险色的柱子和横向箭头，就离开那一条高度（像玩家一样）

@@ -19,6 +19,8 @@ const Station = {
     m.maps = m.maps || { reached: { '1-1': true }, cleared: {}, firstBoss: {}, sel: 1, start: null, kills: {} };
     m.maps.reached = m.maps.reached || { '1-1': true }; m.maps.cleared = m.maps.cleared || {}; m.maps.firstBoss = m.maps.firstBoss || {}; m.maps.kills = m.maps.kills || {};
     m.pity = Object.assign({ noRare: 0, noUni: 0, uniEver: false, runs: 0 }, m.pity || {});
+    m.pity.loss = m.pity.loss || {}; m.pity.crates = m.pity.crates || [];
+    for (const it of this.allItems(m)) it.req = Gear.reqOf(it); // 需要等级的算法改过（§6.3）：老存档里的装备按新的算 // 败北补给（§11）：每张图输给首领几次、送过几箱；没领的箱子
     m.station = Object.assign({ returns: 0, gearHome: false, seen: {}, shop: null, everBlue: false, everSet: false, homes: {}, tut: {} }, m.station || {});
     m.codexGear = Object.assign({ sets: {}, uniques: {}, bases: {} }, m.codexGear || {});
     if (fresh && m.v === 3 && m.progress && m.progress.cleared) { // 老存档：1-1..1-3 的进度算到第 1 张图上
@@ -207,11 +209,40 @@ const Station = {
     if (res.win && done.includes(`${mm}-3`)) { if (!m.maps.cleared[mm]) { mapClear = mm; m.station.homes[MAPS[mm].homeId] = true; } m.maps.cleared[mm] = true; if (MAPS[mm + 1]) m.maps.reached[`${mm + 1}-1`] = true; }
     // 保底计数：连续几局没有黄以上 / 没有暗金
     this.notePity(m, cargo, true);
+    const lossPity = this.noteLoss(m, res, mm);
     if (res.lootCfg && res.lootCfg.uniPity === false && m.pity.uniPityArmed) m.pity.uniPityArmed = false;
     m.station.returns++;
     this.restock(m); // 商人每次回家进一批新货
     const unlocks = this.checkUnlocks(m);
-    return { kept: stored, lost, insured, autoGot, credits, scrap, xp, lvBefore, lvAfter: m.pilot.lv, lvUp, firstKills, mapClear, unlocks };
+    return { kept: stored, lost, insured, autoGot, credits, scrap, xp, lvBefore, lvAfter: m.pilot.lv, lvUp, firstKills, mapClear, unlocks, lossPity };
+  },
+  /* 败北补给（§11）：在还没打通的地图上倒在某个首领面前，给这个首领记一次；够 LOSS_PITY.every 次送一箱（黄 → 绿 → 金），之后这张图掉落偏向克制那个首领 */
+  noteLoss(m, res, mm) {
+    const bf = res.bossFight; if (res.win || res.abandoned || !bf || m.maps.cleared[mm]) return null;
+    const L = m.pity.loss[bf.stage] = Object.assign({ n: 0, crates: 0 }, m.pity.loss[bf.stage] || {}); // 每个首领各记各的：箱子给反复倒在同一个首领面前的人
+    L.n++; L.def = STAGES[bf.stage] ? STAGES[bf.stage].bossDef : null; L.at = m.pity.runs;
+    const every = bf.stage === ALL_STAGES[ALL_STAGES.length - 1] ? LOSS_PITY.everyFinal : LOSS_PITY.every;
+    let crate = null;
+    if (L.n >= every) { L.n = 0; crate = { map: mm, stage: bf.stage, def: L.def, q: LOSS_PITY.q[Math.min(L.crates, LOSS_PITY.q.length - 1)], opts: null }; L.crates++; m.pity.crates.push(crate); }
+    return { map: mm, n: L.n, every, crate: crate ? crate.q : null, nextQ: LOSS_PITY.q[Math.min(L.crates, LOSS_PITY.q.length - 1)] };
+  },
+  /* 箱子打开：每个位各一件（这张图第 3 关的物品等级、带克制词条、现在就穿得上），挑一件 */
+  crateOpts(m) {
+    const c = m.pity.crates[0]; if (!c) return null;
+    if (!c.opts) {
+      c.opts = {}; const rnd = Math.random, top = ilvlOf(c.map, 3, true);
+      for (const slot of GEAR_SLOTS) {
+        if (slot === 'chip2') continue;
+        const kind = slot === 'chip1' ? 'chip' : slot; let it = null;
+        for (let il = top; il >= 1 && (!it || it.req > m.pilot.lv); il--) it = Gear.make({ rnd, ilvl: il, q: c.q, kind, races: this.openRaces(m), mapRaces: MAPS[c.map].races, bossMap: c.map, priest: c.stage === '5-3', counter: c.def, counterAll: true });
+        c.opts[slot] = it;
+      }
+    }
+    return c;
+  },
+  claimCrate(m, slot) {
+    const c = this.crateOpts(m); if (!c || !c.opts[slot]) return null;
+    const it = Object.assign(c.opts[slot], { fresh: true }); m.pity.crates.shift(); this.addItem(m, it, true); this.notePity(m, [it]); return it;
   },
   notePity(m, items, endOfRun) {
     const P = m.pity, rare = items.some((it) => QUALS[it.q].rank >= 2), uni = items.some((it) => it.uni);
@@ -221,6 +252,7 @@ const Station = {
   /* 开局给模拟的掉落配置（只有本机这一份） */
   lootCfg(m) {
     const P = m.pity, uniPity = (!P.uniEver && P.runs + 1 >= PITY.uniFirst) || P.noUni >= PITY.uniRuns;
-    return { races: this.openRaces(m).length ? this.openRaces(m) : MAPS[1].races, firstBoss: Object.assign({}, m.maps.firstBoss), noRare: P.noRare, uniPity, seed: (P.runs + 1) * 7919 + (m.pilot.lv || 1) };
+    const counter = {}, at = {}; for (const k in P.loss) { const mm = mapOfStage(k), L = P.loss[k]; if (STAGES[k] && !m.maps.cleared[mm] && L.def && !(at[mm] > L.at)) { counter[mm] = L.def; at[mm] = L.at; } } // 输过首领的地图：掉落偏向克制最近一次赢你的那个
+    return { races: this.openRaces(m).length ? this.openRaces(m) : MAPS[1].races, firstBoss: Object.assign({}, m.maps.firstBoss), noRare: P.noRare, uniPity, counter, seed: (P.runs + 1) * 7919 + (m.pilot.lv || 1) };
   },
 };

@@ -189,11 +189,11 @@ const sharedHearts = (lv) => SHARED.heartAt.filter((x) => lv >= x).length;
 /* 地图（docs/design.md §10）：一张地图 = 三关连打的一局。races = 这张图的族（敌人的颜色和防御、套装偏向），mission = 开图时“回声”念的一句任务，
    home = 打通后站里多的那样东西。hpK = 这张图敌人的生命系数（按第一次走到这里时的装备和构筑定，--career 量）；bossDef = 三个首领的防御 */
 const MAPS = {
-  1: { id: 1, name: '锈带残骸场', en: 'Rust Belt Wreckfield', races: ['drill', 'ledger'], mission: '接通第一座信号塔，让站里亮起灯。', home: '信号塔：站里的灯全亮了', homeId: 'beacon', stages: ['1-1', '1-2', '1-3'], hpK: 1, bossDef: ['armor', 'shield', 'armor'], color: '#e8925a' },
-  2: { id: 2, name: '霜晶环带', en: 'Frost Ring', races: ['frost', 'hive'], mission: '从冰环里拖回一台温室核心。', home: '温室穹顶：站里第一次有绿色', homeId: 'dome', stages: ['2-1', '2-2', '2-3'], hpK: 2.2, bossDef: ['shield', 'armor', 'shield'], color: '#bfe9ff' },
-  3: { id: 3, name: '霓虹电弧城', en: 'Neon Arc City', races: ['arc', 'neon'], mission: '从公司的地盘里偷出一张船坞许可证。', home: '大船坞：机库扩建，飞船停成一排', homeId: 'dock', stages: ['3-1', '3-2', '3-3'], hpK: 4, bossDef: ['shield', 'shield', 'shield'], color: '#ff6fe0' },
-  4: { id: 4, name: '熔核前线', en: 'Molten Front', races: ['forge', 'drill'], mission: '在炮火下抢回一门防御炮。', home: '防御炮台：站外有了自己的炮', homeId: 'turret', stages: ['4-1', '4-2', '4-3'], hpK: 6.5, bossDef: ['armor', 'armor', 'armor'], color: '#ff7a3a' },
-  5: { id: 5, name: '寂静圣所', en: 'Silent Sanctum', races: ['drill', 'ledger', 'frost', 'hive', 'arc', 'neon', 'forge'], chaos: true, mission: '找到切断所有信号的人。', home: '中继天线：听见地球的杂音', homeId: 'relay', stages: ['5-1', '5-2', '5-3'], hpK: 8, bossDef: ['shield', 'armor', 'chaos'], color: '#b98aff' },
+  1: { id: 1, name: '锈带残骸场', en: 'Rust Belt Wreckfield', races: ['drill', 'ledger'], mission: '接通第一座信号塔，让站里亮起灯。', home: '信号塔：站里的灯全亮了', homeId: 'beacon', stages: ['1-1', '1-2', '1-3'], hpK: 1.2, bossDef: ['armor', 'shield', 'armor'], color: '#e8925a' },
+  2: { id: 2, name: '霜晶环带', en: 'Frost Ring', races: ['frost', 'hive'], mission: '从冰环里拖回一台温室核心。', home: '温室穹顶：站里第一次有绿色', homeId: 'dome', stages: ['2-1', '2-2', '2-3'], hpK: 2.6, bossDef: ['shield', 'armor', 'shield'], color: '#bfe9ff' },
+  3: { id: 3, name: '霓虹电弧城', en: 'Neon Arc City', races: ['arc', 'neon'], mission: '从公司的地盘里偷出一张船坞许可证。', home: '大船坞：机库扩建，飞船停成一排', homeId: 'dock', stages: ['3-1', '3-2', '3-3'], hpK: 6.6, bossDef: ['shield', 'shield', 'shield'], color: '#ff6fe0' },
+  4: { id: 4, name: '熔核前线', en: 'Molten Front', races: ['forge', 'drill'], mission: '在炮火下抢回一门防御炮。', home: '防御炮台：站外有了自己的炮', homeId: 'turret', stages: ['4-1', '4-2', '4-3'], hpK: 10.2, bossDef: ['armor', 'armor', 'armor'], color: '#ff7a3a' },
+  5: { id: 5, name: '寂静圣所', en: 'Silent Sanctum', races: ['drill', 'ledger', 'frost', 'hive', 'arc', 'neon', 'forge'], chaos: true, mission: '找到切断所有信号的人。', home: '中继天线：听见地球的杂音', homeId: 'relay', stages: ['5-1', '5-2', '5-3'], hpK: 12, bossDef: ['shield', 'armor', 'chaos'], color: '#b98aff' },
 };
 const MAP_ORDER = [1, 2, 3, 4, 5];
 const mapOfStage = (id) => +(String(id || '1-1').split('-')[0]) || 1;
@@ -256,7 +256,7 @@ const BUILD_PATHS = [
    Boss / 队长打了 rage.at 秒还没倒就失控：攻击一路加快（rage.ramp 秒加满 rage.max），提前 rage.warn 秒预告。
    失控 wipe 秒后超载（先在血条上倒数，提前 5 秒喊）：全屏冲击、全队倒下——首领战有确定的期限，构筑强度按它算。
    只有成型的火力能在失控前打完；没成型的局要靠操作硬扛失控段 */
-const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 5.1, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: Object.fromEntries(ALL_STAGES.map((id) => [id, [1.3, 8, 19][stageNOf(id) - 1] * MAPS[mapOfStage(id)].hpK * (stageNOf(id) === 2 && mapOfStage(id) >= 4 ? 0.65 : id === '5-3' ? 0.65 : id === '4-3' ? 0.8 : 1)])), regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: Object.fromEntries(ALL_STAGES.map((id) => [id, [40, 70, 55][stageNOf(id) - 1]])), warn: 5, ramp: 15, max: 4, wipe: 35 } }; // 首领厚度按地图乘 MAPS.hpK（§10.4）；第 4、5 张图的第 2 关首领 × 0.65、熔核将军 × 0.8、混沌祭司 × 0.65（连续玩：它们是墙）；只有第 1 张图的第一个首领不考构筑
+const BUILD_CHECK = { needLv: 2, steer: 0.6, formK: 2, maxK: 1.5, formKOf: { 'pierce+bomb': 1.45, 'bomb+rainbow': 3.33, 'homing+thunder': 5.1, 'bomb+thunder': 3.9, 'homing+wing': 2.9, 'multi+ice': 2.8, 'multi+magnet': 3.0 }, free: { '1-1': true }, bossK: Object.fromEntries(ALL_STAGES.map((id) => [id, [1.3, 8, 19][stageNOf(id) - 1] * MAPS[mapOfStage(id)].hpK * (stageNOf(id) === 2 && mapOfStage(id) >= 4 ? 0.65 : id === '5-3' ? 0.6 : id === '4-3' ? 0.8 : 1)])), regen: 0.003, multiK: [1, 1.45, 1.8, 2.1], rage: { at: Object.fromEntries(ALL_STAGES.map((id) => [id, [40, 70, 55][stageNOf(id) - 1]])), warn: 5, ramp: 15, max: 4, wipe: 35 } }; // 首领厚度按地图乘 MAPS.hpK（§10.4）；第 4、5 张图的第 2 关首领 × 0.65、熔核将军 × 0.8、混沌祭司 × 0.65（连续玩：它们是墙）；只有第 1 张图的第一个首领不考构筑
 /* 第一局（§3.6，上手 = 上钩）：第一个完整仪式保底史诗，第一个联动只要两件 1 级（头几分钟一次构筑小爆发），鱼群潮更勤；
    第一个首领（free 里的关）在基础难度下不自愈、不失控：几乎人人打得过 */
 const FIRST_RUN = { rareTier: 1, needLv: 1, swellK: 0.75, hearts: 2 }; // rareTier：第一局第一个完整仪式保底史诗（一档一档认识品质）；hearts：多两颗心

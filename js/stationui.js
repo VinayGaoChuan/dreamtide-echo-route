@@ -182,13 +182,20 @@ function stationHotspots() {
 }
 /* 仓库里有比身上更好的、够得上的装备（装备栏上亮一个点） */
 function stationUpgradeReady() { const m = G.meta; return m.gear.stash.some((it) => Station.canEquip(m, it) && Station.compare(m, it, m.current).total > 1.03); }
+/* 败北补给（§11）：每个位一件，标出换上以后总评变多少，挑一件 */
+function crateHtml() {
+  const m = G.meta, c = Station.crateOpts(m); if (!c) return '';
+  const L = Object.entries(c.opts).map(([slot, it]) => ({ slot, it, k: Station.compare(m, it, m.current).total })), best = L.reduce((a, b) => (b.k > a.k ? b : a), L[0]);
+  G.st.extra = Object.assign(G.st.extra || {}, Object.fromEntries(L.map((o) => [o.it.uid, o.it])));
+  return `<div class="st-crate"><div class="label">败北补给 · 地图 ${c.map} · 挑一件</div><div class="crate-row">${L.map((o) => `<button class="loot-chip crate-opt q-${o.it.q} ${o === best ? 'rec' : ''}" type="button" data-crate="${o.slot}" style="--qc:${QUALS[o.it.q].color}" title="${esc(Gear.name(o.it))}"><canvas width="40" height="40" data-gear="${esc(o.it.uid)}"></canvas>${esc(GEAR_KINDS[o.it.kind].name)}<b class="${o.k > 1.005 ? 'good' : 'dim-text'}">${o.k > 1.005 ? '+' + Math.round((o.k - 1) * 100) + '%' : '—'}</b></button>`).join('')}</div></div>`;
+}
 function stationLaunchHtml() {
   const m = G.meta, mm = m.maps.sel && Station.mapOpen(m, m.maps.sel) ? m.maps.sel : 1, M = MAPS[mm], starts = Station.startStages(m, mm);
   const start = starts.includes(m.maps.start) ? m.maps.start : M.stages[0];
   const races = M.races.slice(0, 2).map((r) => `<span class="chip" style="border-color:${RACES[r].color};color:${RACES[r].color}">${RACES[r].name} · ${RACES[r].def === 'shield' ? '护盾' : '装甲'}</span>`).join('') + (M.chaos ? '<span class="chip">七族信徒 · 护盾 ↔ 装甲</span>' : '');
   const nodes = M.stages.map((id) => { const ok = starts.includes(id), S = STAGES[id], kill = m.maps.firstBoss[id]; return `<button class="stage-node ${id === start ? 'sel' : ''} ${ok ? '' : 'locked'} ${kill ? 'cleared' : ''}" type="button" data-start="${id}" ${offIf(!ok, stageNOf(id) > 1 && !m.unlock.waypoint ? '路标：第一次走到某张图的第 2 关后打开' : '还没走到这一关')}><b>${id}</b><span>${S.name}</span>${kill ? '<i>✓</i>' : ''}</button>`; }).join('');
   const cu = Station.catchUp(start);
-  return `<div class="label">地图 ${mm} · ${esc(M.name)}${m.maps.cleared[mm] ? ' ✓' : ''}</div><div class="mission">“${esc(M.mission)}”</div><div class="row wrap">${races}</div>
+  return `${crateHtml()}<div class="label">地图 ${mm} · ${esc(M.name)}${m.maps.cleared[mm] ? ' ✓' : ''}</div><div class="mission">“${esc(M.mission)}”</div><div class="row wrap">${races}</div>
     <div class="stage-row">${nodes}</div>${cu ? `<div class="dim-text">从第 ${stageNOf(start)} 关开始：开场先补 ${cu} 次升级</div>` : ''}
     <div class="row" style="justify-content:center"><button class="btn primary big" id="st-go" type="button" autofocus>${icon('i-hangar')} 出击</button><button class="btn big cyan" id="st-mp" type="button">${icon('i-team')} ${Lobby.code ? `房间 ${esc(Lobby.code)}` : '联机'}</button></div>`;
 }
@@ -208,6 +215,8 @@ function showStation() {
   paintGearIcons(el); paintPlaneCanvases(el);
   if (!S.panel) $('#st-go', el).onclick = () => { Sound.sfx('select'); S.panel = null; if (Lobby.code) { Lobby.leave(); toast('单人出击：已离开联机房间', '#ffe38a'); } startRun(stationStart()); };
   if (!S.panel) $('#st-mp', el).onclick = () => { Sound.sfx('select'); S.panel = null; showMultiplayer(showStation); };
+  if (m.pity.crates.length) persist(); // 箱子里的几件开箱时就定了：刷新页面不会换
+  $$('[data-crate]', el).forEach((b) => b.onclick = () => { const it = Station.claimCrate(m, b.dataset.crate); if (!it) return; Sound.sfx('select'); persist(); toast(`拿到 ${Gear.name(it)} · 在仓库里`, QUALS[it.q].color, null, 2200); showStation(); });
   $('#st-mp2', el).onclick = () => { Sound.sfx('ui'); showMultiplayer(showStation); };
   $('#st-map', el).onclick = (ev) => { Sound.sfx('ui'); if (S.panel === 'starmap') { pulse(ev.currentTarget); return; } S.panel = 'starmap'; showStation(); };
   $('#st-records', el).onclick = () => { Sound.sfx('ui'); showRecords(showStation); };

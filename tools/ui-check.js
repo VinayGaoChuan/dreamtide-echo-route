@@ -69,6 +69,7 @@ true`;
 const SCREENS = [
   ['标题', 'showTitle()'],
   ['站', "G.st.panel = null; G.st.sel = null; showStation()"],
+  ['站（败北补给的箱子）', "const m = G.meta; if (!m.pity.crates.length) m.pity.crates.push({ map: 1, stage: '1-3', def: STAGES['1-3'].bossDef, q: 'yellow', opts: null }); G.st.panel = null; G.st.sel = null; showStation()"],
   ['装备栏（选中一件）', "G.st.panel = 'equip'; G.st.filter = 'all'; G.st.sel = G.meta.gear.stash[0].uid; showStation()"],
   ['图鉴（局内）', 'showCodex(null, showHub)'],
   ['记录', 'showRecords(showHub)'],

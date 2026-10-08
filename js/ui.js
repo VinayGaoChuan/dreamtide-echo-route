@@ -563,7 +563,7 @@ function showEnd(E) {
     <div class="pilot-badge big"><b>驾驶员 <span class="num">${m.pilot.lv}</span>${O.lvUp ? ` <span class="good">▲${O.lvUp}</span>` : ''}</b><span class="bar-mini"><i style="width:${pct}%"></i></span></div>
     ${O.unlocks.length ? `<div class="good">站里打开了：${O.unlocks.map((u) => FACILITIES[u] ? FACILITIES[u].name : u === 'waypoint' ? '路标' : u).join('、')}</div>` : ''}
     ${O.mapClear ? `<div class="good">站里多了：${esc(MAPS[O.mapClear].home)}${MAPS[O.mapClear + 1] ? ` · 地图 ${O.mapClear + 1} ${esc(MAPS[O.mapClear + 1].name)} 开放了` : ''}</div>` : ''}`;
-  const bossDef = !r.win && r.stage && STAGES[r.stage].bossDef && (r.atBoss || (r.hurt && (r.hurt.boss || r.hurt.rage))) ? `<div class="death"><span><b>这个首领是${STAGES[r.stage].bossDef === 'armor' ? '装甲' : STAGES[r.stage].bossDef === 'shield' ? '护盾' : '护盾和装甲轮换'}</b> ${STAGES[r.stage].bossDef === 'armor' ? '动能伤害、对装甲的词条打它更疼' : STAGES[r.stage].bossDef === 'shield' ? '能量伤害、对护盾的词条打它更疼' : '两种伤害都带一点'}</span></div>` : '';
+  const bossDef = bossGapHtml(r, O);
   const el = showScreen('end', `
     <div class="center-col">
       <div class="h-display" style="font-size:var(--fs-xl);color:${r.win ? 'var(--lamp2)' : 'var(--paper)'}">${esc(title)}</div>
@@ -600,6 +600,19 @@ function countUp(root) {
     setTimeout(() => { n.textContent = String(to); }, delay + dur + 80);
   });
   $$('.rewards .reward', root).forEach((r, i) => { r.style.animation = `revealIn .45s ${(0.4 + els.length * 0.13 + i * 0.16).toFixed(2)}s both`; });
+}
+/* 倒在首领战里：差在哪（火力 / 生存 / 伤害类型），败北补给还差几次（§11）。一行一件事 */
+function bossGapHtml(r, O) {
+  const f = r.bossFight, P = O.lossPity, rows = [];
+  if (!r.win && !r.abandoned && f) {
+    const need = Math.round(f.t / Math.max(0.05, 1 - f.left)), def = STAGES[f.stage].bossDef, g = Gear.compute(G.meta.gear.eq), dt = (GUN_BASES[(g.gun && g.gun.base) || 'rapid'] || GUN_BASES.rapid).dtype;
+    rows.push(f.at && need > f.at ? `<b>差在火力</b> 照这局的火力打倒它要 ${need} 秒，它 ${f.at} 秒就失控` : `<b>差在生存</b> 火力够（约 ${need} 秒能打倒），是被打下来的`);
+    if (def === 'shield' && dt !== 'energy' && (g.vsShield || 0) < 20) rows.push('<b>缺能量伤害</b> 它是护盾：换光束炮、散射炮，或带「对护盾」');
+    else if (def === 'armor' && dt !== 'kinetic' && (g.vsArmor || 0) < 20) rows.push('<b>缺动能伤害</b> 它是装甲：换速射炮、导弹巢，或带「对装甲」');
+    else if (def === 'chaos' && (g.vsShield || 0) + (g.vsArmor || 0) < 30) rows.push('<b>缺克制词条</b> 它护盾和装甲轮换：「对护盾」「对装甲」各带一点');
+  }
+  if (P) rows.push(P.crate ? `<b>败北补给到了</b> 回站开箱：每个位一件${QUALS[P.crate].name}，挑一件` : `<b>败北补给 ${P.n}/${P.every}</b> 再倒在它面前 ${P.every - P.n} 次，站里送一箱${QUALS[P.nextQ].name}装备`);
+  return rows.length ? `<div class="death">${rows.map((x) => `<span>${x}</span>`).join('')}</div>` : '';
 }
 /* 失败复盘：只在被击落时出现（主动结束不显示），按这一局实际记下的受伤来源挑最常见的一类，给一条能照做的建议 */
 function deathHtml(r) {

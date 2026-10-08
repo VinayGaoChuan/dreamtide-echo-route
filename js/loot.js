@@ -24,7 +24,7 @@ Object.assign(World.prototype, {
   /* 这一处掉的物品等级、族偏向 */
   lootCtx(boss) {
     const m = mapOfStage(this.stageId), n = stageNOf(this.stageId), M = MAPS[m] || MAPS[1];
-    return { ilvl: ilvlOf(m, n, boss), mapRaces: M.races, races: this.lootCfg.races, bossMap: boss && n === 3 ? m : 0, priest: boss && this.stageId === '5-3' };
+    return { ilvl: ilvlOf(m, n, boss), mapRaces: M.races, races: this.lootCfg.races, bossMap: boss && n === 3 ? m : 0, priest: boss && this.stageId === '5-3', counter: (this.lootCfg.counter || {})[m] || null };
   },
   /* 掉一件（只给本机这架）。src：fodder / elite / boss；o.minQ、o.q、o.kind 用于首杀必掉和保底 */
   lootRoll(src, x, y, o = {}, v) {

@@ -21,7 +21,8 @@ const TARGETS = (() => {
     return { difficulty: Object.assign(fb.difficulty, t.difficulty || {}), career: Object.assign(fb.career, t.career || {}), loot: t.loot || {}, from: 'docs/design.md' };
   } catch (e) { console.error('读设计文档的目标失败，用兜底值：' + e.message); return fb; }
 })();
-if (flag('eval')) R(flag('eval')); // 调参试验：--eval "BUILD_CHECK.rage.max = 2"（子进程同样执行）
+// 调参试验：--eval "BUILD_CHECK.rage.max = 2"（子进程同样执行）。只对运行时才读的值有效：MAPS[m].hpK 这类载入时就算进 STAGES、BUILD_CHECK.bossK 的，改了等于没改（2026-10-08 两轮连续玩白跑）
+if (flag('eval')) R(flag('eval'));
 const N = +(args[1] || 3), STAGES_RUN = (args[2] || '1-1,1-2,1-3').split(',');
 
 R(`
@@ -66,6 +67,10 @@ function careerStart(m, F) {
 function careerStation(m, plane) {
   const got = { eq: [], sold: 0, salv: 0, fac: [], gamble: 0 }, sc = () => Gear.score(Gear.compute(m.gear.eq), plane).total;
   Station.flushInbox(m);
+  while (m.pity.crates.length) { // 败北补给：挑换上以后总评涨得最多的那件
+    const c = Station.crateOpts(m); let best = null, bk = -1; for (const s in c.opts) { const k = Station.compare(m, c.opts[s], plane).total; if (k > bk) { bk = k; best = s; } }
+    const it = Station.claimCrate(m, best); if (!it) break; got.crate = (got.crate || []).concat(it.q);
+  }
   for (let pass = 0; pass < 3; pass++) { // 换装：每个位挑评分最高的、够得上等级的
     let did = false;
     for (const it of m.gear.stash.slice()) {
@@ -120,7 +125,7 @@ function careerRun(seed, maxRuns, human, maxHours) {
     const bot = careerStation(meta, plane);
     const win = !!res.win, f = F[S0.front] || (F[S0.front] = { n: 0, at: null }); // 计数记在前沿那张图上（回刷的那一局也算一次）
     if (S0.farm) f.n++; else if (win) { f.n = 0; f.at = null; } else { f.n++; f.at = x.reached; } // 回刷的那一局也算一次（下一局再回前沿）
-    const news = [...out.unlocks.map((u) => 'unlock ' + u), ...(out.mapClear ? ['map ' + out.mapClear] : []), ...(out.lvUp ? ['lv ' + meta.pilot.lv] : []), ...bot.eq.map((q) => 'eq ' + q), ...bot.fac.map((id) => 'fac ' + id)];
+    const news = [...out.unlocks.map((u) => 'unlock ' + u), ...(out.mapClear ? ['map ' + out.mapClear] : []), ...(out.lvUp ? ['lv ' + meta.pilot.lv] : []), ...bot.eq.map((q) => 'eq ' + q), ...bot.fac.map((id) => 'fac ' + id), ...(bot.crate || []).map((q) => 'crate ' + q)];
     const kq = {}; for (const it of out.kept) kq[it.q] = (kq[it.q] || 0) + 1;
     hours += (x.t + OVER) / 3600;
     log.push({ r, start, farm: S0.farm, map: mm, stage: x.reached, cleared: x.cleared, fights: (x.bosses || []).map((b) => [b.stage, b.strength, b.won]), won: win, t: x.t, h: Math.round(hours * 100) / 100,
@@ -466,17 +471,18 @@ async function careerReport() {
   if (C.finalMedian && fin.length < out.length * 0.5) W.push(`只有 ${pc(fin.length, out.length)}% 的人打倒了混沌祭司（目标中位 ${C.finalMedian.join('–')} 小时）`);
   else if (C.finalMedian && !inR(q(clearH[MAP_ORDER.length], 0.5), C.finalMedian)) W.push(`打倒混沌祭司中位 ${hr(q(clearH[MAP_ORDER.length], 0.5))}（目标 ${C.finalMedian.join('–')} 小时）`);
   // 每个首领：第一次输给它以后多少局打过；打倒那一场的强度（DE28）
-  const bossIds = ALL_STAGES_N, stuck = [], lowWins = {};
+  const bossIds = ALL_STAGES_N, stuck = [], stuckTop = [], lowWins = {};
   for (const id of bossIds) {
     const after = [], winS = [];
     for (const P of out) { let lostAt = null; for (const x of P.log) { const f = (x.fights || []).find((g) => g[0] === id); if (!f) continue; if (!f[2] && lostAt === null) lostAt = x.r; if (f[2]) { winS.push(f[1]); if (lostAt !== null) after.push(x.r - lostAt); break; } } }
-    if (after.length) stuck.push(q(after, 0.5));
+    if (after.length) { stuck.push(q(after, 0.5)); stuckTop.push([id, Math.max(...after)]); }
     const low = pc(winS.filter((v) => v != null && v < 1).length, winS.filter((v) => v != null).length); lowWins[id] = low;
-    if (winS.length) console.log(`  ${id} 首领：${winS.length} 人打倒；打倒那一场强度中位 ${q(winS, 0.5)}×，不到 1 倍 ${low}%；输过以后中位 ${after.length ? q(after, 0.5) : '—'} 局打过（${after.length} 人输过）`);
+    if (winS.length) console.log(`  ${id} 首领：${winS.length} 人打倒；打倒那一场强度中位 ${q(winS, 0.5)}×，不到 1 倍 ${low}%；输过以后中位 ${after.length ? q(after, 0.5) : '—'} 局、最多 ${after.length ? Math.max(...after) : '—'} 局打过（${after.length} 人输过）`);
     if (winS.length >= 5 && low > 50 && !R(`!!BUILD_CHECK.free['${id}']`)) W.push(`${id} 多数人第一次打倒它是在强度不到 1 倍的局（${low}%）：碰运气碰出来的（DE28）`);
   }
   const stuckMax = stuck.length ? Math.max(...stuck) : null;
   if (C.stuckRuns && stuckMax != null && stuckMax > C.stuckRuns) W.push(`卡在某个首领的人中位 ${stuckMax} 局才打过（目标 ≤ ${C.stuckRuns}）`);
+  for (const [id, n] of stuckTop) if (C.stuckRunsMax && n > C.stuckRunsMax) W.push(`${id} 首领：有人输过以后 ${n} 局才打过（目标最多 ${C.stuckRunsMax}）`);
   // 连续没有新东西、白打的局、下一局开局更强
   const all = out.flatMap((P) => P.log), white = all.filter((x) => !x.kept && !x.news.length).length, str = all.filter((x) => x.stronger != null), up = str.filter((x) => x.stronger).length;
   const quiet = out.map((P) => { let m = 0, c = 0; for (const x of P.log) { c = x.news.length || x.kq.green || x.kq.gold ? 0 : c + 1; m = Math.max(m, c); } return m; });

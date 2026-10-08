@@ -83,5 +83,23 @@ ok(r10.sent && r10.noGold && r10.noRew, '送装备：蓝的能送（离开仓库
 ok(r10.got1 && !r10.got2 && r10.inB === 1, '对方收到一件；同一份不会收两次');
 ok(r10.done === 1 && r10.out === 0 && r10.back, '看到回执才算送完；对方不在时取消，东西回到自己仓库');
 
+// 12. 败北补给（§11）：没打通的地图上倒在首领战里才记（赢了、主动结束、没打到首领、打通过的图都不记）；每 3 次一箱，黄 → 绿 → 金；
+//     箱子里每个位一件、带克制词条、现在穿得上；挑一件进仓库；之后这张图的掉落带着克制方向
+const r11 = run(`const m = Station.ensure(freshMeta()); m.pilot.lv = 16; m.maps.reached['5-1'] = true; m.maps.cleared = { 1: true, 2: true, 3: true, 4: true };
+  const lose = (o) => Station.settle(m, Object.assign({ win: false, stage: '5-3', map: 5, cleared: [], stats: {}, cargo: [], bossFight: { stage: '5-3', left: 0.6, t: 80, at: 90 } }, o)).lossPity;
+  const notWin = Station.settle(m, { win: true, stage: '5-3', map: 5, cleared: [], stats: {}, cargo: [] }).lossPity, notAb = lose({ abandoned: true }), notBoss = lose({ bossFight: null });
+  const old = Station.settle(m, { win: false, stage: '4-3', map: 4, cleared: [], stats: {}, cargo: [], bossFight: { stage: '4-3', left: 0.5, t: 60, at: 90 } }).lossPity;
+  const p1 = lose(), p2 = lose(), cfg = Station.lootCfg(m), c = Station.crateOpts(m), opts = Object.values(c.opts);
+  const counterAll = opts.filter((it) => ['gun', 'aux', 'radar', 'chip'].includes(it.kind) && it.q !== 'gold' && !it.set).every((it) => it.aff.some((a) => a.k === 'vsShield' || a.k === 'vsArmor'));
+  const reqOk = opts.every((it) => it.req <= m.pilot.lv), n0 = m.gear.stash.length, got = Station.claimCrate(m, 'gun');
+  lose(); const q2 = lose().crate; lose(); const q3 = lose().crate;
+  const mid = (o) => Station.settle(m, { win: false, stage: '5-2', map: 5, cleared: [], stats: {}, cargo: [], bossFight: { stage: '5-2', left: 0.5, t: 60, at: 70 } }).lossPity, m1 = mid(), m2 = mid(), m3 = mid();
+  return { skip: [notWin, notAb, notBoss, old].every((x) => x === null), seq: [p1.n, p2.n, p2.crate], mid: [m1.n, m2.n, m3.n, m3.crate], counter: cfg.counter[5], nOpts: opts.length, counterAll, reqOk, claimed: !!got && got.kind === 'gun' && m.gear.stash.length === n0 + 1, left: m.pity.crates.length, q2, q3 };`);
+ok(r11.skip, '败北补给只记“没打通的地图上倒在首领战里”：赢了、主动结束、没打到首领、打通过的图都不记');
+ok(JSON.stringify(r11.seq) === '[1,0,"yellow"]' && r11.q2 === 'green' && r11.q3 === 'gold', `祭司每输 2 次一箱，一箱比一箱好：黄 → 绿 → 金（${JSON.stringify(r11.seq)} ${r11.q2} ${r11.q3}）`);
+ok(JSON.stringify(r11.mid) === '[1,2,0,"yellow"]', `别的首领每输 3 次一箱，各记各的（${JSON.stringify(r11.mid)}）`);
+ok(r11.counter === 'chaos' && r11.nOpts === 7 && r11.counterAll && r11.reqOk, '箱子里每个位一件（芯片一件）、可带的位都有克制词条、现在就穿得上；之后这张图掉落偏向克制祭司');
+ok(r11.claimed && r11.left === 3, '挑一件进仓库，箱子少一个');
+
 console.log(fails ? `站的规则自测：${fails} 条不对` : '站的规则自测通过');
 process.exitCode = fails ? 1 : 0;

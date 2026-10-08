@@ -598,6 +598,11 @@ table.metrics td.num{text-align:right;white-space:nowrap}
 .st-hot.locked{--hc:#6a6288;color:var(--mute);background:rgba(16,12,36,.7)}
 .st-hot .dot{position:absolute;top:-3px;right:-3px;width:10px;height:10px;border-radius:50%;background:var(--coral);box-shadow:0 0 8px var(--coral)}
 .st-launch{position:absolute;right:max(16px,calc(28px*var(--u)));bottom:calc(18px*var(--u));width:min(calc(420px*var(--u)),calc(100% - 32px));padding:calc(12px*var(--u)) calc(16px*var(--u));display:flex;flex-direction:column;gap:8px;z-index:2}
+.st-crate{display:flex;flex-direction:column;gap:6px;padding-bottom:8px;border-bottom:1px dashed rgba(255,214,140,.35)}
+.crate-row{display:flex;flex-wrap:wrap;gap:6px}
+.crate-opt{cursor:pointer;font:inherit}.crate-opt b{margin-left:2px;font-weight:600}
+.crate-opt.rec{box-shadow:0 0 0 2px var(--qc),0 0 14px var(--qc)}
+.crate-opt:hover,.crate-opt:focus-visible{background:rgba(40,30,70,.9)}
 .st-launch .mission{font-family:var(--f-display);font-size:var(--fs-m);color:#ffe7b0}
 .stage-node{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;padding:.35em .8em;border-radius:12px;background:rgba(255,255,255,.05);border:1.5px solid var(--edge);font-size:var(--fs-xs);color:var(--dim)}
 .stage-node b{font-family:var(--f-num);font-weight:800;color:var(--paper)}

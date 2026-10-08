@@ -1380,6 +1380,12 @@ class World {
     if (this.cb.onEnd) this.cb.onEnd(this.result(win));
   }
   result(win) { return this.withPlayer(this.me, () => this.resultOf(win)); }
+  /* 倒在首领战里：首领还剩多少血、打了多久、多久失控（结算写“差在哪”、站里的败北补给都看它） */
+  bossFightOf(win) {
+    const b = this.boss; if (win || this.vs || !b || !b.alive || b.dying || !(b.fightT > 3) || !(b.maxHp > 0)) return null;
+    const B = this.bossBudget();
+    return { stage: this.stageId, left: Math.round(clamp(b.hp / b.maxHp, 0, 1) * 100) / 100, t: Math.round(b.fightT), at: Math.round(B.free ? 0 : B.at || 0) };
+  }
   resultOf(win) {
     const R = this.me.res, m = Object.assign({}, this.m, R, { frags: Object.assign({}, R.frags), choiceTimes: R.choiceTimes.slice() }); // 自己的资源 + 全队统计
     return {
@@ -1389,7 +1395,7 @@ class World {
       choiceAvg: m.choiceTimes.length ? m.choiceTimes.reduce((a, b) => a + b, 0) / m.choiceTimes.length : null,
       skills: [...GUN_ORDER.filter((id) => this.gun[id] > 0).map((id) => ({ id, lv: this.gun[id] })), ...(this.support ? [{ id: this.support.id, lv: this.support.ulv }] : [])],
       syns: [...this.links], stream: this.buildName(), streamId: this.topId(),
-      avgKill: m.killTimeN ? m.killTimeSum / m.killTimeN : null, bossTime: this.bossTime || 0, bossEarly: this.bossEarly,
+      avgKill: m.killTimeN ? m.killTimeSum / m.killTimeN : null, bossTime: this.bossTime || 0, bossEarly: this.bossEarly, bossFight: this.bossFightOf(win),
       journey: (this.journey || []).slice(), companions: (this.companions || []).map((c) => c.id), vs: this.vs ? this.vsResult() : null,
       cargo: (this.me.cargo || []).slice(), loot: Object.assign({}, this.m.loot || {}), map: mapOfStage(this.stageId), lootCfg: this.lootCfg ? { firstBoss: Object.assign({}, this.lootCfg.firstBoss), uniPity: !!this.lootCfg.uniPity } : null,
     };
