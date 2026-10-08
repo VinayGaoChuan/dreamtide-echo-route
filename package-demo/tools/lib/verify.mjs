@@ -113,7 +113,7 @@ export async function smokeTest(ctx, cfg, packs, smokeKey) {
 
   const exe = executablePath(pack.target, cfg, pack.dir);
   const botSeconds = cfg.bot.enabled ? cfg.bot.seconds : 0;
-  ctx.note(`启动 ${pack.target.label}，自动点击、截图${botSeconds ? `，再让机器人试玩 ${botSeconds} 秒` : ''}（约 ${cfg.smoke.bootSeconds + cfg.smoke.clicks * cfg.smoke.stepSeconds + 3 + botSeconds} 秒，会弹出游戏窗口）…`);
+  ctx.note(`启动 ${pack.target.label}，自动点击、截图${botSeconds ? `，再让机器人试玩 ${botSeconds} 秒` : ''}（约 ${cfg.smoke.bootSeconds + cfg.smoke.clicks * cfg.smoke.stepSeconds + 3 + botSeconds} 秒，后台无头运行，不弹窗口）…`);
   const proc = await run(exe, [], { env: { MC_SMOKE_OUT: smokeDir, MC_SMOKE_KEY: smokeKey }, timeoutMs: (cfg.smoke.timeoutSeconds + botSeconds + 60) * 1000 });
   const resultFile = path.join(smokeDir, 'smoke-result.json');
   if (!fs.existsSync(resultFile)) {

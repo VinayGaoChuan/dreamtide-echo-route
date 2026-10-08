@@ -29,6 +29,8 @@ if (DUO_ROLE) {
   app.commandLine.appendSwitch('disable-background-timer-throttling');
   app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 }
+// 试跑和联机测试一律无头：离屏渲染，窗口从不显示，不出程序坞图标、不抢焦点，不挡住用户的屏幕（用户 2026-10-08）
+const HEADLESS = Boolean(SMOKE_DIR);
 const GAME_DIR = path.join(__dirname, 'game');
 const SCHEME = 'app';
 const ORIGIN = `${SCHEME}://game`;
@@ -255,10 +257,12 @@ function createWindow() {
       autoplayPolicy: 'no-user-gesture-required',
       // 试跑时窗口可能被挡住或屏幕休眠：不降速，保证计时和截图正常
       backgroundThrottling: !SMOKE_DIR,
+      offscreen: HEADLESS,
     },
   });
 
-  win.once('ready-to-show', () => win.show());
+  if (HEADLESS) win.webContents.setFrameRate(60);
+  else win.once('ready-to-show', () => win.show());
   win.on('page-title-updated', (event) => event.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event, url) => {
@@ -507,6 +511,10 @@ async function runSmoke(win) {
 }
 
 app.whenReady().then(() => {
+  if (HEADLESS && process.platform === 'darwin') {
+    if (app.setActivationPolicy) app.setActivationPolicy('accessory');
+    if (app.dock) app.dock.hide();
+  }
   if (steamResult === 'fatal') {
     dialog.showErrorBox(CONFIG.gameName, `请通过 Steam 启动《${CONFIG.gameName}》。\n\n${runtime.steam.message || ''}`);
     app.exit(1);

@@ -136,7 +136,7 @@ function startRelay({ latencyMs, jitterMs, lobbyDelayMs }) {
 // ── 启动一个程序，读它的状态文件 ──
 function launch(exe, dir, env, args = []) {
   resetDir(dir);
-  const child = spawn(exe, args, { env: { ...process.env, MC_SMOKE_OUT: dir, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: false });
+  const child = spawn(exe, args, { env: { ...process.env, MC_SMOKE_OUT: dir, ...env }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   const proc = { child, dir, exited: null, stderr: '' };
   child.stderr.on('data', (c) => { proc.stderr = (proc.stderr + c).slice(-4000); });
   child.stdout.on('data', () => {});
@@ -376,7 +376,7 @@ export async function duoTest(ctx, cfg, packs, smokeKey) {
   }
   const exe = executablePath(pack.target, cfg, pack.dir);
   const relay = await startRelay(duo);
-  ctx.note(`本机假 Steam 已启动：消息延迟 ${duo.latencyMs}±${duo.jitterMs} 毫秒，「有人进房」通知晚 ${duo.lobbyDelayMs} 毫秒（会弹出两个游戏窗口，约 ${Math.round((duo.seconds * 2 + 60) / 60)} 分钟）`);
+  ctx.note(`本机假 Steam 已启动：消息延迟 ${duo.latencyMs}±${duo.jitterMs} 毫秒，「有人进房」通知晚 ${duo.lobbyDelayMs} 毫秒（两个游戏在后台无头运行，不弹窗口，约 ${Math.round((duo.seconds * 2 + 60) / 60)} 分钟）`);
   const outcome = { config: duo, rounds: [], relay: null, shots: [] };
   try {
     const r1 = await round(ctx, { exe, key: smokeKey, relay, cfg: { seed: 777 }, name: '1', mode: 'invite', secs: duo.seconds, tail: 0, kill: duo.leaveAt });
