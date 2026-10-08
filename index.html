@@ -66,7 +66,7 @@ svg.ic{width:1.1em;height:1.1em;fill:currentColor;flex:none;vertical-align:-.16e
 .btn.coral{border-color:rgba(255,122,107,.6)}
 .btn.small{min-height:max(32px,calc(40px*var(--u)));font-size:var(--fs-s);padding:0 max(10px,calc(16px*var(--u)))}
 .btn[disabled]{opacity:.45;filter:saturate(.5)}
-.btn[aria-disabled="true"],.job[aria-disabled="true"]{opacity:.45;filter:saturate(.5);cursor:not-allowed}
+.btn[aria-disabled="true"],.job[aria-disabled="true"],.icon-btn[aria-disabled="true"]{opacity:.45;filter:saturate(.5);cursor:not-allowed}
 .pulse{animation:pulseTap .5s ease-out}
 @keyframes pulseTap{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,215,106,.7)}35%{transform:scale(1.04);box-shadow:0 0 0 8px rgba(255,215,106,.25)}100%{transform:scale(1);box-shadow:0 0 0 14px rgba(255,215,106,0)}}
 .icon-btn{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:max(56px,calc(78px*var(--u)));padding:0 calc(6px*var(--u));white-space:nowrap;min-height:max(56px,calc(78px*var(--u)));border-radius:calc(22px*var(--u));background:rgba(30,24,80,.72);border:2px solid var(--edge);font-size:var(--fs-xs);color:var(--dim);transition:transform .12s,border-color .2s,color .2s;position:relative}
