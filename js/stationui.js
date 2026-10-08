@@ -49,9 +49,11 @@ class StationScene {
     // 设施：解锁的亮，没解锁的暗
     for (const id in STATION_SPOTS) {
       const S = STATION_SPOTS[id], x = W * S.x, y = H * S.y, on = !!U[id], f = this.flash[id] !== undefined ? Math.max(0, 1 - (t - this.flash[id]) / 1.2) : 0;
+      const by = y + 40;
       g.fillStyle = on ? '#3a3058' : '#1c1628'; g.strokeStyle = on ? '#8a7ab8' : '#3a3050'; g.lineWidth = 2;
-      g.beginPath(); g.ellipse(x, y + 26, 54, 16, 0, 0, TAU); g.fill(); g.stroke();
-      if (on) { g.globalCompositeOperation = 'lighter'; drawGlow(g, x, y + 20, 70, 'rgba(255,200,120,0.7)', 0.2 + 0.6 * f + 0.05 * Math.sin(t * 2 + x)); g.globalCompositeOperation = 'source-over'; }
+      g.beginPath(); g.ellipse(x, by, 58, 17, 0, 0, TAU); g.fill(); g.stroke();
+      drawFacility(g, id, x, by - 4, on, t); // 平台上有它自己的小建筑（评审 r2：空的发光椭圆台像占位图）
+      if (on) { g.globalCompositeOperation = 'lighter'; drawGlow(g, x, by - 8, 70, 'rgba(255,200,120,0.7)', 0.15 + 0.6 * f + 0.05 * Math.sin(t * 2 + x)); g.globalCompositeOperation = 'source-over'; }
     }
     // 泊位上的船
     const sx = W * 0.40, sy = H * 0.80 - 40;
@@ -64,14 +66,38 @@ class StationScene {
       for (const it of A.list) {
         const u = (A.t - it.at) / it.fly; if (u < 0) continue;
         const c = QUALS[it.q].color;
-        if (u < 1) { const k = Ease.inOutSine(u), x = lerp(px, tx, k), y = lerp(py, ty, k) - Math.sin(k * Math.PI) * (90 + it.rank * 25); g.globalCompositeOperation = 'lighter'; drawGlow(g, x, y, 14 + it.rank * 6, hexA(c, 0.9), 0.8); g.globalCompositeOperation = 'source-over'; g.fillStyle = c; g.strokeStyle = '#2a1e30'; g.lineWidth = 1.6; roundRect(g, x - 8, y - 6, 16, 12, 3); g.fill(); g.stroke(); }
-        else if (u < 3 && it.rank >= 2) { const a = 1 - (u - 1) / 2; g.save(); g.font = '600 15px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.fillStyle = hexA(c, a); g.fillText(it.name, tx, ty - 40 - (u - 1) * 14 - it.rank * 4); g.restore(); if (it.rank >= 4 && u < 1.6) { g.globalCompositeOperation = 'lighter'; drawGlow(g, tx, ty, 120, 'rgba(255,214,140,0.9)', 0.9 * (1.6 - u)); g.globalCompositeOperation = 'source-over'; } }
+        if (u < 1) { // 一件一件从货舱飞起来，划一道弧落进仓库：箱子按品质着色，蓝以上拖一道光，带着名字
+          const k = Ease.inOutSine(u), x = lerp(px, tx, k), y = lerp(py, ty, k) - Math.sin(k * Math.PI) * (120 + it.rank * 30), sz = 1.5 + it.rank * 0.15;
+          if (it.rank >= 1) { const bh = 40 + it.rank * 22; g.globalCompositeOperation = 'lighter'; const gr = g.createLinearGradient(0, y - bh, 0, y); gr.addColorStop(0, hexA(c, 0)); gr.addColorStop(1, hexA(c, 0.7)); g.fillStyle = gr; g.fillRect(x - 4 * sz, y - bh, 8 * sz, bh); g.globalCompositeOperation = 'source-over'; }
+          g.globalCompositeOperation = 'lighter'; drawGlow(g, x, y, 18 + it.rank * 8, hexA(c, 0.9), 0.85); g.globalCompositeOperation = 'source-over';
+          g.fillStyle = c; g.strokeStyle = '#2a1e30'; g.lineWidth = 2; roundRect(g, x - 9 * sz, y - 7 * sz, 18 * sz, 14 * sz, 3 * sz); g.fill(); g.stroke(); g.fillStyle = 'rgba(42,30,48,0.6)'; g.fillRect(x - 1.5 * sz, y - 7 * sz, 3 * sz, 14 * sz);
+          if (u > 0.15) { g.save(); g.font = `${it.rank >= 2 ? 700 : 500} ${14 + it.rank * 2}px "Noto Sans SC", sans-serif`; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = 'rgba(20,14,40,0.9)'; g.strokeText(it.name, x, y - 16 * sz); g.fillStyle = c; g.fillText(it.name, x, y - 16 * sz); g.restore(); }
+        }
+        else if (u < 3 && it.rank >= 2) { const a = 1 - (u - 1) / 2; g.save(); g.font = '700 17px "Noto Sans SC", sans-serif'; g.textAlign = 'center'; g.lineWidth = 4; g.strokeStyle = `rgba(20,14,40,${0.9 * a})`; g.strokeText(it.name, tx, ty - 40 - (u - 1) * 14 - it.rank * 4); g.fillStyle = hexA(c, a); g.fillText(it.name, tx, ty - 40 - (u - 1) * 14 - it.rank * 4); g.restore(); if (it.rank >= 4 && u < 1.6) { g.globalCompositeOperation = 'lighter'; drawGlow(g, tx, ty, 160, 'rgba(255,214,140,0.9)', 0.9 * (1.6 - u)); g.globalCompositeOperation = 'source-over'; } }
       }
     }
     g.restore();
   }
 }
 
+/* 站里每个设施平台上的小建筑：没开的是暗的轮廓，开了亮灯 */
+function drawFacility(g, id, x, by, on, t) {
+  const M = on ? '#8a90a8' : '#2c2640', D = on ? '#4c4a66' : '#1e1a30', L = on ? '#ffd27a' : '#3a3050', ink = '#120e1e';
+  g.save(); g.translate(x, by); g.lineJoin = 'round'; g.strokeStyle = ink; g.lineWidth = 1.6;
+  const box = (bx, bty, w, h, c) => { g.fillStyle = c; g.beginPath(); g.roundRect ? g.roundRect(bx, bty, w, h, 3) : g.rect(bx, bty, w, h); g.fill(); g.stroke(); };
+  switch (id) {
+    case 'stash': box(-26, -14, 18, 14, on ? '#c9a46a' : D); box(-6, -14, 18, 14, on ? '#b08a52' : D); box(-16, -27, 18, 13, on ? '#d8b47a' : D); box(14, -10, 14, 10, on ? '#9fd0ff' : D); break;
+    case 'shop': box(-20, -22, 40, 22, M); g.fillStyle = on ? '#ff9fcf' : D; for (let i = 0; i < 5; i++) { g.beginPath(); g.moveTo(-22 + i * 9, -22); g.lineTo(-18 + i * 9, -29); g.lineTo(-13 + i * 9, -22); g.closePath(); g.fill(); } box(-8, -14, 16, 14, D); g.fillStyle = L; g.beginPath(); g.arc(14, -12, 3, 0, TAU); g.fill(); break;
+    case 'insure': box(-16, -30, 32, 30, M); g.fillStyle = D; g.beginPath(); g.arc(0, -15, 9, 0, TAU); g.fill(); g.stroke(); g.strokeStyle = L; g.lineWidth = 2; for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + t * (on ? 0.6 : 0); g.beginPath(); g.moveTo(0, -15); g.lineTo(Math.cos(a) * 7, -15 + Math.sin(a) * 7); g.stroke(); } break;
+    case 'salvage': box(-20, -14, 40, 14, M); g.save(); g.translate(8, -14); g.rotate(-0.7 + (on ? Math.sin(t * 2) * 0.15 : 0)); box(-3, -26, 6, 26, D); g.restore(); g.fillStyle = on ? '#ffb35c' : D; for (let i = 0; i < 3; i++) { g.beginPath(); g.arc(-10 + i * 6, -16 - (on ? Math.abs(Math.sin(t * 6 + i)) * 4 : 0), 2, 0, TAU); g.fill(); } break;
+    case 'cube': { const bob = on ? Math.sin(t * 1.6) * 3 : 0; g.save(); g.translate(0, -22 + bob); g.rotate(on ? t * 0.5 : 0.4); g.fillStyle = on ? '#b98aff' : D; g.beginPath(); g.roundRect ? g.roundRect(-11, -11, 22, 22, 4) : g.rect(-11, -11, 22, 22); g.fill(); g.stroke(); g.strokeStyle = on ? '#fff3fb' : '#3a3050'; g.lineWidth = 1.4; g.strokeRect(-6, -6, 12, 12); g.restore(); if (on) { g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, -22 + bob, 26, 'rgba(185,138,255,0.9)', 0.6); g.globalCompositeOperation = 'source-over'; } break; }
+    case 'black': g.fillStyle = on ? '#5a2a6a' : D; g.beginPath(); g.moveTo(-24, 0); g.lineTo(0, -32); g.lineTo(24, 0); g.closePath(); g.fill(); g.stroke(); box(-7, -13, 14, 13, on ? '#e8e2f6' : '#2c2640'); g.fillStyle = ink; for (const [dx, dy] of [[-3, -10], [3, -4], [0, -7]]) { g.beginPath(); g.arc(dx, dy, 1.4, 0, TAU); g.fill(); } break;
+    case 'hangar': g.fillStyle = M; g.beginPath(); g.moveTo(-28, 0); g.lineTo(-28, -16); g.quadraticCurveTo(0, -36, 28, -16); g.lineTo(28, 0); g.closePath(); g.fill(); g.stroke(); g.fillStyle = D; for (let i = 0; i < 4; i++) g.fillRect(-18 + i * 9, -14, 7, 14); break;
+    case 'codex': box(-12, -26, 24, 26, M); g.fillStyle = on ? '#9fe3f0' : D; g.fillRect(-8, -22, 16, 11); g.fillStyle = L; g.fillRect(-8, -8, 16, 2); g.fillRect(-8, -4, 10, 2); break;
+    case 'equip': box(-24, -6, 48, 6, M); for (const dx of [-18, 18]) box(dx - 2, -30, 4, 24, D); g.strokeStyle = on ? '#9fd0ff' : '#3a3050'; g.lineWidth = 2; g.beginPath(); g.moveTo(-18, -26); g.lineTo(18, -26); g.stroke(); box(-10, -22, 20, 8, on ? '#a7adc2' : D); break;
+  }
+  g.restore();
+}
 /* ---------- 装备的小图标：位的剪影 + 品质色的框（套装用族色的边） ---------- */
 function paintGearIcon(c, it, kind) {
   // 装备的小图标（评审：纯色几何像占位）：金属的部件 + 品质色的饰条和光 + 族色（套装）/ 金边（暗金）；形状按位和底子

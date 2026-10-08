@@ -1036,7 +1036,7 @@ function drainWorldEvents() {
       case 'phase': banner(e.name, e.captain ? '攻击更密，还带着散兵' : e.n === 2 ? '攻击越来越快，安全区在缩小' : '弹幕会逆行，消失的弹幕会重演', 1.8, null, 3); break;
       case 'flag': banner('', e.text, e.dur || 1, null, 1); break;
       case 'burstEmpty': if (G.hudRefs) { hudFly('burst', 1.6); pulse(G.hudRefs.burst); } break;
-      case 'cargoShip': banner('货舱送回家了', `${e.total} 件装备安全了 · 死了也不会丢`, 2.2, 'rgba(255,190,120,.85)', 4); Sound.sfx('cargoShip'); cargoCard(e.total, null, '✓ 已送回家', '#ffd27a', 2.4); break;
+      case 'cargoShip': if (w.state !== 'victory' || w.chain && w.nextStageId()) banner('货舱送回家了', `${e.total} 件装备安全了 · 死了也不会丢`, 2.2, 'rgba(255,190,120,.85)', 4); Sound.sfx('cargoShip'); cargoCard(e.total, null, '✓ 已送回家', '#ffd27a', 2.4); break; // 打通整张图时不再叠一个大标题（评审 r3：两个大标题抢焦点），货舱自己的字和小卡说明白
       case 'loot': cargoCard(e.total, e.best, `+1 · ${e.name}`, QUALS[e.q].color, 2.2); break; // 右下角货舱小卡（§6.8）：件数、这局最好那件的颜色、刚捡的这件
       case 'stageAdvance':
         // 连成一局：首领倒下后原地进下一关，换天色和音乐，构筑留着

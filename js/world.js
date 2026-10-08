@@ -83,7 +83,7 @@ class World {
     else if (o.vs && this.np > 1) this.initVs(); // 对抗（v0.11）：每人一条航道、三段计分，不走合作关卡的目标链
     else this.initDirector();
     if (this.mode === 'run' && !o.vs) this.eachPlayer((q) => this.applyGearStart(q)); // 装备：开局自带的能力、预言者多一次仪式
-    if (this.mode === 'run' && !o.vs && this.catchUp) this.eachPlayer((q) => { for (let i = 0; i < this.catchUp; i++) this.queueRitual('catch', { who: q.idx, x: q.x + 240, y: (TOP + BOTTOM) / 2, device: 'crystal', promise: '路标补发' }); });
+    if (this.mode === 'run' && !o.vs && this.catchUp) this.eachPlayer((q) => { for (let i = 0; i < this.catchUp; i++) this.queueRitual('catch', { who: q.idx, x: q.x + 240, y: (TOP + BOTTOM) / 2, device: 'crystal', promise: '路标补发', full: i % 3 === 2, q: i % 3 === 2 ? 1 : 0 }); }); // 每 3 次里 1 次是完整仪式（保底史诗）：正常打一关有 2 次完整仪式
     this.eachPlayer(() => this.syncWingmen());
     this.player = this.me; // 模拟之外（界面、HUD、渲染）读到的“当前飞机”就是本机这架
   }
@@ -1018,7 +1018,7 @@ class World {
   tryBurst() {
     const p = this.player;
     if (this.state !== 'play' || this.ritual || !p.alive) return;
-    if (this.bursting) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text(this.bursting.owner === p.idx ? '大招正在放' : this.vs ? '别人的大招还在放' : '队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招（自己的还在放时别说成队友的）
+    if (this.bursting) { if (p === this.me && !(this.t < (p.burstMsgT || 0))) { p.burstMsgT = this.t + 1.2; Sound.sfx('denied', { gap: 250 }); this.text(this.bursting.owner === p.idx ? '大招正在放' : this.vs ? '别人的大招还在放' : '队友的大招还在放', p.x, p.y - 40, '#ffe38a', 15, 2); } return; } // 同一时间只放一个大招（自己的还在放时别说成队友的）
     // 没充满：说出来，大招按钮也闪一下（按了要有看得见的反应，lessons UT4）
     if (p.stock < 1) { if (p === this.me) { Sound.sfx('denied', { gap: 250 }); this.text('大招还没充满', p.x, p.y - 40, '#ffe38a', 15, 1.2); this.emit('burstEmpty'); } return; }
     p.stock--;
@@ -1545,6 +1545,7 @@ class World {
       if (b.ghost > 0) { g.globalAlpha = 0.25 + 0.25 * Math.sin(t * 20); BulletArt.draw(g, b.type, b.x, b.y, b.type === 'blue' || b.type === 'white' ? b.rot : 0, 1, cb); g.globalAlpha = 1; return; }
       if (this.reverseT > 0) { g.globalAlpha = 0.22; BulletArt.draw(g, b.type, b.x + b.vx * 0.06, b.y + b.vy * 0.06, b.rot, 1, false); g.globalAlpha = 1; }
       g.fillStyle = 'rgba(16,10,40,0.55)'; g.beginPath(); g.arc(b.x, b.y, (b.r || 6) + 5, 0, TAU); g.fill(); // 敌弹统一压一圈深色底，和紫色场景、光点拉开
+      g.strokeStyle = 'rgba(255,70,90,0.85)'; g.lineWidth = 2; g.beginPath(); g.arc(b.x, b.y, (b.r || 6) + 4, 0, TAU); g.stroke(); // 再加一圈只有敌弹才有的红边：会伤人的一眼分得出（评审 r3）
       BulletArt.draw(g, b.type, b.x, b.y, b.type === 'blue' || b.type === 'white' ? b.rot : b.type === 'gold' ? b.t * 3 : 0, 1, cb);
       if (stop) { g.strokeStyle = 'rgba(255,215,106,0.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(b.x, b.y, 11, 0, TAU); g.stroke(); }
     });

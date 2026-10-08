@@ -6,6 +6,7 @@
 //       node tools/net-bot.js ws://39.106.153.154:8080/mp 2 vs 400                 # 对抗（自由竞争）
 //       node tools/net-bot.js ws://39.106.153.154:8080/mp 3 1-1 300 --host-leave=60 # 房主第 60 秒断开：其余的人必须继续打完（v0.11 §13）
 //       node tools/net-bot.js ws://localhost:8091/mp 2 1-1 300 --dark=1@40~30        # 第 2 个客户端第 40 秒起断网 30 秒（收发全丢）：必须先被判断线中、回来后恢复（v0.11 §8）
+//       node tools/net-bot.js ws://localhost:8091/mp 3 2-1 120 --gear=1               # 每人一身不一样的装备（光束 / 导弹 / 暗金雷鸣之喉 / 散射）：照样同步
 // 退出码：没同步 / 卡顿过多 / 没跑起来 → 1
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const ARGS = process.argv.slice(2).filter((a) => !a.startsWith('--')), FLAG = (k) => { const f = process.argv.find((a) => a.startsWith('--' + k + '=')); return f ? f.split('=')[1] : null; };
@@ -51,9 +52,18 @@ async function main() {
       sessionStorage: { getItem: (x) => (x in ss ? ss[x] : null), setItem: (x, v) => { ss[x] = String(v); }, removeItem: (x) => { delete ss[x]; } }, __ss: ss };
     ctx.globalThis = ctx; vm.createContext(ctx);
     for (const f of FILES) vm.runInContext(fs.readFileSync(path.join(dir, f + '.js'), 'utf8'), ctx, { filename: f + '.js' });
-    ctx.__url = URL_; ctx.__k = k; ctx.__dump = !!FLAG('dump'); ctx.__trace = !!FLAG('trace'); ctx.__build = build; ctx.__stage = STAGE;
+    ctx.__url = URL_; ctx.__k = k; ctx.__gear = !!FLAG('gear'); ctx.__dump = !!FLAG('dump'); ctx.__trace = !!FLAG('trace'); ctx.__build = build; ctx.__stage = STAGE;
     vm.runInContext(`
       var meta = Station.ensure(freshMeta()); var settings = DEFAULT_SETTINGS(); settings.particles = 'low';
+      if (__gear) { // --gear=1：每个客户端穿一身不一样的装备（不同的主炮底子、套装、暗金）：属性随名单带过去，各端照样同步
+        meta.pilot.lv = 20; var GR = Gear.rng(900 + __k), mk = function (o) { return Gear.make(Object.assign({ rnd: GR, ilvl: 18 }, o)); };
+        meta.gear.eq = [
+          { gun: mk({ q: 'yellow', kind: 'gun', base: 'beam' }), armor: mk({ q: 'green', set: 'frost', kind: 'armor' }), aux: mk({ q: 'green', set: 'frost', kind: 'aux' }), radar: mk({ q: 'gold', uni: 'scavEye' }) },
+          { gun: mk({ q: 'blue', kind: 'gun', base: 'missile' }), engine: mk({ q: 'yellow', kind: 'engine' }), chip1: mk({ q: 'gold', uni: 'twinChip' }) },
+          { gun: mk({ q: 'gold', uni: 'thunderThroat' }), core: mk({ q: 'yellow', kind: 'core' }), armor: mk({ q: 'blue', kind: 'armor' }) },
+          { gun: mk({ q: 'yellow', kind: 'gun', base: 'scatter' }), chip1: mk({ q: 'blue', kind: 'chip' }), chip2: mk({ q: 'yellow', kind: 'chip' }) },
+        ][__k % 4];
+      }
       var B = { w: null, L: null, res: null, rescues: [], rtts: [], leads: [], started: false, stallMs: 0, maxWait: 0, prev: 0, slack: [], win: null };
       /* 分段统计：每段里卡住了多少毫秒、最长一次等多久、队友的操作帧到达时离要用还剩多少毫秒（负数 = 来晚了，这一帧要等） */
       function newWin() { B.win = { t: performance.now(), stallMs: 0, maxWait: 0, slack: [], rtt: [], lead: [], tx: __io.tx, rx: __io.rx, txN: __io.txN, rxN: __io.rxN }; }

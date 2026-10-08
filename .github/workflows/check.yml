@@ -47,7 +47,7 @@ jobs:
           node tools/mp-sim.js js vs 3 net 0.1 100 5
       - name: 联机中转服务器
         run: node tools/relay-test.js
-      - name: 真联机（本地中转服务器 + 无头客户端，真实 WebSocket：2 人打 60 秒；3 人房主第 25 秒断线，其余人继续；第 25 秒刷新页面回到原对局）
+      - name: 真联机（本地中转服务器 + 无头客户端，真实 WebSocket：2 人打 60 秒；3 人房主第 25 秒断线，其余人继续；第 25 秒刷新页面回到原对局；3 人各穿一身不同的装备）
         run: |
           PORT=8091 node server/relay.js &
           sleep 1
@@ -56,6 +56,7 @@ jobs:
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 70 --reload=1@25
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 90 --dark=1@10~20 --reload=1@50
           node tools/net-bot.js ws://localhost:8091/mp 2 1-1 90 --reload=1@30 --lat=150 --spikes=1
+          node tools/net-bot.js ws://localhost:8091/mp 3 2-1 60 --gear=1
       - name: 联机送装备（本地中转 + 两个无头 Chrome：蓝黄绿能送、暗金不能，对方收到、回执清掉待送）
         run: node tools/mp-gift-test.js
       - name: 打包单文件

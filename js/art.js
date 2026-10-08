@@ -1084,9 +1084,9 @@ function drawPortal(g, type, x, y, r, t, alpha = 1) {
 
 /* ---------- 掉落物 ---------- */
 function drawPickup(g, k, t) {
-  if (k.kind === 'dust') {
-    g.globalCompositeOperation = 'lighter'; drawGlow(g, k.x, k.y, k.big ? 11 : 8, k.big ? GLOW.gold : GLOW.purple, 0.7); g.globalCompositeOperation = 'source-over';
-    g.fillStyle = k.big ? '#fff3c8' : '#efe4ff'; BulletArt.star(g, k.x, k.y, 4, k.big ? 5 : 3.5, 1.3); g.fill();
+  if (k.kind === 'dust') { // 星砂：小小的菱形晶粒，没有边——和带红边的敌弹、星形的金色敌弹分得开（评审 r3）
+    g.globalCompositeOperation = 'lighter'; drawGlow(g, k.x, k.y, k.big ? 9 : 6, k.big ? GLOW.gold : GLOW.purple, 0.55); g.globalCompositeOperation = 'source-over';
+    const s = k.big ? 4 : 2.8; g.fillStyle = k.big ? '#fff3c8' : '#d9c8ff'; g.beginPath(); g.moveTo(k.x, k.y - s * 1.4); g.lineTo(k.x + s, k.y); g.lineTo(k.x, k.y + s * 1.4); g.lineTo(k.x - s, k.y); g.closePath(); g.fill();
   } else if (k.kind === 'wood') { // 残骸零件（回家折成废料，§8.2）：一颗翻转的螺母 + 一截弯掉的铁片
     g.save(); g.translate(k.x, k.y); g.rotate(t * 2.2 + k.seed);
     g.globalCompositeOperation = 'lighter'; drawGlow(g, 0, 0, 13, 'rgba(255,190,120,0.75)', 0.6); g.globalCompositeOperation = 'source-over';

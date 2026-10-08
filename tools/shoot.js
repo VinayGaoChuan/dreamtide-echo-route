@@ -22,6 +22,8 @@ const HELPER = PILOT_SRC + `
   window.toast = function (...a) { const r = _t.apply(this, a), el = $('#toast').lastElementChild; if (el) el.dataset.gt = String((G.world ? G.world.t : 0) + (a[3] || 2200) / 1000); return r; };
   toast = window.toast;
 })();
+// 快进时真实时间几乎没过去：HUD 的飞入动画会停在半路（血条被截一半）。截图时不要过渡，直接停在终点
+(function () { const st = document.createElement('style'); st.textContent = '#hud .fly{transition:none!important}'; document.head.appendChild(st); })();
 window.__S = {
   hold: false,
   // 摆拍用的一身装备：按地图给一身那个阶段像样的东西（装备长在船上，截图里看得见）

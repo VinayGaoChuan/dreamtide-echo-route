@@ -58,7 +58,7 @@ class CaptainBoss {
       case 'ring': { const n = 14, gap = srandi(0, n - 1), off = srand(TAU); for (let i = 0; i < n; i++) if (i !== gap && i !== (gap + 1) % n) w.fire('pink', this.x, this.y, off + (i / n) * TAU, 140 * spd, { silent: i > 0 }); yield* wait(0.6); break; }
       case 'cross': for (let k = 0; k < 4; k++) { for (let q = 0; q < 4; q++) w.fire('blue', this.x, this.y, (q * Math.PI) / 2 + Math.PI / 4 + this.t * 0.8, 170 * spd, { silent: q > 0 }); yield* wait(0.18); } break;
       case 'race': { // 这族的招牌：矿业冲锋车、商会收账小偷、霜晶冰墙、群翼工蜂、电弧电塔、马戏弹跳球、熔核迫击炮
-        if (this.race === 'ledger') { if (!this.thiefDone) { this.thiefDone = true; w.spawnThief(true); } } // 小偷一场只叫一次：首领战不能变成刷钱袋
+        if (this.race === 'ledger') { const a0 = w.aimAngle(this.x, this.y); for (let i = 0; i < 9; i++) w.fire('gold', this.x - 20, this.y, a0 + (i - 4) * 0.13, 170 + (i % 3) * 30, { silent: i > 0 }); } // 商会队长“收账”：撒一把金币弹（叫小偷会把追踪 / 雷球的火力全引走，报告里追踪雷暴流成了陷阱）
         else if (RACE_FOES[this.race]) w.spawnRaceFoe(RACE_FOES[this.race].kind);
         yield* wait(1.0); break;
       }
