@@ -59,6 +59,8 @@ function banner(title, sub, dur = 1.6, color, prio = 2) {
    offIf(条件, 原因)：条件成立时按钮灰掉，但仍能按，按下弹出原因（不用 disabled：禁用的按钮按了什么都不发生）；
    pulse(元素)：点了已经选中的东西，原地闪一下 */
 const offIf = (cond, why) => (cond ? `aria-disabled="true" data-why="${esc(why)}"` : '');
+/* 打包版（有桌面外壳）没连上 Steam：联机走不通（程序不能连外网），联机按钮灰掉说原因 */
+const mpOff = () => offIf(typeof window !== 'undefined' && !!window.kitBridge && !window.kitBridge.steam, '联机要先打开 Steam 并登录，再启动游戏');
 function pulse(el) { if (!el) return; el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); clearTimeout(el._pulseT); el._pulseT = setTimeout(() => el.classList.remove('pulse'), 900); }
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('[aria-disabled="true"][data-why]'); if (!b) return;
@@ -113,7 +115,7 @@ function showTitle() {
   Sound.setMode('title'); G.bg = 'title'; G.sea.setTheme('title');
   const first = !G.meta.seenTitle, zhTitle = /^zh/.test(I18N.lang); // 中文显示「余烬：迷航」；其他语言显示英文名（商店上也是）
   const el = showScreen('title', `
-    <div class="corner-tr"><button class="icon-btn" id="t-mp" type="button">${icon('i-team')}<span>联机</span></button><button class="icon-btn" id="t-sound" type="button" aria-label="声音开关">${icon(G.meta.settings.muted ? 'i-mute' : 'i-sound')}<span>${G.meta.settings.muted ? '静音' : '声音'}</span></button></div>
+    <div class="corner-tr"><button class="icon-btn" id="t-mp" type="button" ${mpOff()}>${icon('i-team')}<span>联机</span></button><button class="icon-btn" id="t-sound" type="button" aria-label="声音开关">${icon(G.meta.settings.muted ? 'i-mute' : 'i-sound')}<span>${G.meta.settings.muted ? '静音' : '声音'}</span></button></div>
     <div class="title-block">
       <h1 class="title-main ${zhTitle ? '' : 'long'}">${zhTitle ? '余烬<em>：迷航</em>' : 'EMBERS<em>LOST VOYAGE</em>'}</h1>
       <p class="title-sub">${[zhTitle ? 'EMBERS: LOST VOYAGE' : '', DEMO.on ? 'DEMO' : ''].filter(Boolean).join(' · ')}</p>

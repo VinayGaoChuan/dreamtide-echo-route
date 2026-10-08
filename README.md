@@ -1,4 +1,4 @@
-# 拾荒之翼 Lootwing（暂定名；仓库沿用旧名“梦潮：回声航线”）
+# 余烬：迷航 Embers: Lost Voyage（仓库沿用旧名“梦潮：回声航线”）
 
 胖乎乎的横版自动射击刷宝游戏（HTML / Canvas，目标平台 Steam：键鼠 + 手柄 / Steam Deck）。
 一张地图是三关连打，一关是一串主目标，局内靠升级仪式长出这一局的构筑；精英和首领掉暗黑 2 式的装备（白 / 蓝 / 黄 / 绿套装 / 暗金），首领倒下货舱把东西送回家。
@@ -46,12 +46,15 @@
 | `js/surprise.js` | 场景惊喜：月亮怪、贴纸拟态、拟态梦灯屋 |
 | `js/boss.js` · `js/captain.js` | 失控闹钟 Boss、关卡队长 |
 | `js/loot.js` | 局内掉落：按种族偏向和寻宝率掷骰、首杀保底、光柱和名字、吸取、首领倒下的货舱 |
-| `js/priest.js` | 终点首领混沌祭司（5-3）：圣歌环、静默带、护盾 / 装甲轮换 |
+| `js/priest.js` | 终点首领缄默主教（5-3，代码里叫 priest）：颂词环、静默带、护盾 / 装甲轮换 |
 | `js/vs.js` | 联机对抗（自由竞争）：航道、风塔、干扰洞口、冲突区直攻、复归、计分、对抗画面 |
 | `js/net.js` | 联机：帧同步会话 `LockstepSession`、操作编码、转发层（Claude 房间 / 本机多窗口）、联机房间 `Lobby` |
 | `js/ui.js` | 菜单、联机房间、HUD、结算、设置 |
 | `js/stationui.js` | 站的画面和面板：环形空间站、热点、装备栏 / 仓库 / 商人 / 保险舱 / 拆解台 / 改造台 / 黑市 / 机库 / 图鉴 / 星图、装备图标与对比 |
 | `js/main.js` | 启动、自适应舞台、固定步长主循环、联机主循环 |
+| `js/i18n.js` | 多语言：选语言（设置 > Steam 客户端 > 系统）、查表 `__T`、装备名按语言换语序 `affixName`；网页版没有句子表，一直是中文 |
+| `js/steamnet.js` | 打包版的联机：Steam 好友房间（大厅）+ 点对点消息，和网页版的转发层同一套接口 |
+| `js/kitshim.js` · `js/bot.js` | 金牌制作人打包工具要的接口（`K.net`、`K.game.netcheck`、`K.test.run`、`host-left`）和游戏自带的机器人（两个客户端联机测试、联机自检用） |
 | `tools/smoke-sim.js` · `tools/sim-env.js` | 无头冒烟测试（假画布跑三关）；`sim-env.js` 是共用的无头环境和自动驾驶 `pilot`（报告工具、截图工具也用它） |
 | `tools/report-sim.js` | 构筑报告 + 节奏报告：机器人按 7 个流派各打三关，量胜率差、成型件、只加数字的选择、强度曲线、平静 / 高压 / 无奖励时长、不公平受击、火力成长（目标在 docs/design.md §14） |
 | `tools/shoot.js` | 真实画面截图：无头 Chrome 打真实关卡，截商店主图、5 张截图、预告片 9 帧（`--moments` 改拍标志时刻的连续帧） |
@@ -62,7 +65,10 @@
 | `server/relay.js` | 联机中转服务器（零依赖 Node）：同一个端口提供游戏网页和 WebSocket `/mp` |
 | `tools/relay-test.js` · `tools/deploy-server.js` | 中转服务器自测；一键部署到 Debian / Ubuntu 主机 |
 | `tools/net-bot.js` | 真联机测试：几个无头客户端经真实 WebSocket 连服务器打一局（和网页同一份联机主循环 `MpDriver`），报告同步、卡顿、延迟、操作帧到达余量、收发流量 |
-| `build.py` | 把 js 内联成单个 HTML |
+| `build.py` | 把 js 内联成单个 HTML；`--demo` 打试玩版（只开第 1 张图），`--pkg <文件夹或 .zip>` 打给打包工具用的文件夹（本地字体、31 种语言） |
+| `tools/i18n.js` · `i18n/` | 多语言：打包时把给玩家看的中文整句改写成 `__T('整句', 参数…)`（`extract` / `transform` / `check`）；`i18n/<语言>.json` 是 30 种译文，`i18n/glossary.md` 是统一译法 |
+| `fonts/` | 打包版用的本地字体（打包后的程序不能连外网） |
+| `package-demo/` | 试玩版的 Windows / Mac 打包（金牌制作人打包工具）：游戏包放 `放游戏包/`，双击「一键打包」；说明见里面的 `使用说明.md` |
 | `docs/design.md` | 唯一的策划文档（2026-10-06 由 01–10 合并；改设计就改它，旧原文在提交 ba27caf 的 docs/）：玩法、Build、节奏、手感、家园、联机、美术、测量目标、用户裁定原话 |
 
 所有代码都是浏览器原生 JS，多个文件共享全局作用域；`World` 的方法分散在几个文件里，用 `Object.assign(World.prototype, {...})` 挂上去。
@@ -84,8 +90,10 @@ node tools/net-bot.js ws://39.106.153.154:8080/mp 2 1-1 300  # 真联机：2 个
 node tools/net-bot.js ws://39.106.153.154:8080/mp 2 vs 420   # 真联机对抗
 node tools/net-bot.js ws://39.106.153.154:8080/mp 3 1-1 300 --host-leave=40  # 房主第 40 秒断线：其余人必须继续打完
 python3 build.py dist/dreamtide.html                       # 打包单文件（dist/ 不入库）
+node tools/i18n.js check                                   # 多语言：每种语言缺几句、占位符、标签（改了给玩家看的中文以后先 extract 再补译文）
+python3 build.py --demo --pkg package-demo/放游戏包/game.zip  # 试玩版游戏包（31 种语言、本地字体）；再双击 package-demo/一键打包
 node tools/report-sim.js js 4                              # 构筑 + 节奏报告（84 局，约 5 分钟）；有 WARN 就按报告改，--gate 时 WARN 退出码为 1
-node tools/report-sim.js js --career 8 --human --jobs 8    # 连续玩：8 个玩家从新存档打到混沌祭司（站里换装、卖、拆、升设施、赌），量首通时间、掉落节奏、卡关
+node tools/report-sim.js js --career 8 --human --jobs 8    # 连续玩：8 个玩家从新存档打到缄默主教（站里换装、卖、拆、升设施、赌），量首通时间、掉落节奏、卡关
 node tools/shoot.js .ai/shots                              # 截图（需要本机装 Chrome；输出在 .ai/，不入库）
 ```
 

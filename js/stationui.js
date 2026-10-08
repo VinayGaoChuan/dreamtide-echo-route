@@ -197,7 +197,7 @@ function stationLaunchHtml() {
   const cu = Station.catchUp(start);
   return `${crateHtml()}<div class="label">地图 ${mm} · ${esc(M.name)}${m.maps.cleared[mm] ? ' ✓' : ''}</div><div class="mission">“${esc(M.mission)}”</div><div class="row wrap">${races}</div>
     <div class="stage-row">${nodes}</div>${cu ? `<div class="dim-text">从第 ${stageNOf(start)} 关开始：开场先补 ${cu} 次升级</div>` : ''}
-    <div class="row" style="justify-content:center"><button class="btn primary big" id="st-go" type="button" autofocus>${icon('i-hangar')} 出击</button><button class="btn big cyan" id="st-mp" type="button">${icon('i-team')} ${Lobby.code ? `房间 ${esc(Lobby.code)}` : '联机'}</button></div>`;
+    <div class="row" style="justify-content:center"><button class="btn primary big" id="st-go" type="button" autofocus>${icon('i-hangar')} 出击</button><button class="btn big cyan" id="st-mp" type="button" ${mpOff()}>${icon('i-team')} ${Lobby.code ? `房间 ${esc(Lobby.code)}` : '联机'}</button></div>`;
 }
 function showStation() {
   Sound.setMode('hub'); Sound.focus(false); G.world = null; Input.gameActive = false; hideHud(); stopPreview();
@@ -206,7 +206,7 @@ function showStation() {
   const el = showScreen('hub', `
     <div class="st-top">${stationRes()}<span class="spacer"></span>
       <button class="icon-btn" id="st-map" type="button">${icon('i-starmap')}<span>星图</span></button>
-      <button class="icon-btn" id="st-mp2" type="button">${icon('i-team')}<span>联机</span></button>
+      <button class="icon-btn" id="st-mp2" type="button" ${mpOff()}>${icon('i-team')}<span>联机</span></button>
       <button class="icon-btn" id="st-records" type="button">${icon('i-trophy')}<span>记录</span></button>
       <button class="icon-btn" id="st-settings" type="button">${icon('i-gear')}<span>设置</span></button></div>
     ${S.panel ? '' : `<div class="home-hot">${stationHotspots()}</div>

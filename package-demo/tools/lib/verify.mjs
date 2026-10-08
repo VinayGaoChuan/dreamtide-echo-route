@@ -185,7 +185,9 @@ export async function smokeTest(ctx, cfg, packs, smokeKey) {
   const steamState = result.steam.state;
   if (steamState === 'module-loaded') ctx.note('Steam 组件在打包后的程序里加载成功（还没填 App ID，正版校验未启用）');
   else if (steamState === 'ready') ctx.note('已连上 Steam，当前账号拥有这款游戏，正版校验通过');
-  else if (steamState === 'init-failed') ctx.note(`正版校验已启用：这台电脑没有通过 Steam 运行本游戏（${result.steam.message}），正式版在这种情况下会拒绝启动`);
+  else if (steamState === 'init-failed') ctx.note(cfg.steam.requireSteam
+    ? `正版校验已启用：这台电脑没有通过 Steam 运行本游戏（${result.steam.message}），正式版在这种情况下会拒绝启动`
+    : `这台电脑没有通过 Steam 运行本游戏（${result.steam.message}）：正版校验没开（requireSteam: false），程序按单机运行，联机入口不显示`);
   else ctx.warn(`Steam 组件加载异常：${steamState} ${result.steam.message}`);
   result.realErrors = realErrors;
   result.realMissing = realMissing;
